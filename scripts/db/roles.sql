@@ -17,11 +17,25 @@ begin
   end if;
 end $$;
 
--- Defensive: if a role already existed with different attributes, correct it.
--- BYPASSRLS on app_user would silently disable every policy in the system.
-alter role app_owner nobypassrls nosuperuser;
-alter role app_user  nobypassrls nosuperuser nocreatedb nocreaterole;
-alter role app_admin nobypassrls nosuperuser nocreatedb nocreaterole;
+-- Defensive: assert, rather than correct. BYPASSRLS or SUPERUSER on any of these roles
+-- would silently disable every policy in the system, so a role that already existed with
+-- the wrong attributes must stop this script rather than be quietly patched.
+--
+-- This is an assertion and not `alter role ... nobypassrls nosuperuser` on purpose:
+-- ALTER ROLE checks the SUPERUSER and BYPASSRLS attributes on *mention*, not on value, so
+-- even specifying the negative requires superuser. Neon's branch owner is not a superuser,
+-- so the corrective form would hard-fail here and get deleted by whoever hit the error.
+-- CREATE ROLE's check is value-gated, which is why `nobypassrls` above is fine.
+do $$
+declare bad text;
+begin
+  select string_agg(rolname, ', ') into bad
+  from pg_roles
+  where rolname in ('app_owner','app_user','app_admin') and (rolbypassrls or rolsuper);
+  if bad is not null then
+    raise exception 'FAIL: role(s) % hold BYPASSRLS or SUPERUSER. Every RLS policy in this database would be inert for them.', bad;
+  end if;
+end $$;
 
 create schema if not exists authz authorization app_owner;
 alter schema public owner to app_owner;
