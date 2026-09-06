@@ -306,6 +306,19 @@ git commit -m "chore: add Vitest harness with a proven-failing-then-passing test
 - Consumes: nothing in the repo; the existing Neon project
 - Produces: `DATABASE_URL` (app_user, pooled), `DATABASE_URL_MIGRATE` (app_owner, direct), `DATABASE_URL_TEST`; the `app_user` role every later task depends on
 
+> **Split (controller ruling, 2026-09-06).** This task divides at the credential boundary:
+> **Task 3a** authors `scripts/db/roles.sql` and `scripts/db/prove-rls.sql` — pure SQL, no
+> credentials, runnable now. **Task 3b** verifies the console settings, creates the branches,
+> applies the roles and runs the proof — all of which need a Neon connection string.
+>
+> **`psql` is not required and must not be assumed.** It is not installed on the development
+> machine and installing a Postgres client just to run two scripts is unnecessary. Task 3b
+> executes the SQL through a small Node runner built on the `@neondatabase/serverless` client
+> that Task 5 already brings in. Consequence for Task 3a: **the SQL files must not use psql-only
+> syntax** — no `\set`, no `:'variable'` interpolation, no `\i`. Passwords are never
+> string-interpolated into DDL; the runner must have Postgres do the quoting (`format('… %L', $1)`)
+> so a password containing a quote cannot break or inject into the statement.
+>
 > This is the most important task in Phase 0. Everything downstream assumes `app_user` cannot bypass RLS. Prove it here, in SQL, before writing a line of application code.
 
 - [ ] **Step 1: Confirm region and compute settings in the Neon console**
