@@ -137,9 +137,13 @@ node scripts/db/run.mjs --as app_user  --file scripts/db/prove-rls-assert.sql
 node scripts/db/run.mjs --as app_owner --file scripts/db/prove-rls-teardown.sql
 ```
 
-`--verify-roles` reports the checks the proof cannot make about itself: that `app_user` holds none
-of `BYPASSRLS`/`SUPERUSER`/`CREATEROLE`/`CREATEDB`, owns no relation, and — the one that matters
-most on Neon — holds membership in **no role at all**.
+`--verify-roles` checks what the proof cannot check about itself, and **exits non-zero if any of
+it fails**: that none of `app_owner`/`app_user`/`app_admin` holds `BYPASSRLS`, `SUPERUSER`,
+`CREATEROLE`, or `CREATEDB`; that `app_user` owns no relation; and — the one that matters most on
+Neon — that `app_user` holds membership in **no role at all**. It also prints, for context only
+and without gating on them, the attributes of `neon_superuser` and of the connecting role itself
+(the branch owner) — those are fixed by Neon and outside this project's control, so a nonzero
+reading there is informational, not a violation.
 
 Every line the runner prints is passed through a redaction function built from the values in
 `.env`, including caught exceptions and stack traces, so a connection error cannot leak a host or a
@@ -173,13 +177,51 @@ genuine failure of the authorization model, and nothing downstream of it may pro
 fixed. In particular, do not proceed past a failure by relaxing the assertion — fix the role or
 grant that caused it.
 
-Silence is only worth something if the assertions can actually speak, so Task 3b checked that they
-do, with three deliberately broken runs against the real branch: changing assertion 3's
-`set_config(..., true)` to `false` tripped assertion 4; running the file as `app_owner` tripped
-assertion 1; and a temporary `grant app_owner to app_user` tripped assertion 6. All three raised,
-the runner exited non-zero, and the grant was revoked and re-verified afterwards. Re-do that check
-if you ever change how the file is executed — a runner that swallows exceptions looks identical to
-a passing proof.
+Silence is only worth something if the assertions can actually speak. One check of that has
+actually been run against the real branch, using `scripts/db/negative-control.mjs`: with the probe
+set up and the proof passing, `grant app_owner to app_user` was issued, `app_user`'s membership
+count went from 0 to 1, and `prove-rls-assert.sql` then raised on assertion 6 and exited non-zero
+—
+
+```
+step 1 — set the probe up (as app_owner)                     ok
+step 2 — baseline: proof must PASS before breaking anything  exit 0  (PASS)
+step 3 — ATTACK: grant app_owner to app_user                 app_user memberships now: 1
+step 4 — proof must now FAIL                                 exit 1  (FAILED — assertion works)
+        raised: FAIL: role app_user owns, or holds membership in the owner of, 1 relation(s).
+                RLS is not enforced against a relation's owner unless it is FORCE'd, and
+                ownership follows role membership: ...
+step 5 — revoke (always runs)                                memberships after revoke: 0 (clean)
+step 6 — proof must PASS again                               exit 0  (PASS — restored)
+step 7 — probe torn down                                     ok
+```
+
+the grant was then revoked, the membership count was re-verified at 0, and the proof passed again.
+
+That is **one** negative control, run once. What it establishes: assertion 6 is not passing
+vacuously — it was actually put into the state it exists to catch (`app_user` a member of
+`app_owner`) and it did fire, with the exact reasoning ("ownership follows role membership")
+the assertion's own error text claims. What it does **not** establish: it is one run of one
+attack against one throwaway probe table on one branch, and it says nothing about any other
+path to owner-equivalence, or about the `set_config` mutation an earlier draft of this file
+claimed had been tested against assertion 4 — that mutation has not been tested, by this script
+or otherwise. See `scripts/db/negative-control.mjs` for the full script and its own
+"what this does not establish" note; re-run it if you ever change how the file is executed or
+how assertion 6 is written — a runner that swallows exceptions looks identical to a passing
+proof, and a check that has never failed once is not yet known to be able to.
+
+## The negative control (`scripts/db/negative-control.mjs`)
+
+The seven-step sequence and its one real run against the live branch are described just above.
+The script that runs it, `node scripts/db/negative-control.mjs`, reuses `run.mjs`'s env loading,
+redaction, and connection config rather than reimplementing them, revokes the grant in a `finally`
+so it is removed even if an earlier step throws, and re-verifies the membership count is back to
+zero before declaring the run clean. See the comment at the top of the file for exactly what
+running it once does and does not establish.
+
+Run it again whenever assertion 6 or the roles it depends on change, and **re-run it in Phase 1**
+once real application tables exist, so the check runs against genuine relations instead of only
+the throwaway probe.
 
 ## Where this must run
 

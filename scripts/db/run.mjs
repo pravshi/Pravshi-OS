@@ -259,7 +259,19 @@ async function setPasswords(client, env) {
   }
 }
 
+// Roles whose attributes and ownership this check actually gates. `neon_superuser` and the
+// connecting branch owner (`current_user`) are printed for context only — their attributes are
+// fixed by Neon (the branch owner needs BYPASSRLS-adjacent privileges to administer the branch;
+// see README) and are not something this project controls or can correct, so a nonzero reading
+// on either of those two is informational, not a violation.
+const GATED_ROLES = new Set(['app_owner', 'app_user', 'app_admin']);
+
 async function verifyRoles(client) {
+  // Violations are collected rather than thrown immediately, so a single run prints every
+  // check's detail before the process dies — an operator (or a CI log) then sees the full
+  // picture in one pass instead of fixing one failure only to hit the next on a re-run.
+  const violations = [];
+
   const attrs = await client.query(
     `select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolcanlogin, rolinherit
        from pg_roles
@@ -274,6 +286,20 @@ async function verifyRoles(client) {
         `login=${r.rolcanlogin} inherit=${r.rolinherit}`,
     );
   }
+  // roles.sql asserts this once, at creation time. This re-checks it at whatever later moment
+  // --verify-roles is run, because these attributes can be changed afterwards (e.g. through the
+  // Neon console) without roles.sql ever running again. BYPASSRLS/SUPERUSER defeat RLS directly;
+  // CREATEROLE/CREATEDB are privilege-escalation surface these three roles have no legitimate
+  // reason to hold, mirroring roles.sql's own defense-in-depth assertion.
+  for (const r of attrs.rows) {
+    if (!GATED_ROLES.has(r.rolname)) continue;
+    const bad = [];
+    if (r.rolsuper) bad.push('SUPERUSER');
+    if (r.rolbypassrls) bad.push('BYPASSRLS');
+    if (r.rolcreaterole) bad.push('CREATEROLE');
+    if (r.rolcreatedb) bad.push('CREATEDB');
+    if (bad.length) violations.push(`${r.rolname} holds ${bad.join(', ')}`);
+  }
 
   const owned = await client.query(
     `select coalesce(n.nspname, '?') as schema, c.relname, c.relkind
@@ -284,6 +310,11 @@ async function verifyRoles(client) {
   );
   console.log(`  relations owned by app_user: ${owned.rowCount}`);
   for (const r of owned.rows) console.log(`    ${r.schema}.${r.relname} (${r.relkind})`);
+  // app_user must never own a relation: Postgres does not enforce RLS against a relation's
+  // owner unless it is FORCE'd, so ownership is a direct bypass, not merely undesirable.
+  if (owned.rowCount !== 0) {
+    violations.push(`app_user owns ${owned.rowCount} relation(s)`);
+  }
 
   // Requirement 7. Attributes are NOT inherited through membership, so neither roles.sql's
   // assertion nor assertion 5 of the proof would see a BYPASSRLS role reachable by SET ROLE.
@@ -303,6 +334,15 @@ async function verifyRoles(client) {
         `super=${r.granted_role_is_super} bypassrls=${r.granted_role_bypasses_rls}`,
     );
   }
+  // This is the check that closes the SET ROLE path the ownership assertion (assertion 6 of
+  // prove-rls-assert.sql) cannot reach by design: ownership follows role membership with
+  // inheritance, not name equality, so any membership at all — not just one flagged bypassrls
+  // or super above — is one `SET ROLE` away from owner-equivalence. A nonzero count here must
+  // fail the run; printing it and continuing would be a false pass at the one point requirement
+  // 7 exists to cover.
+  if (members.rowCount !== 0) {
+    violations.push(`app_user holds membership in ${members.rowCount} role(s)`);
+  }
 
   const schemas = await client.query(
     `select nspname, pg_get_userbyid(nspowner) as owner
@@ -317,6 +357,12 @@ async function verifyRoles(client) {
     "select count(*)::int as n from pg_class where relname = '_rls_probe'",
   );
   console.log(`  _rls_probe relations present: ${probe.rows[0].n}`);
+
+  if (violations.length) {
+    throw new Error(
+      `--verify-roles found ${violations.length} violation(s): ${violations.join('; ')}`,
+    );
+  }
 }
 
 // ----------------------------------------------------------------------------- main
