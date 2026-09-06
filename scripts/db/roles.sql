@@ -17,18 +17,15 @@ begin
   end if;
 end $$;
 
--- Defensive: assert, rather than correct. BYPASSRLS or SUPERUSER on any of these roles
--- would silently disable every policy in the system. CREATEROLE on app_user is a genuine
--- path to the same failure: under PG16's rules a CREATEROLE holder can `grant app_owner
--- to` itself, because app_owner is not a superuser, and Postgres's ownership test is
--- membership with inheritance, not name equality — so that self-grant reaches
--- owner-equivalence and reopens the hole from the ownership side. CREATEDB is different:
--- rolcreatedb gates only the CREATE DATABASE statement, and grants no ability to grant
--- role membership, change ownership, or acquire any privilege inside this database. It is
--- asserted here anyway for parity with the `alter role ... nocreatedb nocreaterole` this
--- assertion replaced (see below), and as defense-in-depth: an application's runtime role
--- has no business creating databases. A role that already holds any of these four
--- attributes must stop this script rather than be quietly patched.
+-- Defensive: assert, rather than correct. BYPASSRLS and SUPERUSER defeat RLS directly:
+-- either attribute on any of these roles would silently disable every RLS policy for that
+-- role. CREATEROLE and CREATEDB are asserted as defense-in-depth, not as known bypasses.
+-- They are privilege-escalation surface that an application's runtime roles have no
+-- legitimate reason to hold, and asserting them restores the coverage of the
+-- `alter role ... nocreatedb nocreaterole` that this assertion replaced. On PG16+ a
+-- CREATEROLE holder may only administer roles it created or holds ADMIN OPTION on, so
+-- CREATEROLE alone is not a route to app_owner here. A role that already holds any of
+-- these four attributes must stop this script rather than be quietly patched.
 --
 -- This is an assertion and not `alter role ... nobypassrls nosuperuser` on purpose:
 -- ALTER ROLE checks the SUPERUSER and BYPASSRLS attributes on *mention*, not on value, so
@@ -56,7 +53,7 @@ begin
   where rolname in ('app_owner','app_user','app_admin')
     and (rolbypassrls or rolsuper or rolcreaterole or rolcreatedb);
   if bad is not null then
-    raise exception 'FAIL: role(s) % hold an attribute this script asserts against. BYPASSRLS and SUPERUSER bypass RLS directly. CREATEROLE can reach the same result by self-granting membership in app_owner. CREATEDB grants no such path; it is asserted only for defense-in-depth. Every RLS policy in this database would be, or could be made, inert for the first two.', bad;
+    raise exception 'FAIL: role(s) % hold an attribute this script asserts against. BYPASSRLS and SUPERUSER defeat RLS directly. CREATEROLE and CREATEDB are asserted as defense-in-depth, not as known RLS bypasses: they are privilege-escalation surface these roles have no legitimate reason to hold. Fix the role attributes rather than deleting this check.', bad;
   end if;
 end $$;
 
