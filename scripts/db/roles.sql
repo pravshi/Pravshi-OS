@@ -18,8 +18,11 @@ begin
 end $$;
 
 -- Defensive: assert, rather than correct. BYPASSRLS or SUPERUSER on any of these roles
--- would silently disable every policy in the system, so a role that already existed with
--- the wrong attributes must stop this script rather than be quietly patched.
+-- would silently disable every policy in the system. CREATEROLE or CREATEDB on app_user
+-- would let it self-grant membership in app_owner and reopen the same hole from the
+-- ownership side, since Postgres's ownership test is membership with inheritance, not
+-- name equality. A role that already holds any of these four attributes must stop this
+-- script rather than be quietly patched.
 --
 -- This is an assertion and not `alter role ... nobypassrls nosuperuser` on purpose:
 -- ALTER ROLE checks the SUPERUSER and BYPASSRLS attributes on *mention*, not on value, so
@@ -29,11 +32,20 @@ end $$;
 do $$
 declare bad text;
 begin
-  select string_agg(rolname, ', ') into bad
+  select string_agg(
+    rolname || ' (' || concat_ws(', ',
+      case when rolbypassrls then 'BYPASSRLS' end,
+      case when rolsuper then 'SUPERUSER' end,
+      case when rolcreaterole then 'CREATEROLE' end,
+      case when rolcreatedb then 'CREATEDB' end
+    ) || ')',
+    ', '
+  ) into bad
   from pg_roles
-  where rolname in ('app_owner','app_user','app_admin') and (rolbypassrls or rolsuper);
+  where rolname in ('app_owner','app_user','app_admin')
+    and (rolbypassrls or rolsuper or rolcreaterole or rolcreatedb);
   if bad is not null then
-    raise exception 'FAIL: role(s) % hold BYPASSRLS or SUPERUSER. Every RLS policy in this database would be inert for them.', bad;
+    raise exception 'FAIL: role(s) % hold an attribute that can bypass RLS directly (BYPASSRLS, SUPERUSER) or be used to acquire that bypass via ownership (CREATEROLE, CREATEDB). Every RLS policy in this database would be, or could be made, inert for them.', bad;
   end if;
 end $$;
 
