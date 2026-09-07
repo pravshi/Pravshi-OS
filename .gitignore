@@ -38,6 +38,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the documented template carries names only, never values, and must ship.
+!.env.example
 
 # vercel
 .vercel
