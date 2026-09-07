@@ -37,7 +37,14 @@ const KEY = need('NEON_API_KEY');
 const PROJECT = need('NEON_PROJECT_ID');
 const BRANCH_NAME = need('CI_BRANCH_NAME');
 
-async function neon(method, path, body) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Neon answers 423 Locked while a branch operation is still settling — including for
+ * a short window after a password reset. It is transient, so retry it; every other
+ * status is returned to the caller as-is.
+ */
+async function neon(method, path, body, attempt = 0) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
@@ -48,6 +55,10 @@ async function neon(method, path, body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const text = await res.text();
+  if (res.status === 423 && attempt < 20) {
+    await sleep(3000);
+    return neon(method, path, body, attempt + 1);
+  }
   if (!res.ok) {
     // Never echo the body verbatim: Neon error payloads can quote a connection URI.
     throw new Error(`Neon ${method} ${path.split('?')[0]} failed with HTTP ${res.status}`);
@@ -91,7 +102,7 @@ async function waitUntilReady(branchId, timeoutMs = 120_000) {
         `Branch ${branchId} was still "${branch.current_state}" after ${timeoutMs}ms`,
       );
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await sleep(2000);
   }
 }
 
