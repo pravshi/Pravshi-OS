@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PRAVSHI OS — code ownership
+#
+# GitHub applies the LAST matching rule, so this file reads general → specific.
+# Teams come from the master blueprint §28. A team must hold at least write
+# access to be a valid code owner, which is why `reviewers` (triage) and
+# `vibecoders` (write, but branches only) never appear as owners here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Default owner for anything not claimed below.
+*                       @pravshi/maintainers
+
+# ── Frontend ────────────────────────────────────────────────────────────────
+# Routes, UI, styles and public assets.
+/src/app/               @pravshi/developers
+/src/components/        @pravshi/developers
+/public/                @pravshi/developers
+/e2e/                   @pravshi/developers
+/postcss.config.mjs     @pravshi/developers
+/components.json        @pravshi/developers
+
+# ── Backend / security ──────────────────────────────────────────────────────
+# Database, authorization, migrations, DB tests and the security guards.
+# A mistake in any of these is a breach, not a bug.
+/drizzle/               @pravshi/maintainers
+/drizzle.config.ts      @pravshi/maintainers
+/scripts/db/            @pravshi/maintainers
+/src/lib/db/            @pravshi/maintainers
+/src/lib/authz/         @pravshi/maintainers
+/src/env.ts             @pravshi/maintainers
+/tests/db/              @pravshi/maintainers
+/tests/guards/          @pravshi/maintainers
+/tests/health/          @pravshi/maintainers
+/tests/env.test.ts      @pravshi/maintainers
+
+# Health routes sit under src/app but gate database access, so they are
+# owned as backend rather than as frontend. Listed after /src/app/ on purpose.
+/src/app/health/        @pravshi/maintainers
+
+# ── Founder / architect ─────────────────────────────────────────────────────
+# Architecture, shared configuration, and deployment/security configuration.
+/docs/architecture/     @pravshi/owners
+/docs/superpowers/      @pravshi/owners
+/.github/               @pravshi/owners
+/.env.example           @pravshi/owners
+/.gitattributes         @pravshi/owners
+/.gitignore             @pravshi/owners
+/eslint.config.mjs      @pravshi/owners
+/next.config.ts         @pravshi/owners
+/package.json           @pravshi/owners
+/playwright.config.ts   @pravshi/owners
+/pnpm-lock.yaml         @pravshi/owners
+/pnpm-workspace.yaml    @pravshi/owners
+/tsconfig.json          @pravshi/owners
+/vercel.json            @pravshi/owners
+/vitest.config.mts      @pravshi/owners
