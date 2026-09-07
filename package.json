@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "guards": "node scripts/guards/secret-scan.mjs",
+    "guards": "node scripts/guards/secret-scan.mjs && node scripts/guards/workflow-secret-flow.mjs",
     "ci:branch": "node scripts/ci/provision-branch-role.mjs"
   },
   "dependencies": {
@@ -54,6 +54,7 @@
     "prettier": "^3.9.6",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "yaml": "^2.9.0"
   }
 }

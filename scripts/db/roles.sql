@@ -57,6 +57,24 @@ begin
   end if;
 end $$;
 
+-- app_owner needs CREATE on the DATABASE, and only that.
+--
+-- Drizzle's migration runner unconditionally executes
+--   CREATE SCHEMA IF NOT EXISTS <migrations schema>
+-- before it touches its bookkeeping table, and PostgreSQL evaluates the database-level
+-- CREATE privilege BEFORE the IF NOT EXISTS short-circuit. So the statement fails even
+-- for a schema app_owner already owns, and no migration can run without this grant.
+--
+-- This is a database-level GRANT, not a role attribute. The assertion above still holds:
+-- app_owner remains NOBYPASSRLS, NOSUPERUSER, NOCREATEDB, NOCREATEROLE. It may create
+-- schemas in this one database; it gains no privilege-escalation surface beyond that.
+--
+-- current_database() keeps this correct on every Neon branch rather than hardcoding a name.
+do $$
+begin
+  execute format('grant create on database %I to app_owner', current_database());
+end $$;
+
 create schema if not exists authz authorization app_owner;
 alter schema public owner to app_owner;
 

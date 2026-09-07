@@ -1,8 +1,11 @@
 name: direct-push-audit
 
-# Detection, not prevention. GitHub Free cannot block a direct push to main, so this
-# records one loudly instead. It opens no issue, tags nobody, changes no repository
-# state, and requests no write permission — a failed run on main is the signal.
+# DETECTION, NOT PREVENTION. GitHub Free cannot block a direct push to main, so this
+# records one loudly after the fact. It opens no issue, tags nobody, changes no
+# repository state, and requests no write permission — a failed run on main is the signal.
+#
+# The verdict comes from GitHub's commit/PR association data, never from the commit
+# message: a subject ending "(#123)" is trivially forged and is not consulted.
 
 on:
   push:
@@ -10,33 +13,17 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2 }
-
-      - name: Determine whether this push arrived through a pull request
-        run: |
-          SUBJECT=$(git log -1 --format=%s)
-          PARENTS=$(git log -1 --format=%P | wc -w)
-          echo "commit: $(git log -1 --format=%h)"
-          echo "subject: $SUBJECT"
-          echo "parents: $PARENTS"
-
-          # A PR merge is either a merge commit, or a squash/rebase merge whose
-          # subject carries the "(#123)" reference GitHub appends.
-          if [ "$PARENTS" -gt 1 ]; then
-            echo "Merge commit — arrived through a pull request."
-            exit 0
-          fi
-          if printf '%s' "$SUBJECT" | grep -qE '\(#[0-9]+\)$'; then
-            echo "Squash/rebase merge referencing a pull request."
-            exit 0
-          fi
-
-          echo "::error title=Direct push to main::Unexpected direct push to main detected. Policy violation: production changes must arrive through a PR."
-          echo "Unexpected direct push to main detected. Policy violation: production changes must arrive through a PR."
-          exit 1
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc }
+      - name: Verify this commit arrived through a merged pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/ci/verify-pr-merge.mjs

@@ -39,15 +39,11 @@ jobs:
       - name: Secret-shape scan (compensates for unavailable push protection)
         run: node scripts/guards/secret-scan.mjs
 
-      # Constraint: CI derives database URLs at runtime from the Neon API. A database
-      # URL stored as a GitHub secret would mean a long-lived credential in Actions.
+      # Semantic guard: no DATABASE_URL* may be populated from a GitHub secret, whether
+      # bound directly, renamed through an intermediary, carried on a step output, or
+      # assigned via shell indirection. Heuristic by design — see the script header.
       - name: No workflow may source a database URL from a GitHub secret
-        run: |
-          if grep -rnE 'DATABASE_URL[A-Z_]*[[:space:]]*:[[:space:]]*\$\{\{[[:space:]]*secrets\.' .github/workflows/; then
-            echo "::error title=Database URL from secret::A database URL is sourced from a GitHub secret. CI must derive it from the Neon API instead."
-            exit 1
-          fi
-          echo "OK: no database URL is sourced from a GitHub secret."
+        run: node scripts/guards/workflow-secret-flow.mjs
 
       - run: pnpm format:check
       - run: pnpm audit --audit-level=high

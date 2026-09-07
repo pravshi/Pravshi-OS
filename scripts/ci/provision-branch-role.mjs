@@ -24,7 +24,8 @@
 //
 // Env: NEON_API_KEY, NEON_PROJECT_ID, NEON_PARENT_BRANCH, CI_BRANCH_NAME
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const API = 'https://console.neon.tech/api/v2';
 const need = (k) => {
@@ -33,9 +34,14 @@ const need = (k) => {
   return v.trim();
 };
 
-const KEY = need('NEON_API_KEY');
-const PROJECT = need('NEON_PROJECT_ID');
-const BRANCH_NAME = need('CI_BRANCH_NAME');
+let KEY;
+let PROJECT;
+let BRANCH_NAME;
+function loadEnv() {
+  KEY = need('NEON_API_KEY');
+  PROJECT = need('NEON_PROJECT_ID');
+  BRANCH_NAME = need('CI_BRANCH_NAME');
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -44,6 +50,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * a short window after a password reset. It is transient, so retry it; every other
  * status is returned to the caller as-is.
  */
+/**
+ * The ONLY Neon branch CI may cut ephemeral branches from.
+ *
+ * Finding #4: the previous check refused only the project DEFAULT branch, which is a
+ * proxy, not a rule — if production ever stopped being the default, the refusal would
+ * silently stop protecting it. This is an explicit allowlist and it fails closed for
+ * production, main, an unknown name, or an empty value.
+ */
+export const ALLOWED_PARENT = 'staging';
+
+export function assertParentAllowed(name) {
+  const value = typeof name === 'string' ? name.trim() : '';
+  if (value !== ALLOWED_PARENT) {
+    throw new Error(
+      `Refusing to create a CI branch from "${value || '(empty)'}". ` +
+        `NEON_PARENT_BRANCH must be exactly "${ALLOWED_PARENT}".`,
+    );
+  }
+  return value;
+}
+
 async function neon(method, path, body, attempt = 0) {
   const res = await fetch(`${API}${path}`, {
     method,
@@ -112,18 +139,13 @@ async function findBranch(name) {
 }
 
 async function create() {
-  const parent = need('NEON_PARENT_BRANCH');
+  const parent = process.env.NEON_PARENT_BRANCH;
+  assertParentAllowed(parent);
 
-  // Refuse to branch from the project default. The default branch is production,
-  // and Task 11's entire premise is that CI never touches it.
   const { branches } = await neon('GET', `/projects/${PROJECT}/branches`);
-  const parentBranch = branches.find((b) => b.id === parent || b.name === parent);
-  if (!parentBranch) throw new Error('NEON_PARENT_BRANCH does not exist in this project');
-  if (parentBranch.default) {
-    throw new Error(
-      'Refusing to create a CI branch from the DEFAULT (production) branch. ' +
-        'NEON_PARENT_BRANCH must name the non-production parent.',
-    );
+  const parentBranch = branches.find((b) => b.name === ALLOWED_PARENT);
+  if (!parentBranch) {
+    throw new Error(`The only permitted CI parent branch, "${ALLOWED_PARENT}", does not exist`);
   }
 
   const created = await neon('POST', `/projects/${PROJECT}/branches`, {
@@ -168,10 +190,14 @@ async function remove() {
   console.log(`Deleted ephemeral branch ${BRANCH_NAME} (${branch.id})`);
 }
 
-const mode = process.argv[2];
-if (mode === 'create') await create();
-else if (mode === 'delete') await remove();
-else {
-  console.error('usage: provision-branch-role.mjs <create|delete>');
-  process.exit(2);
+const invoked = process.argv[1] ? realpathSync(process.argv[1]) : '';
+if (invoked && invoked === realpathSync(fileURLToPath(import.meta.url))) {
+  loadEnv();
+  const mode = process.argv[2];
+  if (mode === 'create') await create();
+  else if (mode === 'delete') await remove();
+  else {
+    console.error('usage: provision-branch-role.mjs <create|delete>');
+    process.exit(2);
+  }
 }
