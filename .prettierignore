@@ -4,3 +4,7 @@ node_modules
 .superpowers
 # Authored specs and plans — formatting is deliberate, not Prettier's to normalise
 docs/
+# Playwright run artefacts, not source
+test-results
+playwright-report
+blob-report
