@@ -22,6 +22,32 @@ describe('parseRuntimeEnv', () => {
     ).toThrow(/DATABASE_URL_MIGRATE must never be present in the runtime environment/);
   });
 
+  it('still refuses the migration credential in a production RUNTIME, not just in theory', () => {
+    // No NEXT_PHASE — this is the serving runtime, where the rule is absolute.
+    expect(() =>
+      parseRuntimeEnv({
+        DATABASE_URL: POOLED,
+        DATABASE_URL_MIGRATE: DIRECT,
+        APP_URL: 'https://os.pravshi.com',
+        NODE_ENV: 'production',
+        NEXT_PHASE: 'phase-production-server',
+      }),
+    ).toThrow(/DATABASE_URL_MIGRATE must never be present in the runtime environment/);
+  });
+
+  it('allows it during `next build`, which collects page data and serves nothing', () => {
+    // CI runs migrations and the build in the same environment, so the build
+    // phase legitimately sees app_owner. Narrow, deliberate, and tested.
+    const env = parseRuntimeEnv({
+      DATABASE_URL: POOLED,
+      DATABASE_URL_MIGRATE: DIRECT,
+      APP_URL: 'https://os.pravshi.com',
+      NODE_ENV: 'production',
+      NEXT_PHASE: 'phase-production-build',
+    });
+    expect(env.APP_URL).toBe('https://os.pravshi.com');
+  });
+
   it('accepts a correct runtime environment', () => {
     const env = parseRuntimeEnv({
       DATABASE_URL: POOLED,

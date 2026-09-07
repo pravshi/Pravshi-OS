@@ -16,6 +16,7 @@ const runtimeSchema = z.object({
     }),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']),
+  HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
   SENTRY_DSN: z.string().url().optional(),
 });
 
@@ -52,7 +53,16 @@ function fail(issues: z.ZodIssue[]): never {
 
 export function parseRuntimeEnv(raw: Record<string, unknown>): RuntimeEnv {
   // A leaked owner credential is a silent, total loss of RLS. Refuse to start.
-  if (raw.NODE_ENV === 'production' && raw.DATABASE_URL_MIGRATE) {
+  //
+  // `next build` is not a boot. It evaluates every route module to collect page
+  // data, and it runs on developer machines and in CI — both of which hold
+  // DATABASE_URL_MIGRATE legitimately, because that is where migrations are run
+  // from. Exempting that one phase keeps the rule aimed at the thing it protects:
+  // the serving runtime, which must never hold app_owner. A migration credential
+  // wrongly added to Vercel still fails the application closed on its first
+  // request; it does not slip through.
+  const isBuildPhase = raw.NEXT_PHASE === 'phase-production-build';
+  if (!isBuildPhase && raw.NODE_ENV === 'production' && raw.DATABASE_URL_MIGRATE) {
     throw new Error(
       'DATABASE_URL_MIGRATE must never be present in the runtime environment. ' +
         'It uses app_owner, which owns the schema and is not constrained by RLS. ' +
