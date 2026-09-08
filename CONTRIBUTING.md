@@ -12,31 +12,42 @@ request whose CI is red. That is precisely why these rules are written down.
 ## Branches
 
 ```
-main       production. Protected by policy only.
-develop    integration. Everything lands here first.
-feature/*  fix/*  chore/*  docs/*      branch from develop
+feature/*  ->  PR  ->  main
+```
+
+```
+main       the integration branch and the intended production branch.
+           Protected by policy only.
+feature/*  fix/*  chore/*  docs/*      branch from main
 hotfix/*                               branch from main, genuine production incidents only
 ```
 
 Use no other prefixes without a reason.
+
+There is **no `develop` branch**. An earlier `feature/* -> develop -> main` model was
+retired once the project became single-developer: a second integration branch adds a
+merge step and no review that a solo founder was not already performing. If the team
+grows, reintroducing `develop` is a deliberate decision, not a default.
 
 ## Rules
 
 1. **Nobody pushes directly to `main`.** A push to `main` that did not arrive through a
    pull request fails the `direct-push-audit` workflow, which exists to make the
    violation visible after the fact — it cannot prevent it.
-2. **Nobody pushes directly to `develop`.** Same reasoning, no automated detection.
-3. **All normal work branches from `develop`** and returns through a pull request.
-4. **CI must be green before merge.** GitHub cannot mark the `ci` check required on this
+2. **All normal work branches from `main`** and returns through a pull request.
+3. **CI must be green before merge.** GitHub cannot mark the `ci` check required on this
    plan, so a red run blocks a merge only because a human refuses to merge it. Merging
    over red CI requires a written justification in the pull request.
-5. **The founder or an authorised maintainer performs the merge to `main`.**
-6. **CODEOWNERS requests review; it does not require it.** `.github/CODEOWNERS` causes
+4. **The founder or an authorised maintainer performs the merge to `main`.**
+5. **CODEOWNERS requests review; it does not require it.** `.github/CODEOWNERS` causes
    GitHub to auto-request the right reviewers. On GitHub Free that request can be
    dismissed or ignored, and merging without it is not blocked. Treat the request as
    binding anyway.
-7. **`hotfix/*` may branch from `main`** only for a genuine production incident, and
-   must be merged back into `develop` immediately afterwards.
+6. **`hotfix/*` may branch from `main`** only for a genuine production incident, and
+   returns through a pull request like anything else.
+
+Merging a pull request deletes its head branch automatically. That is correct for
+`feature/*`; be aware of it before pointing a long-lived branch at a PR.
 
 ## A guard failure is a security failure
 
