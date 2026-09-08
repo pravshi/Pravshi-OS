@@ -1,0 +1,29 @@
+name: direct-push-audit
+
+# DETECTION, NOT PREVENTION. GitHub Free cannot block a direct push to main, so this
+# records one loudly after the fact. It opens no issue, tags nobody, changes no
+# repository state, and requests no write permission — a failed run on main is the signal.
+#
+# The verdict comes from GitHub's commit/PR association data, never from the commit
+# message: a subject ending "(#123)" is trivially forged and is not consulted.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc }
+      - name: Verify this commit arrived through a merged pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: node scripts/ci/verify-pr-merge.mjs
