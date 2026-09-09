@@ -155,14 +155,7 @@ describe('security properties of every implemented helper', () => {
     );
     // my_departments was deferred here and implemented by Task 1.4, so it has moved off
     // this list. The list shrinks as each helper's tables arrive; it must never grow.
-    const deferred = [
-      'is_active',
-      'reports_to_me',
-      'scope_for',
-      'has',
-      'is_project_member',
-      'has_record_grant',
-    ];
+    const deferred = ['reports_to_me', 'scope_for', 'has', 'is_project_member', 'has_record_grant'];
     for (const d of deferred) {
       expect(
         rows.map((r) => r.proname),

@@ -36,6 +36,13 @@
       "when": 1757991600000,
       "tag": "0004_departments_and_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1757995200000,
+      "tag": "0005_engagements",
+      "breakpoints": true
     }
   ]
 }
