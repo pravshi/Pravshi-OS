@@ -170,7 +170,7 @@ using (
   and (
     case (select authz.scope_for('leads.view'))
       when 'GLOBAL'     then true
-      when 'DEPARTMENT' then department_id = any ((select authz.my_departments()))
+      when 'DEPARTMENT' then department_id = any ((select authz.my_departments())::uuid[])
       when 'TEAM'       then owner_person_id = (select authz.person_id())
                             or (select authz.reports_to_me(owner_person_id))
       when 'PROJECT'    then (select authz.is_project_member(project_id))
