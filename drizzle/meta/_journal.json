@@ -15,6 +15,13 @@
       "when": 1757980800000,
       "tag": "0001_identity_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1757984400000,
+      "tag": "0002_organizations_and_people",
+      "breakpoints": true
     }
   ]
 }

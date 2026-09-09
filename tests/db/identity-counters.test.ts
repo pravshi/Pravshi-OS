@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
 /**
@@ -26,8 +26,13 @@ const RUN = Array.from({ length: 4 }, () =>
 ).join('');
 const type = (suffix: string) => `${RUN}${suffix}`;
 
-const ORG_A = '11111111-2222-3333-4444-555555555555';
-const ORG_B = '66666666-7777-8888-9999-000000000000';
+/**
+ * Task 1.2 added identity_counters.org_id -> organizations(id), so counters can no
+ * longer be allocated against an invented uuid. Real organizations are created here,
+ * which is closer to how the counter is actually used.
+ */
+let ORG_A = '';
+let ORG_B = '';
 
 const owner = () => new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 const asUser = () => new Pool({ connectionString: process.env.DATABASE_URL_TEST });
@@ -37,6 +42,19 @@ const track = <T extends Pool>(p: T): T => {
   pools.push(p);
   return p;
 };
+
+beforeAll(async () => {
+  const p = track(owner());
+  const make = async (suffix: string) =>
+    (
+      await p.query<{ id: string }>(
+        `insert into public.organizations (name, slug) values ($1, $2) returning id`,
+        [`Counter Org ${suffix}`, `ctr-${RUN.toLowerCase()}-${suffix}`],
+      )
+    ).rows[0]!.id;
+  ORG_A = await make('a');
+  ORG_B = await make('b');
+});
 
 afterAll(async () => {
   await Promise.all(pools.map((p) => p.end().catch(() => undefined)));
