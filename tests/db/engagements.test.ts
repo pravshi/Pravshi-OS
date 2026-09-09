@@ -400,10 +400,23 @@ describe('authz.is_active()', () => {
     );
     expect(before[0]!.a).toBe(true);
 
-    await owner.query(
-      `update public.engagements set status='SUSPENDED'::public.engagement_status where id=$1`,
-      [e],
-    );
+    // Task 1.6 added the transition machine: a status change needs an authenticated
+    // actor and a legal pair, so this goes through an identity context now.
+    const c = await owner.connect();
+    try {
+      await c.query('begin');
+      await c.query(
+        `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
+        [alice, orgA],
+      );
+      await c.query(
+        `update public.engagements set status='SUSPENDED'::public.engagement_status where id=$1`,
+        [e],
+      );
+      await c.query('commit');
+    } finally {
+      c.release();
+    }
 
     const after = await inContext<{ a: boolean }>(
       { personId: p, orgId: orgA },

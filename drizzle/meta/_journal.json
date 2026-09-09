@@ -43,6 +43,13 @@
       "when": 1757995200000,
       "tag": "0005_engagements",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1757998800000,
+      "tag": "0006_engagement_events",
+      "breakpoints": true
     }
   ]
 }
