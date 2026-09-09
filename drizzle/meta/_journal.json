@@ -29,6 +29,13 @@
       "when": 1757988000000,
       "tag": "0003_authz_identity_helpers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1757991600000,
+      "tag": "0004_departments_and_teams",
+      "breakpoints": true
     }
   ]
 }

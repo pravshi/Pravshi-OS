@@ -153,9 +153,10 @@ describe('security properties of every implemented helper', () => {
       `select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        where n.nspname='authz' order by proname`,
     );
+    // my_departments was deferred here and implemented by Task 1.4, so it has moved off
+    // this list. The list shrinks as each helper's tables arrive; it must never grow.
     const deferred = [
       'is_active',
-      'my_departments',
       'reports_to_me',
       'scope_for',
       'has',
