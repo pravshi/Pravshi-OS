@@ -887,12 +887,13 @@ describe('RLS', () => {
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
        from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
     );
-    // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7 plus record_grants
-    // from Task 1.9, all of them still relationship-scoped rather than scope-driven.
-    expect(Number(rows[0]!.n)).toBe(14);
-    // None branches on scope_for yet: TEAM needs reports_to_me and PROJECT needs
-    // is_project_member, so the database.md 4.2 template is not writable in full.
-    expect(Number(rows[0]!.with_scope)).toBe(0);
+    // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7, record_grants from
+    // Task 1.9, and audit_logs from Task 1.10.
+    expect(Number(rows[0]!.n)).toBe(15);
+    // Exactly one branches on scope_for: audit_logs, whose permission is GLOBAL-only in the
+    // matrix and therefore needs neither reports_to_me nor is_project_member. The rest stay
+    // relationship-scoped until those helpers exist.
+    expect(Number(rows[0]!.with_scope)).toBe(1);
   });
 });
 

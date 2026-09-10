@@ -941,10 +941,11 @@ describe('the rest of the authorization model is untouched', () => {
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
        from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
     );
-    // Thirteen from Tasks 1.2-1.7, plus record_grants. None branches on scope yet: TEAM
-    // still needs reports_to_me and PROJECT still needs is_project_member.
-    expect(Number(policies.rows[0]!.n)).toBe(14);
-    expect(Number(policies.rows[0]!.with_scope)).toBe(0);
+    // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10. Only the
+    // last branches on scope: audit_logs.view is GLOBAL-only in the matrix, so it needs
+    // neither reports_to_me nor is_project_member. record_grants stays SELF-scoped.
+    expect(Number(policies.rows[0]!.n)).toBe(15);
+    expect(Number(policies.rows[0]!.with_scope)).toBe(1);
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
