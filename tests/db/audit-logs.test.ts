@@ -938,17 +938,32 @@ describe('the rest of the model is untouched', () => {
     ]);
   });
 
-  it('retrofits no audit trigger onto an existing table', async () => {
-    // Blueprint 19.3's trigger source is a separate task; this one must not have started it.
-    const { rows } = await owner.query<{ relname: string; tgname: string }>(
-      `select c.relname, t.tgname from pg_trigger t
+  it('is written to by exactly the Task 1.11 trigger allow-list, and by nothing else', async () => {
+    // Task 1.10 asserted this set was EMPTY, because blueprint 19.3's trigger source was a
+    // separate task and starting it early would have gone unnoticed. Task 1.11 filled it,
+    // and the assertion inverts rather than disappears: the set is now closed at seven.
+    // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
+    // carry append-only triggers whose names also contain "audit", and they are a different
+    // mechanism entirely.
+    const { rows } = await owner.query<{ relname: string }>(
+      `select distinct c.relname from pg_trigger t
        join pg_class c on c.oid=t.tgrelid
        join pg_namespace n on n.oid=c.relnamespace
-       where n.nspname='public' and not t.tgisinternal
-         and c.relname not like 'audit_logs%'
-         and (t.tgname ~* 'audit' or pg_get_triggerdef(t.oid) ~* 'write_audit_log')`,
+       join pg_proc p on p.oid=t.tgfoid
+       where n.nspname='public' and not t.tgisinternal and p.proname='audit_row_change'
+       order by 1`,
     );
-    expect(rows).toEqual([]);
+    expect(rows.map((r) => r.relname)).toEqual([
+      'engagements',
+      'people',
+      'permissions',
+      'person_roles',
+      'record_grants',
+      'role_permissions',
+      'roles',
+    ]);
+    // and never on audit_logs itself, which would recurse
+    expect(rows.map((r) => r.relname)).not.toContain('audit_logs');
   });
 });
 
