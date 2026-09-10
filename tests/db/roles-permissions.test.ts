@@ -140,8 +140,9 @@ beforeAll(async () => {
         [`Rp ${s}`, `rp-${RUN}-${s}`],
       )
     ).rows[0]!.id;
-  orgA = await mkOrg('a');
-  orgB = await mkOrg('b');
+  // Independent rows go together. Serially this fixture is thirty-five round trips to
+  // Neon, which overruns the hook budget as soon as the branch is under any load.
+  [orgA, orgB] = await Promise.all([mkOrg('a'), mkOrg('b')]);
 
   const mkDept = async (org: string, code: string) =>
     (
@@ -150,31 +151,45 @@ beforeAll(async () => {
         [org, code, `Dept ${code}`],
       )
     ).rows[0]!.id;
-  deptA = await mkDept(orgA, `${CODE}_A`);
-  deptB = await mkDept(orgB, `${CODE}_B`);
+  [deptA, deptB] = await Promise.all([mkDept(orgA, `${CODE}_A`), mkDept(orgB, `${CODE}_B`)]);
 
-  sa = await mkPerson(orgA, 'Super Admin');
-  saSuspended = await mkPerson(orgA, 'Suspended Super Admin');
-  hr = await mkPerson(orgA, 'HR Admin');
-  adm = await mkPerson(orgA, 'Admin');
-  fin = await mkPerson(orgA, 'Finance');
-  emp = await mkPerson(orgA, 'Employee');
-  plain = await mkPerson(orgA, 'No Roles');
-  saB = await mkPerson(orgB, 'Super Admin B');
+  [sa, saSuspended, hr, adm, fin, emp, plain, saB] = await Promise.all([
+    mkPerson(orgA, 'Super Admin'),
+    mkPerson(orgA, 'Suspended Super Admin'),
+    mkPerson(orgA, 'HR Admin'),
+    mkPerson(orgA, 'Admin'),
+    mkPerson(orgA, 'Finance'),
+    mkPerson(orgA, 'Employee'),
+    mkPerson(orgA, 'No Roles'),
+    mkPerson(orgB, 'Super Admin B'),
+  ]);
 
-  for (const p of [sa, hr, adm, fin, emp, plain]) await mkEngagement(orgA, p, deptA);
-  await mkEngagement(orgA, saSuspended, deptA, 'SUSPENDED');
-  await mkEngagement(orgB, saB, deptB);
+  const [superA, superB, hrRole, adminRole, finRole, empRole] = await Promise.all([
+    roleId(orgA, 'SUPER_ADMIN'),
+    roleId(orgB, 'SUPER_ADMIN'),
+    roleId(orgA, 'HR_ADMIN'),
+    roleId(orgA, 'ADMIN'),
+    roleId(orgA, 'FINANCE'),
+    roleId(orgA, 'EMPLOYEE'),
+  ]);
+
+  await Promise.all([
+    ...[sa, hr, adm, fin, emp, plain].map((p) => mkEngagement(orgA, p, deptA)),
+    mkEngagement(orgA, saSuspended, deptA, 'SUSPENDED'),
+    mkEngagement(orgB, saB, deptB),
+  ]);
 
   // Genesis: neither organization has a roles.manage holder yet, so the first protected
-  // grant is permitted from a non-runtime role. This is the Task 1.14 bootstrap path.
-  await grantRole(sa, await roleId(orgA, 'SUPER_ADMIN'), orgA);
-  await grantRole(saB, await roleId(orgB, 'SUPER_ADMIN'), orgB);
+  // grant is permitted from a non-runtime role. This is the Task 1.14 bootstrap path. The
+  // two organizations are independent, so their genesis grants do not race each other.
+  await Promise.all([grantRole(sa, superA, orgA), grantRole(saB, superB, orgB)]);
 
-  await grantRole(hr, await roleId(orgA, 'HR_ADMIN'), orgA);
-  await grantRole(adm, await roleId(orgA, 'ADMIN'), orgA);
-  await grantRole(fin, await roleId(orgA, 'FINANCE'), orgA);
-  await grantRole(emp, await roleId(orgA, 'EMPLOYEE'), orgA);
+  await Promise.all([
+    grantRole(hr, hrRole, orgA),
+    grantRole(adm, adminRole, orgA),
+    grantRole(fin, finRole, orgA),
+    grantRole(emp, empRole, orgA),
+  ]);
 
   // Genesis is now closed for orgA, so this second protected grant has to go through an
   // actual GLOBAL roles.manage holder. That it succeeds is the positive control for every
@@ -182,7 +197,7 @@ beforeAll(async () => {
   await asActor(
     { personId: sa, orgId: orgA },
     `insert into public.person_roles (person_id, role_id, org_id, granted_by) values ($1,$2,$3,$4)`,
-    [saSuspended, await roleId(orgA, 'SUPER_ADMIN'), orgA, sa],
+    [saSuspended, superA, orgA, sa],
   );
 });
 
@@ -1301,32 +1316,32 @@ describe('authz.has()', () => {
     expect(scopes.rows.map((r) => r.scope).sort()).toEqual(['GLOBAL', 'SELF']);
   });
 
-  it('creates no scope resolver, so no caller can mistake one for existing', async () => {
+  it('creates no helper whose tables do not exist', async () => {
     const { rows } = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        where n.nspname='authz'`,
     );
     const names = rows.map((r) => r.proname);
-    for (const deferred of [
-      'scope_for',
-      'reports_to_me',
-      'is_project_member',
-      'has_record_grant',
-    ]) {
+    // scope_for was on this list for Task 1.7 and arrived with Task 1.8, which is the only
+    // direction this list is allowed to move.
+    for (const deferred of ['reports_to_me', 'is_project_member', 'has_record_grant']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });
 
-  it('leaves my_departments() exactly as Task 1.4 defined it', async () => {
+  it('leaves my_departments() driven by explicit membership, never by the tenant', async () => {
     const { rows } = await owner.query<{ src: string }>(
       `select pg_get_functiondef(p.oid) src from pg_proc p
        join pg_namespace n on n.oid=p.pronamespace
        where n.nspname='authz' and p.proname='my_departments'`,
     );
-    // Still secondary membership only; the engagement-derived primary department belongs
-    // to scope resolution, not here.
-    expect(rows[0]!.src).toContain('person_departments');
-    expect(rows[0]!.src).not.toContain('engagements');
+    // Task 1.7 did not touch this helper; Task 1.8 completed it to the authoritative
+    // "primary + secondary". What must hold either way is that membership is the only
+    // source — there is no branch that returns the organization departments wholesale.
+    const src = rows[0]!.src;
+    expect(src).toContain('person_departments');
+    expect(src).toContain('authz.person_id()');
+    expect(src).toContain('authz.org_id()');
   });
 });
 

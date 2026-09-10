@@ -64,6 +64,13 @@
       "when": 1758006000000,
       "tag": "0008_roles_and_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1758009600000,
+      "tag": "0009_scope_resolution",
+      "breakpoints": true
     }
   ]
 }
