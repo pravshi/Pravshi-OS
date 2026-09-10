@@ -288,7 +288,9 @@ describe('permission catalogue', () => {
     const { rows } = await owner.query<{ count: string }>(
       `select count(*) count from public.permissions`,
     );
-    expect(Number(rows[0]!.count)).toBe(81);
+    // 81 from the security.md section 1 V1 catalogue, plus record_grants.manage, added by
+    // the Task 1.9 amendment as the capability requirePermission() will name.
+    expect(Number(rows[0]!.count)).toBe(82);
   });
 
   it('holds every named key from each module', async () => {
@@ -374,6 +376,9 @@ describe('permission catalogue', () => {
       'settings.view',
       'settings.manage',
       'integrations.manage',
+      // Task 1.9 amendment. Sits in the roles_permissions module with the other two
+      // authorization-configuration capabilities.
+      'record_grants.manage',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -409,6 +414,7 @@ describe('permission catalogue', () => {
       'leads.export',
       'people.export',
       'permissions.manage',
+      'record_grants.manage',
       'reports.export',
       'roles.manage',
       'users.impersonate',
@@ -509,8 +515,8 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    expect(Number(rows[0]!.total)).toBe(80);
-    expect(Number(rows[0]!.global)).toBe(80);
+    expect(Number(rows[0]!.total)).toBe(81);
+    expect(Number(rows[0]!.global)).toBe(81);
   });
 
   it('seeds MANAGER and MARKETING with no grants rather than guessing at them', async () => {
@@ -1322,9 +1328,9 @@ describe('authz.has()', () => {
        where n.nspname='authz'`,
     );
     const names = rows.map((r) => r.proname);
-    // scope_for was on this list for Task 1.7 and arrived with Task 1.8, which is the only
-    // direction this list is allowed to move.
-    for (const deferred of ['reports_to_me', 'is_project_member', 'has_record_grant']) {
+    // scope_for was on this list for Task 1.7 and arrived with Task 1.8, has_record_grant
+    // with Task 1.9. Shrinking is the only direction this list is allowed to move.
+    for (const deferred of ['reports_to_me', 'is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });

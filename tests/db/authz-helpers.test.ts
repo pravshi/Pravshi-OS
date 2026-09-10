@@ -154,9 +154,10 @@ describe('security properties of every implemented helper', () => {
        where n.nspname='authz' order by proname`,
     );
     // my_departments was deferred here and implemented by Task 1.4, is_active by Task 1.5,
-    // has by Task 1.7 once roles, permissions and their two joins existed, and scope_for by
-    // Task 1.8. The list shrinks as each helper's tables arrive; it must never grow.
-    const deferred = ['reports_to_me', 'is_project_member', 'has_record_grant'];
+    // has by Task 1.7 once roles, permissions and their two joins existed, scope_for by
+    // Task 1.8 and has_record_grant by Task 1.9. The list shrinks as each helper's tables
+    // arrive; it must never grow.
+    const deferred = ['reports_to_me', 'is_project_member'];
     for (const d of deferred) {
       expect(
         rows.map((r) => r.proname),

@@ -10,7 +10,7 @@ import { Pool } from '@neondatabase/serverless';
  *      instant a broad role goes away.
  *   2. has(p) is true if and only if scope_for(p) is not null, in every identity state.
  *
- * Claim 2 is asserted by sweeping the entire 81-row permission catalogue for each state
+ * Claim 2 is asserted by sweeping the entire 82-row permission catalogue for each state
  * rather than by spot-checking, because "these two agree" is only worth saying if it has
  * been checked everywhere it could fail.
  */
@@ -169,7 +169,7 @@ const departmentsOf = async (ctx: Ctx) =>
 /**
  * has() and scope_for() for EVERY permission in the catalogue, in one round trip. Run on
  * the owner connection so the permissions table itself is not RLS-filtered — the point is
- * to ask about all 81 keys, including the ones this identity does not hold.
+ * to ask about all 82 keys, including the ones this identity does not hold.
  */
 const sweep = (ctx: Ctx) =>
   asActor<{ key: string; h: boolean; s: string | null }>(
@@ -179,7 +179,7 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  expect(rows.length, `${label}: catalogue size`).toBe(81);
+  expect(rows.length, `${label}: catalogue size`).toBe(82);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -887,8 +887,9 @@ describe('RLS', () => {
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
        from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
     );
-    // One app_user SELECT policy per table, exactly as Tasks 1.2-1.7 left them.
-    expect(Number(rows[0]!.n)).toBe(13);
+    // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7 plus record_grants
+    // from Task 1.9, all of them still relationship-scoped rather than scope-driven.
+    expect(Number(rows[0]!.n)).toBe(14);
     // None branches on scope_for yet: TEAM needs reports_to_me and PROJECT needs
     // is_project_member, so the database.md 4.2 template is not writable in full.
     expect(Number(rows[0]!.with_scope)).toBe(0);
@@ -970,7 +971,8 @@ describe('function properties', () => {
     );
     const names = rows.map((r) => r.proname);
     expect(names).toContain('scope_for');
-    for (const deferred of ['reports_to_me', 'is_project_member', 'has_record_grant']) {
+    // has_record_grant arrived with Task 1.9 and has moved off this list.
+    for (const deferred of ['reports_to_me', 'is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });

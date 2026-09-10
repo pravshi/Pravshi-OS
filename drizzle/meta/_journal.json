@@ -71,6 +71,13 @@
       "when": 1758009600000,
       "tag": "0009_scope_resolution",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1758013200000,
+      "tag": "0010_record_grants",
+      "breakpoints": true
     }
   ]
 }
