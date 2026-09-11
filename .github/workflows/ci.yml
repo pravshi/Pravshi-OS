@@ -69,6 +69,23 @@ jobs:
           NEON_PARENT_BRANCH: staging
         run: node scripts/ci/provision-branch-role.mjs create
 
+      # Task 1.12 made BETTER_AUTH_SECRET a required runtime variable, and src/env.ts
+      # validates the environment at import time — so every step that loads the app needs
+      # one. It is generated per run rather than stored as a repository secret:
+      #
+      #   * the secret only signs session cookies, and a CI job's sessions are created and
+      #     consumed inside that same job, so nothing needs continuity across runs;
+      #   * it keeps the repository's Actions secrets at exactly two, NEON_API_KEY and
+      #     NEON_PROJECT_ID, which is the rule Task 11 established;
+      #   * no long-lived signing key exists in Actions to be leaked or to go stale.
+      #
+      # Masked before it is written, so it cannot surface in a log line.
+      - name: Generate an ephemeral session signing secret
+        run: |
+          SECRET=$(openssl rand -base64 32)
+          echo "::add-mask::$SECRET"
+          echo "BETTER_AUTH_SECRET=$SECRET" >> "$GITHUB_ENV"
+
       - run: pnpm typecheck
       - run: pnpm lint
 
