@@ -113,6 +113,13 @@
       "when": 1758031200000,
       "tag": "0015_bootstrap",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1758034800000,
+      "tag": "0016_aal_requires_verified_factor",
+      "breakpoints": true
     }
   ]
 }

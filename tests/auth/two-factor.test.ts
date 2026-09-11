@@ -587,6 +587,28 @@ describe('authz.aal() fails closed', () => {
     expect(await effectiveAal(user.person, 'aal2')).toBe('aal1');
   });
 
+  it('refuses aal2 once the verified factor row is gone, even with the enrolment flag still set', async () => {
+    // Task 1.15, migration 0016. Under the library's own flows the flag and a verified factor
+    // travel together; this is the out-of-band state where they do not.
+    const user = await enrol('factorgone');
+    expect(await effectiveAal(user.person, 'aal2')).toBe('aal2');
+    await owner.query(`delete from auth.auth_two_factors where user_id=$1`, [user.id]);
+    const flag = await owner.query<{ f: boolean }>(
+      `select two_factor_enabled f from auth.auth_users where id=$1`,
+      [user.id],
+    );
+    expect(flag.rows[0]!.f).toBe(true);
+    expect(await effectiveAal(user.person, 'aal2')).toBe('aal1');
+  });
+
+  it('refuses aal2 while the only factor is unverified', async () => {
+    const user = await enrol('factorunverified');
+    await owner.query(`update auth.auth_two_factors set verified = false where user_id=$1`, [
+      user.id,
+    ]);
+    expect(await effectiveAal(user.person, 'aal2')).toBe('aal1');
+  });
+
   it('never returns NULL, so a caller cannot mishandle a third state', async () => {
     for (const claim of [null, '', 'aal1', 'aal2', 'nonsense']) {
       const value = await effectiveAal(null, claim);
