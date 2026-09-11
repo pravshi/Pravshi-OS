@@ -358,13 +358,18 @@ describe('the authorization boundary is unmoved', () => {
     );
     expect(rows.length).toBe(10);
     for (const r of rows) {
+      // aal() reads auth.auth_users from Task 1.13 onward, and is the only helper that may:
+      // it has to check a claim of aal2 against whether a second factor actually exists.
+      if (r.proname === 'aal') continue;
       expect(r.src, `${r.proname} must not consult the auth schema`).not.toMatch(/auth\./);
     }
   });
 
   it('adds no policy to public and leaves every table protected', async () => {
     const policies = await owner.query<{ n: string }>(
-      `select count(*) n from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
+      `select count(*) n from pg_policies
+       where schemaname='public' and 'app_user' = any(roles)
+         and tablename not like '\\_%'`,
     );
     expect(Number(policies.rows[0]!.n)).toBe(15);
 

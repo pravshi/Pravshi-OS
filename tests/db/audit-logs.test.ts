@@ -902,7 +902,9 @@ describe('the rest of the model is untouched', () => {
   it('adds one app_user policy and weakens none', async () => {
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
-       from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
+       from pg_policies
+       where schemaname='public' and 'app_user' = any(roles)
+         and tablename not like '\\_%'`,
     );
     // Fourteen through Task 1.9, plus audit_logs — the first one driven by a permission.
     expect(Number(rows[0]!.n)).toBe(15);

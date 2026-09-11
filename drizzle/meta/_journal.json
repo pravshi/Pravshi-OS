@@ -99,6 +99,13 @@
       "when": 1758024000000,
       "tag": "0013_auth_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1758027600000,
+      "tag": "0014_two_factor",
+      "breakpoints": true
     }
   ]
 }

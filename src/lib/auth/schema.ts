@@ -36,6 +36,9 @@ export const authUsers = authSchema.table('auth_users', {
   email: citext('email').notNull().unique(),
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
+  // Enrolment, not assurance: a second factor is configured. Whether one was USED is
+  // recorded on the session, not here.
+  twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -49,6 +52,8 @@ export const authSessions = authSchema.table('auth_sessions', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
+  // Written once when the session is minted; never upgraded afterwards.
+  aal: text('aal').notNull().default('aal1'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -80,6 +85,22 @@ export const authVerifications = authSchema.table('auth_verifications', {
   updatedAt: updatedAt(),
 });
 
+/**
+ * TOTP seed and recovery codes, both encrypted with the application secret before they
+ * reach this table. Nothing in the application reads either column.
+ */
+export const authTwoFactors = authSchema.table('auth_two_factors', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => authUsers.id, { onDelete: 'cascade' }),
+  secret: text('secret').notNull(),
+  backupCodes: text('backup_codes').notNull(),
+  verified: boolean('verified').notNull().default(true),
+  failedVerificationCount: integer('failed_verification_count').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+});
+
 export const authRateLimits = authSchema.table('auth_rate_limits', {
   id: uuid('id').primaryKey().defaultRandom(),
   key: text('key').notNull().unique(),
@@ -99,4 +120,5 @@ export const authDbSchema = {
   auth_accounts: authAccounts,
   auth_verifications: authVerifications,
   auth_rate_limits: authRateLimits,
+  auth_two_factors: authTwoFactors,
 };

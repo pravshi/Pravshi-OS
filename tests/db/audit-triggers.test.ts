@@ -715,7 +715,9 @@ describe('nothing already approved has moved', () => {
 
   it('adds no app_user policy and leaves every table protected', async () => {
     const policies = await owner.query<{ n: string }>(
-      `select count(*) n from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
+      `select count(*) n from pg_policies
+       where schemaname='public' and 'app_user' = any(roles)
+         and tablename not like '\\_%'`,
     );
     expect(Number(policies.rows[0]!.n)).toBe(15);
 

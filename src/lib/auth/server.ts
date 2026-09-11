@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
+import { twoFactor } from 'better-auth/plugins';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
 import { env } from '@/env';
@@ -26,6 +27,18 @@ export const PASSWORD_SETTING_PATHS = [
   '/reset-password',
   '/change-password',
 ] as const;
+
+/**
+ * The only requests that may mint an aal2 session. Better Auth creates a session after a
+ * second factor in exactly one place — verify-two-factor.ts — and it reaches that place
+ * through these endpoints: TOTP at sign-in, TOTP at the end of enrolment, and a recovery
+ * code. Anything else produces aal1.
+ */
+export const TWO_FACTOR_VERIFY_PREFIX = '/two-factor/verify-';
+
+/** aal2 means a second factor was verified on THIS session, not that one is enrolled. */
+export const sessionAssuranceFor = (path: string | undefined): 'aal1' | 'aal2' =>
+  typeof path === 'string' && path.startsWith(TWO_FACTOR_VERIFY_PREFIX) ? 'aal2' : 'aal1';
 
 export const auth = betterAuth({
   appName: 'PRAVSHI OS',
@@ -55,6 +68,12 @@ export const auth = betterAuth({
     modelName: 'auth_sessions',
     expiresIn: SESSION_EXPIRY_SECONDS,
     updateAge: SESSION_REFRESH_SECONDS,
+    additionalFields: {
+      // input: false — no client can propose its own assurance level. It is written by the
+      // hook below at creation time and never updated: a session does not gain assurance
+      // after the fact, it is minted with it or without it.
+      aal: { type: 'string', defaultValue: 'aal1', input: false },
+    },
   },
   user: { modelName: 'auth_users' },
   account: { modelName: 'auth_accounts' },
@@ -93,6 +112,44 @@ export const auth = betterAuth({
     },
   },
 
+  /**
+   * TOTP, per blueprint section 25. The library's own plugin rather than a parallel
+   * implementation: it already does the things that are easy to get wrong — the challenge
+   * cookie is consumed atomically before a session is minted, so a replayed challenge
+   * cannot produce a second one; the seed and the recovery codes are encrypted with the
+   * application secret before they reach the database; enrolment is not complete until
+   * possession is proven; and there is an account-level lockout on consecutive failures.
+   *
+   * skipVerificationOnEnable is deliberately NOT set. Generating a secret is not enrolment;
+   * the factor is only enabled once a code from it has been accepted.
+   */
+  plugins: [
+    twoFactor({
+      issuer: 'PRAVSHI OS',
+      // Explicit rather than relying on the plugin's default staying put: the low-level
+      // helper writes PLAINTEXT recovery codes when this is unset.
+      backupCodeOptions: { storeBackupCodes: 'encrypted' },
+      // The plugin calls its model `twoFactor`; ours follows the auth_* convention Task 1.12
+      // set. Column names are mapped by the Drizzle definitions, as for every other table.
+      schema: { twoFactor: { modelName: 'auth_two_factors' } },
+    }),
+  ],
+
+  databaseHooks: {
+    session: {
+      create: {
+        /**
+         * Stamps the assurance onto the session at the moment it is created. This is the
+         * whole mechanism: `aal2` is a fact about how THIS session came to exist, not a
+         * property inherited from the person's enrolment status.
+         */
+        before: async (session, ctx) => ({
+          data: { ...session, aal: sessionAssuranceFor(ctx?.path) },
+        }),
+      },
+    },
+  },
+
   hooks: {
     /**
      * A second refusal in front of sign-up, independent of the library's own.
@@ -108,6 +165,23 @@ export const auth = betterAuth({
         throw new APIError('FORBIDDEN', {
           message:
             'Accounts are created by invitation only. There is no sign-up route in PRAVSHI OS.',
+        });
+      }
+
+      /**
+       * Remembered devices are refused.
+       *
+       * The plugin can issue a trusted-device cookie that skips the prompt for thirty days.
+       * A session minted that way has not had a second factor verified on it, so calling it
+       * aal2 would make the level mean "enrolled and recently trusted" instead of "verified
+       * now" — which is the distinction this task exists to establish. Asking for it is an
+       * error rather than a silently ignored flag, so a client cannot believe it got
+       * something it did not.
+       */
+      if (ctx.path?.startsWith('/two-factor/') && ctx.body?.trustDevice) {
+        throw new APIError('BAD_REQUEST', {
+          message:
+            'Trusted devices are disabled: every privileged session must verify its second factor.',
         });
       }
     }),

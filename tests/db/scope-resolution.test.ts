@@ -885,7 +885,9 @@ describe('RLS', () => {
     // behaviour change is departments, through the helper rather than through a policy edit.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
-       from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
+       from pg_policies
+       where schemaname='public' and 'app_user' = any(roles)
+         and tablename not like '\\_%'`,
     );
     // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7, record_grants from
     // Task 1.9, and audit_logs from Task 1.10.

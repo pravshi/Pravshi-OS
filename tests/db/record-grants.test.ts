@@ -939,7 +939,9 @@ describe('the rest of the authorization model is untouched', () => {
 
     const policies = await owner.query<{ n: string; with_scope: string }>(
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
-       from pg_policies where schemaname='public' and 'app_user' = any(roles)`,
+       from pg_policies
+       where schemaname='public' and 'app_user' = any(roles)
+         and tablename not like '\\_%'`,
     );
     // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10. Only the
     // last branches on scope: audit_logs.view is GLOBAL-only in the matrix, so it needs

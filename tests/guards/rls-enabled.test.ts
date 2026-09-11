@@ -10,7 +10,7 @@ describe('every table in public has RLS enabled AND forced', () => {
       join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public'
         and c.relkind = 'r'
-        and c.relname not like '\_%'          -- probe tables from tests
+        and c.relname not like '\\_%'          -- probe tables from tests
         and c.relname <> '__drizzle_migrations'
         and (not c.relrowsecurity or not c.relforcerowsecurity)
     `);

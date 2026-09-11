@@ -296,21 +296,40 @@ describe('org_id() is derived, never accepted', () => {
 });
 
 describe('aal()', () => {
-  it('reads the transaction context', async () => {
+  // Task 1.3 shipped this as a plain reader of app.aal, with a warning attached: the value
+  // was not established by anything and must not gate a sensitive surface. Task 1.13
+  // hardened it, so the two assertions that used to live here — "returns whatever the
+  // context says" and "is null when unset" — are now the wrong shape. What replaces them is
+  // stronger in both directions.
+
+  it('refuses a claim of aal2 from somebody with no second factor', async () => {
+    // alice has no login at all, so she certainly has no verified factor. The claim cannot
+    // widen access — the same deny-never-grant rule org_id() applies to a tenant claim.
     const r = await inContext<{ a: string | null }>(
       { personId: alice, orgId: orgA, aal: 'aal2' },
       `select authz.aal() a`,
     );
-    expect(r[0]!.a).toBe('aal2');
+    expect(r[0]!.a).toBe('aal1');
   });
 
-  it('is null when unset', async () => {
+  it('answers aal1 when unset, rather than a third state a caller could mishandle', async () => {
     const r = await inContext<{ a: string | null }>(
       { personId: alice, orgId: orgA },
       `select authz.aal() a`,
     );
-    expect(r[0]!.a).toBeNull();
+    expect(r[0]!.a).toBe('aal1');
   });
+
+  it('answers aal1 with no identity at all', async () => {
+    const r = await inContext<{ a: string | null }>(
+      { personId: null, orgId: null, aal: 'aal2' },
+      `select authz.aal() a`,
+    );
+    expect(r[0]!.a).toBe('aal1');
+  });
+
+  // The positive case — an enrolled person whose claim IS honoured — is exercised end to
+  // end in tests/auth/two-factor.test.ts, where a real TOTP verification produces it.
 });
 
 describe('SECURITY DEFINER grants app_user no extra capability', () => {

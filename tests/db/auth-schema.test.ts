@@ -20,6 +20,7 @@ const AUTH_TABLES = [
   'auth_accounts',
   'auth_rate_limits',
   'auth_sessions',
+  'auth_two_factors',
   'auth_users',
   'auth_verifications',
 ] as const;
@@ -89,7 +90,7 @@ describe('the auth schema', () => {
     expect(rows[0]!.owner).toBe('app_owner');
   });
 
-  it('holds exactly the five Better Auth tables and nothing else', async () => {
+  it('holds exactly the Better Auth tables and nothing else', async () => {
     const { rows } = await owner.query<{ tablename: string }>(
       `select tablename from pg_tables where schemaname='auth' order by tablename`,
     );
@@ -117,7 +118,7 @@ describe('the auth schema', () => {
       `select table_name, data_type from information_schema.columns
        where table_schema='auth' and column_name='id' order by table_name`,
     );
-    expect(rows.length).toBe(5);
+    expect(rows.length).toBe(AUTH_TABLES.length);
     for (const r of rows) expect(r.data_type, r.table_name).toBe('uuid');
 
     const personCol = await owner.query<{ data_type: string }>(
@@ -169,7 +170,13 @@ describe('privilege posture', () => {
     // A login is disabled, never deleted — the audit trail and people row both point at it.
     expect(byTable.get('auth_users:app_user')).toBe('INSERT,SELECT,UPDATE');
     // Sessions, tokens and counters are consumed or revoked in normal operation.
-    for (const t of ['auth_sessions', 'auth_accounts', 'auth_verifications', 'auth_rate_limits']) {
+    for (const t of [
+      'auth_sessions',
+      'auth_accounts',
+      'auth_verifications',
+      'auth_rate_limits',
+      'auth_two_factors',
+    ]) {
       expect(byTable.get(`${t}:app_user`), t).toBe('DELETE,INSERT,SELECT,UPDATE');
     }
     // app_admin is for bootstrap, provisioning and the audit writer. Authentication is none.

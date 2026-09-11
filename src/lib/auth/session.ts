@@ -63,9 +63,15 @@ export async function resolveAuthContext(headers: Headers): Promise<AuthContext 
     personId: identity.person_id,
     // From the person row, never from the session. A cookie cannot propose a tenant.
     orgId: identity.org_id,
-    // Task 1.13 owns MFA. authz.aal() already carries a comment saying this value is not
-    // cryptographically established yet and must not gate a sensitive surface until it is.
-    aal: 'aal1',
+    /**
+     * Read from the session row, where it was stamped at creation. Not derived from the
+     * person's enrolment status: a session minted before the person enrolled, or by any
+     * path that did not verify a second factor, carries aal1 and keeps it.
+     *
+     * authz.aal() will refuse this claim anyway if the person holds no verified factor, so
+     * the two layers have to agree before anything reaches aal2.
+     */
+    aal: session.session.aal === 'aal2' ? 'aal2' : 'aal1',
   };
 }
 
