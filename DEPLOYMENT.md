@@ -74,8 +74,9 @@ production branch. Confirm the region resolves to `sin1` from `vercel.json`.
 | Preview            | `APP_URL`            | the preview URL                         |
 | Preview            | `HEALTH_CHECK_TOKEN` | a different value from production       |
 
-**Never add to Vercel:** `DATABASE_URL_MIGRATE`, `NEON_OWNER_URL`, `APP_OWNER_PASSWORD`,
-`APP_USER_PASSWORD`, `APP_ADMIN_PASSWORD`, `NEON_API_KEY`. See
+**Never add to Vercel:** `DATABASE_URL_MIGRATE`, `DATABASE_URL_BOOTSTRAP`, `NEON_OWNER_URL`,
+`APP_OWNER_PASSWORD`, `APP_USER_PASSWORD`, `APP_ADMIN_PASSWORD`, `NEON_API_KEY`, or any
+`BOOTSTRAP_*` setting. See
 [ENVIRONMENT.md](ENVIRONMENT.md) for why the migration credential in particular is fatal.
 
 Then verify the owner credential is genuinely absent rather than assumed absent, by listing
@@ -116,6 +117,22 @@ Migrations are **never run by the Vercel runtime**. They run from CI or a develo
 as `app_owner` against the direct endpoint. The deployed application holds only `app_user`
 and could not run one even if asked.
 
+### 7. Bootstrap the first SUPER_ADMIN — once
+
+**Unperformed, and blocked on frontend work:** the `/setup` page that completes the one-time
+link does not exist yet. Do not bootstrap production until it does, because the link expires
+60 minutes after it is printed and cannot be re-issued.
+
+From the operator's machine, never from CI or Vercel, following
+[scripts/bootstrap/README.md](scripts/bootstrap/README.md):
+
+1. Confirm `0015_bootstrap` is applied to `production`.
+2. Set `app_admin`'s password on `production` and compose `DATABASE_URL_BOOTSTRAP` (direct
+   endpoint) in the local `.env` — confirm it names `production`, because bootstrap cannot be
+   undone.
+3. Run `node scripts/bootstrap/run.mjs` in an interactive terminal.
+4. Open the printed link, set the password, sign in, and enrol TOTP.
+
 ## Rollback
 
 - **Application:** redeploy the previous Vercel build.
@@ -129,6 +146,8 @@ Before any deployment, confirm:
 
 - [ ] Repository is still private
 - [ ] `DATABASE_URL_MIGRATE` absent from every Vercel environment
+- [ ] `DATABASE_URL_BOOTSTRAP` and every `BOOTSTRAP_*` setting absent from Vercel and GitHub
+      Actions
 - [ ] No Neon owner or admin credential in Vercel
 - [ ] Production `DATABASE_URL` uses `app_user` on the **pooled** endpoint
 - [ ] Preview points at `staging`, not `production`

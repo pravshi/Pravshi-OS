@@ -5,11 +5,19 @@
 
 ## Credential separation — the most important rule in this file
 
-| Variable               | Role        | Endpoint | Permitted to live in                      |
-| ---------------------- | ----------- | -------- | ----------------------------------------- |
-| `DATABASE_URL`         | `app_user`  | pooled   | Vercel (all envs, when it exists) + local |
-| `DATABASE_URL_MIGRATE` | `app_owner` | direct   | GitHub Actions and local machines ONLY    |
-| `DATABASE_URL_TEST`    | `app_user`  | pooled   | GitHub Actions and local machines ONLY    |
+| Variable                 | Role        | Endpoint | Permitted to live in                                             |
+| ------------------------ | ----------- | -------- | ---------------------------------------------------------------- |
+| `DATABASE_URL`           | `app_user`  | pooled   | Vercel (all envs, when it exists) + local                        |
+| `DATABASE_URL_MIGRATE`   | `app_owner` | direct   | GitHub Actions and local machines ONLY                           |
+| `DATABASE_URL_TEST`      | `app_user`  | pooled   | GitHub Actions and local machines ONLY                           |
+| `DATABASE_URL_BOOTSTRAP` | `app_admin` | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions |
+
+**`DATABASE_URL_BOOTSTRAP` must never leave the operator's machine.** It connects as
+`app_admin`, whose one capability is creating the first SUPER_ADMIN — once per database, see
+[scripts/bootstrap/README.md](scripts/bootstrap/README.md). Neither the application, the
+migrations nor the test suite needs it. `src/env.ts` refuses to boot in production with it
+present, and `scripts/guards/workflow-secret-flow.mjs` fails CI if any workflow so much as names
+it or runs `scripts/bootstrap/` — from any source, not only from a secret.
 
 **`DATABASE_URL_MIGRATE` must never be added to Vercel.** It uses `app_owner`, which owns the
 schema and is precisely what RLS does not constrain. A deployed application holding that
@@ -32,11 +40,27 @@ absolute everywhere else. Both halves are pinned by tests in `tests/env.test.ts`
 
 ### Database
 
-| Variable               | Required | Notes                                                                 |
-| ---------------------- | -------- | --------------------------------------------------------------------- |
-| `DATABASE_URL`         | yes      | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL |
-| `DATABASE_URL_MIGRATE` | tooling  | Must **not** contain `-pooler`; migrations need one real session      |
-| `DATABASE_URL_TEST`    | tooling  | Integration tests. Point at your own branch, never `production`       |
+| Variable                 | Required  | Notes                                                                  |
+| ------------------------ | --------- | ---------------------------------------------------------------------- |
+| `DATABASE_URL`           | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL  |
+| `DATABASE_URL_MIGRATE`   | tooling   | Must **not** contain `-pooler`; migrations need one real session       |
+| `DATABASE_URL_TEST`      | tooling   | Integration tests. Point at your own branch, never `production`        |
+| `DATABASE_URL_BOOTSTRAP` | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs` |
+
+### First-run bootstrap — operator machine only
+
+Read by `scripts/bootstrap/run.mjs`, once per database, from the process environment and then
+`.env`. None of these belongs in Vercel or GitHub Actions.
+
+| Variable                | Notes                                                                     |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `BOOTSTRAP_ORG_NAME`    | The organization's display name                                           |
+| `BOOTSTRAP_ORG_SLUG`    | Lower-case letters, digits and inner hyphens                              |
+| `BOOTSTRAP_OWNER_NAME`  | The owner's full legal name                                               |
+| `BOOTSTRAP_OWNER_EMAIL` | Becomes the owner's login. No email is ever compiled into the application |
+
+`APP_URL` is also read, to build the one-time setup link; it must be `https` except for
+`localhost`, because the link carries a secret.
 
 ### Application
 

@@ -6,11 +6,11 @@ Postgres does not enforce RLS against a table's owner, or against any role holdi
 `BYPASSRLS`. An application connected as either one has policies that look correct, review
 as correct, and do nothing at all. The role split exists so that failure cannot happen.
 
-| Role        | Purpose                           | Owns tables | Credential lives in                               |
-| ----------- | --------------------------------- | ----------- | ------------------------------------------------- |
-| `app_owner` | Schema owner, migrations only     | Yes         | GitHub Actions and local machines ONLY            |
-| `app_user`  | **Application runtime**           | **No**      | `DATABASE_URL` — local, and Vercel when it exists |
-| `app_admin` | Reserved for elevated admin paths | No          | Not in use in Phase 0                             |
+| Role        | Purpose                                                                                  | Owns tables | Credential lives in                                    |
+| ----------- | ---------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------ |
+| `app_owner` | Schema owner, migrations only                                                            | Yes         | GitHub Actions and local machines ONLY                 |
+| `app_user`  | **Application runtime**                                                                  | **No**      | `DATABASE_URL` — local, and Vercel when it exists      |
+| `app_admin` | First-run bootstrap only: EXECUTE on `public.bootstrap_organization()`, and nothing else | No          | `DATABASE_URL_BOOTSTRAP` — the operator's machine only |
 
 All three are created `login nobypassrls`, and `roles.sql` asserts that none holds
 `BYPASSRLS`, `SUPERUSER`, `CREATEROLE` or `CREATEDB`. The assertion raises and aborts if any
@@ -62,16 +62,35 @@ every policy evaluates false and the query returns **zero rows** — fail-closed
 Each proves one property the rest of the system assumes. **A guard failure is a security
 failure, not a test failure.** Fix the cause; never weaken the guard to make CI green.
 
-| Guard                                     | What it proves                                                        |
-| ----------------------------------------- | --------------------------------------------------------------------- |
-| `tests/guards/rls-enabled.test.ts`        | Every table in `public` has RLS enabled **and forced**                |
-| `tests/guards/runtime-role.test.ts`       | The runtime role has no `BYPASSRLS`, is not superuser, owns no tables |
-| `tests/guards/single-db-path.test.ts`     | Nothing bypasses `withAuthorizedDb()` or the cold-start retry         |
-| `tests/guards/no-keepalive.test.ts`       | No cron, heartbeat or warm-up defeats Neon autosuspend                |
-| `tests/db/authorized.test.ts`             | Context does not leak across pooled connections; fail-closed holds    |
-| `tests/health/no-db-in-health.test.ts`    | `/health` never touches the database                                  |
-| `scripts/guards/secret-scan.mjs`          | No credential-shaped string enters the repository                     |
-| `scripts/guards/workflow-secret-flow.mjs` | No workflow feeds a GitHub secret into a `DATABASE_URL*` variable     |
+| Guard                                     | What it proves                                                                                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/guards/rls-enabled.test.ts`        | Every table in `public` has RLS enabled **and forced**                                                                                         |
+| `tests/guards/runtime-role.test.ts`       | The runtime role has no `BYPASSRLS`, is not superuser, owns no tables                                                                          |
+| `tests/guards/single-db-path.test.ts`     | Nothing bypasses `withAuthorizedDb()` or the cold-start retry                                                                                  |
+| `tests/guards/no-keepalive.test.ts`       | No cron, heartbeat or warm-up defeats Neon autosuspend                                                                                         |
+| `tests/db/authorized.test.ts`             | Context does not leak across pooled connections; fail-closed holds                                                                             |
+| `tests/health/no-db-in-health.test.ts`    | `/health` never touches the database                                                                                                           |
+| `scripts/guards/secret-scan.mjs`          | No credential-shaped string enters the repository                                                                                              |
+| `scripts/guards/workflow-secret-flow.mjs` | No workflow feeds a GitHub secret into a `DATABASE_URL*` variable, and none names the bootstrap credential or runs the bootstrap script at all |
+
+## First-run bootstrap
+
+The first SUPER_ADMIN is created once per database by `scripts/bootstrap/run.mjs`, calling
+`public.bootstrap_organization()` as `app_admin` (`drizzle/0015_bootstrap.sql`). The chain, and
+what closes each link:
+
+| Link                   | Closed by                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `app_admin` credential | Operator machine only; refused by `src/env.ts` in production and by the CI workflow guard |
+| the bootstrap function | EXECUTE granted to `app_admin` alone; `app_user` refused by privilege and by the function |
+| `bootstrap_state`      | The first write; a singleton no role can update, delete or truncate                       |
+| the SUPER_ADMIN grant  | The protected-role genesis branch, which closes the moment the organization has a holder  |
+| the setup token        | SHA-256 digest only, 60-minute ceiling, consumed once under a row lock, never re-issued   |
+
+Nothing in `audit_logs` is written during bootstrap, because no person acts and the audit log
+has no system actor. The origin is `bootstrap_state`; the first audit entry is the owner
+completing setup, and it carries the origin — `granted_by: null` — in its metadata. See
+[scripts/bootstrap/README.md](scripts/bootstrap/README.md).
 
 ## What GitHub Free does not give us
 

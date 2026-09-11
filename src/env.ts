@@ -58,23 +58,38 @@ function fail(issues: z.ZodIssue[]): never {
   );
 }
 
+/**
+ * Credentials the serving runtime must never hold, and why. Each one belongs to a role that
+ * can do something app_user deliberately cannot.
+ */
+const RUNTIME_FORBIDDEN_CREDENTIALS = {
+  DATABASE_URL_MIGRATE: 'It uses app_owner, which owns the schema and is not constrained by RLS.',
+  DATABASE_URL_BOOTSTRAP:
+    'It uses app_admin, the role that can bootstrap the first SUPER_ADMIN, and belongs on the ' +
+    'operator machine only.',
+} as const;
+
 export function parseRuntimeEnv(raw: Record<string, unknown>): RuntimeEnv {
-  // A leaked owner credential is a silent, total loss of RLS. Refuse to start.
+  // A leaked owner or bootstrap credential is a silent, total loss of the access model.
+  // Refuse to start.
   //
   // `next build` is not a boot. It evaluates every route module to collect page
-  // data, and it runs on developer machines and in CI — both of which hold
-  // DATABASE_URL_MIGRATE legitimately, because that is where migrations are run
-  // from. Exempting that one phase keeps the rule aimed at the thing it protects:
-  // the serving runtime, which must never hold app_owner. A migration credential
-  // wrongly added to Vercel still fails the application closed on its first
-  // request; it does not slip through.
+  // data, and it runs on developer machines and in CI — developer machines hold
+  // these credentials legitimately, because that is where migrations and the
+  // bootstrap are run from. Exempting that one phase keeps the rule aimed at the
+  // thing it protects: the serving runtime, which must never hold app_owner or
+  // app_admin. A credential wrongly added to Vercel still fails the application
+  // closed on its first request; it does not slip through.
   const isBuildPhase = raw.NEXT_PHASE === 'phase-production-build';
-  if (!isBuildPhase && raw.NODE_ENV === 'production' && raw.DATABASE_URL_MIGRATE) {
-    throw new Error(
-      'DATABASE_URL_MIGRATE must never be present in the runtime environment. ' +
-        'It uses app_owner, which owns the schema and is not constrained by RLS. ' +
-        'Remove it from the Vercel environment.',
-    );
+  if (!isBuildPhase && raw.NODE_ENV === 'production') {
+    for (const [name, reason] of Object.entries(RUNTIME_FORBIDDEN_CREDENTIALS)) {
+      if (raw[name]) {
+        throw new Error(
+          `${name} must never be present in the runtime environment. ${reason} ` +
+            'Remove it from the Vercel environment.',
+        );
+      }
+    }
   }
   const r = runtimeSchema.safeParse(withoutBlanks(raw));
   return r.success ? r.data : fail(r.error.issues);
