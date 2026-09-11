@@ -8,6 +8,104 @@
       "when": 1757116800000,
       "tag": "0000_extensions_and_schemas",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1757980800000,
+      "tag": "0001_identity_counters",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1757984400000,
+      "tag": "0002_organizations_and_people",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1757988000000,
+      "tag": "0003_authz_identity_helpers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1757991600000,
+      "tag": "0004_departments_and_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1757995200000,
+      "tag": "0005_engagements",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1757998800000,
+      "tag": "0006_engagement_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1758002400000,
+      "tag": "0007_internships",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1758006000000,
+      "tag": "0008_roles_and_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1758009600000,
+      "tag": "0009_scope_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1758013200000,
+      "tag": "0010_record_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1758016800000,
+      "tag": "0011_audit_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1758020400000,
+      "tag": "0012_audit_event_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1758024000000,
+      "tag": "0013_auth_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1758027600000,
+      "tag": "0014_two_factor",
+      "breakpoints": true
     }
   ]
 }

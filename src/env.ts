@@ -18,6 +18,13 @@ const runtimeSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
   SENTRY_DSN: z.string().url().optional(),
+  /**
+   * Signs Better Auth's session cookies and tokens. Required, not optional: without it the
+   * library would fall back to a generated value that differs between serverless instances,
+   * so a session issued by one would be rejected by the next. 32 characters is the same
+   * floor HEALTH_CHECK_TOKEN uses.
+   */
+  BETTER_AUTH_SECRET: z.string().min(32),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */

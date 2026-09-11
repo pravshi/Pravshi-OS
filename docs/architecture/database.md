@@ -127,6 +127,10 @@ person_roles(person_id, role_id, granted_by, granted_at, expires_at,
 
 record_grants(id, org_id, entity_type, entity_id, person_id, permission_id,
               granted_by, reason, granted_at, expires_at, revoked_at)
+      -- entity_type: singular lower_snake_case entity name ('lead', 'project', 'document'),
+      -- format-constrained, never a table name and never concatenated into SQL. There is no
+      -- foreign key on (entity_type, entity_id): the tables it names arrive in Phases 3-5,
+      -- and an unrecognised value reaches nothing rather than everything.
 ```
 
 ### 4.1 The `authz` helper functions — the whole security model in one schema
@@ -170,7 +174,7 @@ using (
   and (
     case (select authz.scope_for('leads.view'))
       when 'GLOBAL'     then true
-      when 'DEPARTMENT' then department_id = any ((select authz.my_departments()))
+      when 'DEPARTMENT' then department_id = any ((select authz.my_departments())::uuid[])
       when 'TEAM'       then owner_person_id = (select authz.person_id())
                             or (select authz.reports_to_me(owner_person_id))
       when 'PROJECT'    then (select authz.is_project_member(project_id))

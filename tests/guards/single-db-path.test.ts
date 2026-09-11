@@ -15,4 +15,25 @@ describe('there is exactly one path to Postgres', () => {
     );
     expect(hits, `Unexpected pool import — use withAuthorizedDb(), in:\n${hits}`).toBe('');
   });
+
+  it('only the auth module uses the auth client, which is the one sanctioned exception', () => {
+    // authDb reaches the `auth` schema without an identity in the transaction, because a
+    // request cannot present an identity while it is being established. That exception is
+    // for authentication and nothing else: business data still goes through
+    // withAuthorizedDb(), where RLS meets it.
+    const hits = grep(
+      `-lE "from '@/lib/db/auth-client'" -- src ":!src/lib/auth/*" ":!src/lib/db/*"`,
+    );
+    expect(
+      hits,
+      `authDb bypasses withAuthorizedDb() and belongs to the auth module only, in:\n${hits}`,
+    ).toBe('');
+  });
+
+  it('no feature code queries the credential tables by hand', () => {
+    const hits = grep(
+      `-lE "auth[.]auth_(users|sessions|accounts|verifications)" -- src ":!src/lib/auth/*"`,
+    );
+    expect(hits, `Direct auth-table access outside the auth layer, in:\n${hits}`).toBe('');
+  });
 });
