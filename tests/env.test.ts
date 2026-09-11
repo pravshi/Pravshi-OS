@@ -58,6 +58,33 @@ describe('parseRuntimeEnv', () => {
     expect(env.APP_URL).toBe('https://os.pravshi.com');
   });
 
+  it('REFUSES TO BOOT if the bootstrap credential is present in a production runtime', () => {
+    // Task 1.14. app_admin can bootstrap the first SUPER_ADMIN; its custody is the operator's
+    // machine, and the serving runtime must fail closed if it ever appears there.
+    expect(() =>
+      parseRuntimeEnv({
+        DATABASE_URL: POOLED,
+        DATABASE_URL_BOOTSTRAP: DIRECT,
+        APP_URL: 'https://os.pravshi.com',
+        NODE_ENV: 'production',
+        NEXT_PHASE: 'phase-production-server',
+        BETTER_AUTH_SECRET: SECRET,
+      }),
+    ).toThrow(/DATABASE_URL_BOOTSTRAP must never be present in the runtime environment/);
+  });
+
+  it('allows the bootstrap credential during `next build`, exactly as it does the migration one', () => {
+    const env = parseRuntimeEnv({
+      DATABASE_URL: POOLED,
+      DATABASE_URL_BOOTSTRAP: DIRECT,
+      APP_URL: 'https://os.pravshi.com',
+      NODE_ENV: 'production',
+      NEXT_PHASE: 'phase-production-build',
+      BETTER_AUTH_SECRET: SECRET,
+    });
+    expect(env.APP_URL).toBe('https://os.pravshi.com');
+  });
+
   it('accepts a correct runtime environment', () => {
     const env = parseRuntimeEnv({
       DATABASE_URL: POOLED,

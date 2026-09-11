@@ -11,6 +11,14 @@
 // indirection that is visible in the run script. It cannot follow a value through an
 // external action, a file, base64, or a dynamically constructed name. Treat a pass as
 // "no obvious flow", never as proof.
+//
+// SECOND RULE (Task 1.14): the bootstrap never runs in CI. DATABASE_URL_BOOTSTRAP is the
+// app_admin credential that can create the first SUPER_ADMIN, and its custody is the
+// operator's machine alone — not an Actions secret, and not a URL derived from the Neon API
+// either, which the taint rule above would otherwise allow. So ANY mention of that variable,
+// or any invocation of scripts/bootstrap/, anywhere in a workflow, is a violation regardless
+// of where a value comes from. This half is a plain text match over every key and string in
+// the document, and is as blunt as it sounds on purpose.
 
 import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +26,27 @@ import { join } from 'node:path';
 import { parse } from 'yaml';
 
 const TARGET = /^DATABASE_URL/i;
+const BOOTSTRAP_ONLY = [
+  [/DATABASE_URL_BOOTSTRAP/i, 'the bootstrap database credential DATABASE_URL_BOOTSTRAP'],
+  [/scripts[\\/]+bootstrap\b/i, 'the bootstrap script under scripts/bootstrap/'],
+];
+
+/**
+ * Every key and string in the workflow, with a readable path, so the bootstrap rule sees env
+ * keys, values, run scripts and action inputs alike.
+ * @returns {{path:string, text:string}[]}
+ */
+function textsOf(node, path = 'workflow') {
+  if (typeof node === 'string') return [{ path, text: node }];
+  if (Array.isArray(node)) return node.flatMap((item, i) => textsOf(item, `${path}[${i}]`));
+  if (node && typeof node === 'object') {
+    return Object.entries(node).flatMap(([key, value]) => [
+      { path: `${path}.${key}`, text: key },
+      ...textsOf(value, `${path}.${key}`),
+    ]);
+  }
+  return [];
+}
 const SECRETS_REF = /\$\{\{\s*secrets\./;
 const ENV_REF = /\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 const OUT_REF = /\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}/g;
@@ -101,6 +130,23 @@ export function analyseWorkflow(doc, file = 'workflow') {
       }
     }
   }
+
+  // The bootstrap rule: no source makes these acceptable in CI, so no taint is consulted.
+  const reported = new Set();
+  for (const { path, text } of textsOf(doc)) {
+    for (const [pattern, what] of BOOTSTRAP_ONLY) {
+      const key = `${path}|${what}`;
+      if (pattern.test(text) && !reported.has(key)) {
+        reported.add(key);
+        violations.push({
+          file,
+          where: path,
+          name: 'bootstrap',
+          reason: `${what} must never appear in a workflow: the bootstrap runs from the operator machine only`,
+        });
+      }
+    }
+  }
   return violations;
 }
 
@@ -126,7 +172,8 @@ function main() {
   if (total > 0) {
     console.error(
       `\nworkflow-secret-flow: ${total} violation(s). CI must derive database URLs from the ` +
-        'Neon API at runtime, never hold them as GitHub secrets.',
+        'Neon API at runtime, never hold them as GitHub secrets, and must never touch the ' +
+        'bootstrap credential or script at all.',
     );
     process.exit(1);
   }
