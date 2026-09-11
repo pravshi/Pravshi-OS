@@ -48,10 +48,11 @@ absolute everywhere else. Both halves are pinned by tests in `tests/env.test.ts`
 
 ### Observability — not yet configured
 
-| Variable            | Required | Notes                                     |
-| ------------------- | -------- | ----------------------------------------- |
-| `SENTRY_DSN`        | optional | No Sentry project exists yet. Leave blank |
-| `SENTRY_AUTH_TOKEN` | optional | Source-map upload. Not in use             |
+| Variable             | Required     | Notes                                                                                                                                                 |
+| -------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SENTRY_DSN`         | optional     | No Sentry project exists yet. Leave blank                                                                                                             |
+| `SENTRY_AUTH_TOKEN`  | optional     | Source-map upload. Not in use                                                                                                                         |
+| `BETTER_AUTH_SECRET` | **required** | Signs Better Auth session cookies. At least 32 characters. Without it each serverless instance would generate its own and reject the others' sessions |
 
 ### Storage — not yet configured
 

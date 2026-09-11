@@ -92,6 +92,13 @@
       "when": 1758020400000,
       "tag": "0012_audit_event_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1758024000000,
+      "tag": "0013_auth_tables",
+      "breakpoints": true
     }
   ]
 }
