@@ -147,6 +147,7 @@ authz.aal()            -- current_setting('app.aal')  →  'aal1' | 'aal2'
 authz.scope_for(p text)-- broadest access_scope for permission p, or NULL if not granted
 authz.has(p text)      -- scope_for(p) is not null
 authz.my_departments() -- uuid[]  (primary + secondary)
+authz.in_my_departments(person uuid) -- that person's live engagement is in one of mine
 authz.reports_to_me(person uuid)   -- recursive manager chain
 authz.is_project_member(project uuid)
 authz.has_record_grant(entity_type text, entity_id uuid, p text)
@@ -185,6 +186,13 @@ using (
   )
 );
 ```
+
+When a table does not carry the column a branch needs — `people` has no `department_id`, because a
+person's department comes from their live engagement — **the lookup goes in a helper, never inline
+in the policy.** A subquery inside a policy runs as `app_user` and is therefore filtered by the
+other table's own policy, so reading `engagements` from inside the `people` policy returns the
+caller's own engagement and nothing else: the branch would look right and match nobody. The helper
+is `security definer`, so it answers about another person the way `reports_to_me()` already does.
 
 Separate policies for `insert`, `update`, `delete`, each using the matching permission key.
 **`deleted_at is null` lives in the policy**, so a forgotten `WHERE` clause in application code

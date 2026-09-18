@@ -155,9 +155,9 @@ describe('security properties of every implemented helper', () => {
     );
     // my_departments was deferred here and implemented by Task 1.4, is_active by Task 1.5,
     // has by Task 1.7 once roles, permissions and their two joins existed, scope_for by
-    // Task 1.8 and has_record_grant by Task 1.9. The list shrinks as each helper's tables
-    // arrive; it must never grow.
-    const deferred = ['reports_to_me', 'is_project_member'];
+    // Task 1.8, has_record_grant by Task 1.9, and reports_to_me and in_my_departments by
+    // Task 1.16. The list shrinks as each helper's tables arrive; it must never grow.
+    const deferred = ['is_project_member'];
     for (const d of deferred) {
       expect(
         rows.map((r) => r.proname),

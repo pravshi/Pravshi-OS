@@ -449,14 +449,14 @@ describe('targets are concealed, never confirmed', () => {
     );
   });
 
-  it('conceals a colleague from a GLOBAL people.view while the people policy is still SELF-scoped', async () => {
-    // The deferred database.md 4.2 rollout: the capability is GLOBAL, the policy still says SELF,
-    // and the request fails closed rather than trusting the application layer on its own.
+  it('reaches a colleague at GLOBAL, and still conceals another tenant', async () => {
+    // Task 1.16 gave people the database.md 4.2 template, so a GLOBAL holder now resolves the
+    // colleague the SELF policy hid. The tenant boundary is unmoved: org_id comes first.
     const cookie = acct.directory!.cookie;
     expect((await ask(cookie, { permission: 'people.view' })).scope).toBe('GLOBAL');
-    expect((await refusal(ask(cookie, personTarget(acct.employee!.personId)))).code).toBe(
-      'NOT_FOUND',
-    );
+    const colleague = await ask(cookie, personTarget(acct.employee!.personId));
+    expect(colleague.target).toEqual({ entity: 'person', id: acct.employee!.personId });
+    expect((await refusal(ask(cookie, personTarget(acct.orgB!.personId)))).code).toBe('NOT_FOUND');
   });
 });
 
@@ -598,7 +598,7 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('adds no authz helper and no app_user policy', async () => {
+  it('has twelve authz helpers, and still one app_user policy per table', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
@@ -607,12 +607,14 @@ describe('the rest of the authorization model is unchanged', () => {
       'aal',
       'has',
       'has_record_grant',
+      'in_my_departments',
       'is_active',
       'is_active_person',
       'my_departments',
       'next_identity_code',
       'org_id',
       'person_id',
+      'reports_to_me',
       'scope_for',
     ]);
     const policies = await owner.query<{ n: number }>(

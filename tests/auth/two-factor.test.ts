@@ -833,7 +833,7 @@ describe('the rest of the model is untouched', () => {
       `select p.proname, pg_get_functiondef(p.oid) src from pg_proc p
        join pg_namespace n on n.oid=p.pronamespace where n.nspname='authz'`,
     );
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(12);
     for (const r of rows) {
       // aal() is the one helper this task touches, and the only one allowed to see `auth`.
       if (r.proname === 'aal') continue;

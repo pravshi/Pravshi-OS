@@ -373,7 +373,9 @@ describe('resolve_auth_identity()', () => {
       await c.query(`select set_config('app.person_id',$1,true)`, [person]);
       const active = await c.query<{ a: boolean }>(`select authz.is_active() a`);
       expect(active.rows[0]!.a).toBe(false);
-      const visible = await c.query(`select * from public.people`);
+      // `select id`, not `select *`: Task 1.16 took date_of_birth, personal_email and
+      // phone out of app_user's grant, so a star select on people is a privilege error.
+      const visible = await c.query(`select id from public.people`);
       expect(visible.rows.length).toBe(1); // their own row, by SELF policy
       const roles = await c.query(`select * from public.roles`);
       expect(roles.rows).toEqual([]);
@@ -396,7 +398,7 @@ describe('resolve_auth_identity()', () => {
   it('does not let app_user read public.people directly instead', async () => {
     // The function exists because this returns nothing without an identity in the
     // transaction — which is exactly the state the auth layer is in.
-    const { rows } = await asUser.query(`select * from public.people`);
+    const { rows } = await asUser.query(`select id from public.people`);
     expect(rows).toEqual([]);
   });
 });

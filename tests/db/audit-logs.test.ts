@@ -907,8 +907,9 @@ describe('the rest of the model is untouched', () => {
          and tablename not like '\\_%'`,
     );
     // Fourteen through Task 1.9, plus audit_logs — the first one driven by a permission.
+    // Task 1.16 replaced three more in place, so the count holds and four branch on scope.
     expect(Number(rows[0]!.n)).toBe(15);
-    expect(Number(rows[0]!.with_scope)).toBe(1);
+    expect(Number(rows[0]!.with_scope)).toBe(4);
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {
@@ -930,12 +931,14 @@ describe('the rest of the model is untouched', () => {
       'aal',
       'has',
       'has_record_grant',
+      'in_my_departments',
       'is_active',
       'is_active_person',
       'my_departments',
       'next_identity_code',
       'org_id',
       'person_id',
+      'reports_to_me',
       'scope_for',
     ]);
   });

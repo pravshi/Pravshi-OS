@@ -880,9 +880,9 @@ describe('RLS', () => {
     expect(rows).toEqual([]);
   });
 
-  it('adds no new policy and widens none', async () => {
-    // Scope resolution exists; the tables that will branch on it do not yet. The only
-    // behaviour change is departments, through the helper rather than through a policy edit.
+  it('keeps one app_user policy per table, four of them scope-driven', async () => {
+    // Scope resolution arrived in Task 1.8; Task 1.16 gave people, engagements and
+    // engagement_events the database.md 4.2 template, replacing their SELF policies in place.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
       `select count(*) n, count(*) filter (where qual like '%scope_for%') with_scope
        from pg_policies
@@ -892,10 +892,9 @@ describe('RLS', () => {
     // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7, record_grants from
     // Task 1.9, and audit_logs from Task 1.10.
     expect(Number(rows[0]!.n)).toBe(15);
-    // Exactly one branches on scope_for: audit_logs, whose permission is GLOBAL-only in the
-    // matrix and therefore needs neither reports_to_me nor is_project_member. The rest stay
-    // relationship-scoped until those helpers exist.
-    expect(Number(rows[0]!.with_scope)).toBe(1);
+    // Four branch on scope_for: audit_logs from Task 1.10, and people, engagements and
+    // engagement_events from Task 1.16. The rest stay relationship-scoped.
+    expect(Number(rows[0]!.with_scope)).toBe(4);
   });
 });
 
@@ -974,8 +973,9 @@ describe('function properties', () => {
     );
     const names = rows.map((r) => r.proname);
     expect(names).toContain('scope_for');
-    // has_record_grant arrived with Task 1.9 and has moved off this list.
-    for (const deferred of ['reports_to_me', 'is_project_member']) {
+    // has_record_grant arrived with Task 1.9 and reports_to_me with Task 1.16; both have
+    // moved off this list.
+    for (const deferred of ['is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });
