@@ -42,6 +42,23 @@ Identity is set **inside the transaction only**, with transaction-scoped `set_co
 Session-scoped `SET` is banned — pooled connections are reused, and a session setting would
 carry one person's identity into the next person's query.
 
+Since Task 1.16, `people`, `engagements` and `engagement_events` follow the database.md §4.2
+template: `authz.scope_for()` decides GLOBAL, DEPARTMENT (through the live engagement's
+department, via `authz.in_my_departments()`), TEAM (through `authz.reports_to_me()`) and SELF,
+with PROJECT false until Phase 4. Seeing **yourself** is never gated on `authz.is_active()`;
+seeing **anybody else** always is.
+
+**A subquery inside a policy is itself subject to RLS.** It runs as `app_user` like any other
+query, so a policy that reads another table sees only what that table's policy allows. This is
+why both widening branches on `people` go through definer helpers instead of reading
+`engagements` inline: the inline version returned the caller's own engagement and nothing else,
+so it would have read as correct and hidden the whole department.
+
+RLS filters rows, not columns. So `date_of_birth`, `personal_email` and `phone` sit outside
+`app_user`'s grant on `people` entirely: widening a row can never widen those fields, which is
+what §2 footnote 2 requires when a DEPARTMENT holder sees a colleague. Only a definer function,
+running as the owner, reads them.
+
 ## withAuthorizedDb() — the only path to Postgres
 
 ```
@@ -131,12 +148,14 @@ a pass. The only exceptions are four pre-authentication routes — `/api/auth/[.
 It is the central authorization engine, not the whole Phase 1 backend. Still to come, explicitly:
 
 - invitations, and `login_events` (including refusing sign-in to people who are not access-eligible)
-- the database.md §4.2 scope-based RLS policies for the Phase 1 tables — until then those tables
-  stay SELF-scoped, and DEPARTMENT or GLOBAL targets on them answer 404. The rollout also has to
-  settle how PROJECT combines with SELF: effective scope is one value, so a person granted a
-  permission at both resolves to PROJECT, and their own rows fail closed until
-  `authz.is_project_member()` exists (`tests/authz/scopes-and-grants.test.ts` records it)
-- `authz.reports_to_me()`; TEAM scope fails closed until it exists, and PROJECT until Phase 4
+- the §4.2 template on the Phase 1 tables it has not reached: `internships` has no catalogue key
+  at all, and `departments`, `teams`, `team_members` and `person_departments` stay
+  relationship-scoped because `departments.view` and `teams.view` reach nobody but SUPER_ADMIN
+- `engagements.view` in the §2 matrix: HR_MANAGER may transition an engagement at DEPARTMENT but
+  holds no key to read one, so the Task 1.16 policy reaches SUPER_ADMIN alone
+- `authz.is_project_member()` and PROJECT scope (Phase 4). Effective scope is one value, so a
+  person granted a permission at both PROJECT and SELF resolves to PROJECT and their own rows fail
+  closed until that helper exists (`tests/authz/scopes-and-grants.test.ts` records it)
 - admin services, and the record-grant issuing path
 - the breach-list password check, and appropriate rate limits for application routes and actions
 - per-permission step-up for people who are not privileged (Phase 2)

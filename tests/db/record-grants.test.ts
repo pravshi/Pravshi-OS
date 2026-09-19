@@ -915,15 +915,17 @@ describe('the rest of the authorization model is untouched', () => {
       'aal',
       'has',
       'has_record_grant',
+      'in_my_departments',
       'is_active',
       'is_active_person',
       'my_departments',
       'next_identity_code',
       'org_id',
       'person_id',
+      'reports_to_me',
       'scope_for',
     ]);
-    for (const deferred of ['reports_to_me', 'is_project_member']) {
+    for (const deferred of ['is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });
@@ -943,11 +945,11 @@ describe('the rest of the authorization model is untouched', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10. Only the
-    // last branches on scope: audit_logs.view is GLOBAL-only in the matrix, so it needs
-    // neither reports_to_me nor is_project_member. record_grants stays SELF-scoped.
+    // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10, and Task
+    // 1.16 replaced people, engagements and engagement_events in place: still one policy per
+    // table, now four branching on scope. record_grants itself stays SELF-scoped.
     expect(Number(policies.rows[0]!.n)).toBe(15);
-    expect(Number(policies.rows[0]!.with_scope)).toBe(1);
+    expect(Number(policies.rows[0]!.with_scope)).toBe(4);
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {

@@ -12,12 +12,12 @@ import type { Tx } from '@/lib/db/authorized';
  *
  * ── WHAT THE PHASE 1 PROBES ANSWER TODAY ─────────────────────────────────────────
  *
- * people and engagements still carry the SELF policies Tasks 1.2 and 1.5 gave them. So a person
- * can see their own record, and a holder of a DEPARTMENT or GLOBAL scope still cannot see
- * anybody else's through these probes: the request ends NOT_FOUND. That is the fail-closed
- * direction, and it stays that way until the database.md 4.2 policy template is rolled out to
- * these tables — a later task, not this one. TEAM and PROJECT likewise stay closed until
- * authz.reports_to_me() and authz.is_project_member() exist.
+ * Since Task 1.16, people and engagements carry the database.md 4.2 template: a probe answers
+ * true for the caller's own record, for a GLOBAL holder, for the live department of a DEPARTMENT
+ * holder, and for the manager chain of a TEAM holder. PROJECT stays false until Phase 4 brings
+ * authz.is_project_member(), so a person whose effective scope is PROJECT reaches nothing here —
+ * the fail-closed direction. Which permission key gates which table is the policy's business,
+ * not this file's: a probe only asks whether the row is visible.
  *
  * ── THE REGISTRY IS CLOSED ───────────────────────────────────────────────────────
  *

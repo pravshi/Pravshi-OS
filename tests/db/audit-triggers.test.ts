@@ -738,14 +738,26 @@ describe('writing without the privilege to write', () => {
     // Worth stating as a property rather than a gap: today every audited table is
     // SELECT-only for app_user, so the trigger path is not reachable from the application
     // until Task 1.15 introduces a write path. The chain below is what will carry it.
+    //
+    // Both catalogues are consulted, because a grant can be narrower than a table: Task 1.16
+    // replaced people's table-level SELECT with a column list, so people has no row in
+    // table_privileges at all. The property under test is unchanged — no audited table grants
+    // app_user anything but SELECT, by either route.
     const { rows } = await owner.query<{ table_name: string; privs: string }>(
-      `select table_name, string_agg(privilege_type, ',' order by privilege_type) privs
-       from information_schema.table_privileges
-       where table_schema='public' and grantee='app_user' and table_name = any($1)
-       group by table_name order by table_name`,
+      `with granted as (
+         select table_name, privilege_type
+           from information_schema.table_privileges
+          where table_schema='public' and grantee='app_user' and table_name = any($1)
+         union
+         select table_name, privilege_type
+           from information_schema.column_privileges
+          where table_schema='public' and grantee='app_user' and table_name = any($1)
+       )
+       select table_name, string_agg(distinct privilege_type, ',' order by privilege_type) privs
+       from granted group by table_name order by table_name`,
       [[...AUDITED]],
     );
-    expect(rows.length).toBe(7);
+    expect(rows.map((r) => r.table_name)).toEqual([...AUDITED].sort());
     for (const r of rows) expect(r.privs, r.table_name).toBe('SELECT');
   });
 

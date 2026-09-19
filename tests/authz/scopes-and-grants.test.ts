@@ -27,13 +27,12 @@ import {
 /**
  * Task 1.15 — scope and record grants reach a target only through the table's RLS policy.
  *
- * Phase 1 tables still carry SELF policies, so no real table can show DEPARTMENT or GLOBAL reach
- * yet, and none consults record grants. This suite creates a probe table whose SELECT policy is
- * the database.md 4.2 template for documents.view, with the two branches whose helpers do not
- * exist yet reduced to what can be proven today:
+ * documents.view belongs to a table Phase 3 will bring, so this suite creates a probe table whose
+ * SELECT policy is the database.md 4.2 template for it. Since Task 1.16 the template is complete
+ * except for one branch:
  *
- *   TEAM      owner = me  or  reports_to_me(owner)   the helper is missing, so only owner = me
- *   PROJECT   is_project_member(project)             the helper is missing, so false
+ *   TEAM      owner = me  or  reports_to_me(owner)   both halves, the helper arrived in Task 1.16
+ *   PROJECT   is_project_member(project)             the helper is Phase 4, so false
  *
  * The table is registered as a target through a test-only probe of exactly the shape of the real
  * ones in src/lib/authz/targets.ts. Everything else is real: sessions, role assignments, record
@@ -163,6 +162,11 @@ beforeAll(async () => {
     `insert into public.person_departments (org_id, person_id, department_id) values ($1, $2, $3)`,
     [orgA, acct.deptHead!.personId, d2],
   );
+  // One reporting line, for the TEAM branch: colleague reports to the TEAM-scoped holder.
+  await owner.query(`update public.engagements set manager_person_id = $1 where person_id = $2`, [
+    acct.team!.personId,
+    acct.colleague!.personId,
+  ]);
 
   // ── the probe table ──
   const colleague = acct.colleague!.personId;
@@ -219,6 +223,7 @@ beforeAll(async () => {
             when 'GLOBAL'     then true
             when 'DEPARTMENT' then department_id = any ((select authz.my_departments())::uuid[])
             when 'TEAM'       then owner_person_id = (select authz.person_id())
+                                   or (select authz.reports_to_me(owner_person_id))
             when 'PROJECT'    then false
             when 'SELF'       then owner_person_id = (select authz.person_id())
             else false
@@ -305,10 +310,12 @@ describe('scope reaches a target only through the table policy (database.md 4.2)
     expect(await codeOf(onProbe(head, R.outside))).toBe('NOT_FOUND');
   });
 
-  it('TEAM reaches only the caller’s own rows until authz.reports_to_me() exists', async () => {
+  it('TEAM reaches the caller’s own rows and everyone who reports to them', async () => {
+    // colleague's engagement names the TEAM holder as manager; self's does not.
     expect(await scopeOf(acct.team!)).toBe('TEAM');
     expect((await onProbe(acct.team!, R.teamOwn)).scope).toBe('TEAM');
-    expect(await codeOf(onProbe(acct.team!, R.colleague))).toBe('NOT_FOUND');
+    expect((await onProbe(acct.team!, R.colleague)).scope).toBe('TEAM');
+    expect(await codeOf(onProbe(acct.team!, R.self))).toBe('NOT_FOUND');
   });
 
   it('PROJECT reaches nothing until authz.is_project_member() exists', async () => {
@@ -445,21 +452,23 @@ describe('the work after the check runs under the same chain', () => {
 
 // ── 4. the real Phase 1 targets ──────────────────────────────────────────────────
 
-describe('Phase 1 tables are still SELF-scoped', () => {
-  it('conceals a same-department colleague from a DEPARTMENT people.view until 4.2 reaches people', async () => {
+describe('the real Phase 1 tables follow the same template', () => {
+  it('lets a DEPARTMENT people.view reach that department, and stops at the tenant', async () => {
     const head = acct.deptHead!;
-    const own = await requirePermission(headersFor(head.cookie), {
+    const person = (id: string) => ({
       permission: 'people.view',
-      target: { entity: 'person', id: head.personId },
+      target: { entity: 'person' as const, id },
     });
-    expect(own.scope).toBe('DEPARTMENT');
+    expect((await requirePermission(headersFor(head.cookie), person(head.personId))).scope).toBe(
+      'DEPARTMENT',
+    );
+    // Task 1.16: the colleague sharing their department is now reachable …
     expect(
-      await codeOf(
-        requirePermission(headersFor(head.cookie), {
-          permission: 'people.view',
-          target: { entity: 'person', id: acct.colleague!.personId },
-        }),
-      ),
+      (await requirePermission(headersFor(head.cookie), person(acct.colleague!.personId))).scope,
+    ).toBe('DEPARTMENT');
+    // … and another organization's person is not, at any scope.
+    expect(
+      await codeOf(requirePermission(headersFor(head.cookie), person(acct.foreign!.personId))),
     ).toBe('NOT_FOUND');
   });
 });

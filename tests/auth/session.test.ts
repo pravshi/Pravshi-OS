@@ -356,7 +356,7 @@ describe('the authorization boundary is unmoved', () => {
       `select p.proname, pg_get_functiondef(p.oid) src from pg_proc p
        join pg_namespace n on n.oid=p.pronamespace where n.nspname='authz'`,
     );
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(12);
     for (const r of rows) {
       // aal() reads auth.auth_users from Task 1.13 onward, and is the only helper that may:
       // it has to check a claim of aal2 against whether a second factor actually exists.

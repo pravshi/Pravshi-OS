@@ -120,6 +120,13 @@
       "when": 1758034800000,
       "tag": "0016_aal_requires_verified_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1758038400000,
+      "tag": "0017_scope_aware_rls",
+      "breakpoints": true
     }
   ]
 }
