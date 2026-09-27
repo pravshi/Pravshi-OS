@@ -111,8 +111,11 @@ export async function requestPasswordReset(
   if (!resetId) return { ok: true };
 
   const resetUrl = buildResetUrl(env.APP_URL, token);
-  // Best-effort like the invitation mailer; a false return is logged inside.
-  void sendResetEmail(cleanEmail, resetUrl);
+  // Awaited like the invitation mailer: the email is the deliverable here, and a
+  // fire-and-forget send risks the serverless function freezing before Resend is
+  // reached. A false return is logged inside sendResetEmail; the row stays the
+  // source of truth and the user can simply request again.
+  await sendResetEmail(cleanEmail, resetUrl);
 
   await recordLoginEvent({
     orgId: await resolveLoginOrg(cleanEmail),
