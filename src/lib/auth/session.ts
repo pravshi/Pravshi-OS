@@ -90,4 +90,11 @@ export async function revokeSessionsFor(authUserId: string): Promise<void> {
   await authDb.execute(sql`
     delete from auth.auth_sessions where user_id = ${authUserId}::uuid
   `);
+  // Second half of the contract in the docstring above: stamp the person so a
+  // session that somehow survives the delete (race, restore) still fails.
+  // app_user cannot UPDATE people directly (SELECT-only policy), so the stamp
+  // goes through the narrow SECURITY DEFINER function from migration 0023.
+  await authDb.execute(sql`
+    select authz.stamp_sessions_revoked(${authUserId}::uuid)
+  `);
 }

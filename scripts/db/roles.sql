@@ -75,6 +75,13 @@ begin
   execute format('grant create on database %I to app_owner', current_database());
 end $$;
 
+-- Extensions are database-level objects, so they are installed here, once, by the
+-- branch owner — not in the Drizzle migrations (app_owner must not need superuser).
+-- pgcrypto provides digest() for the SHA-256 token shadows (invitation and bootstrap
+-- setup tokens): the plaintext token never reaches the database. citext is created
+-- in migration 0002 where the first citext column appears.
+create extension if not exists pgcrypto;
+
 create schema if not exists authz authorization app_owner;
 alter schema public owner to app_owner;
 

@@ -8,7 +8,7 @@
 -- WHY SECURITY DEFINER, AND WHY IT IS SAFE
 --
 -- The pre-auth application path runs as app_user, which holds no write grant on
--- invitations, auth.users, people or person_roles, and FORCE RLS would deny the writes
+-- invitations, auth.auth_users, people or person_roles, and FORCE RLS would deny the writes
 -- anyway. These functions run as the table owner so the acceptance can happen at all.
 -- They stay safe because they are not generic: accept_invitation() only fulfills a
 -- single valid invitation for the invited person, revoke_invitation() only flips one
@@ -41,9 +41,12 @@
 -- create the engagement when the person has none (authz.is_active() requires one —
 -- without it the new login would authenticate but see no business data), grant the
 -- invitation's roles, mark the invitation used, write the audit and login events.
--- Single-use is enforced by the partial unique index on invitations (accepted_at
--- is null), re-checked inside the function under row lock: two concurrent accepts of
--- the same token cannot both succeed.
+-- Single-use is enforced in three layers, none of them a partial unique index: the
+-- row lock (SELECT ... FOR UPDATE) serializes concurrent accepts of the same token;
+-- the function then refuses any invitation whose accepted_at or revoked_at is already
+-- set; and the integrity trigger (0018) makes both columns write-once, so a consumed
+-- invitation can never be resurrected. The token_hash unique constraint guarantees
+-- one token names exactly one invitation.
 --
 -- The token NEVER reaches this function. The TypeScript route hashes the presented
 -- token and passes only the digest; a database log, a slow-query sample or an error
@@ -65,7 +68,6 @@ declare
   v_existing_person_id uuid;
   v_role_id uuid;
   v_invited_by uuid;
-  v_actor_label text;
   v_engagement_created boolean := false;
 begin
   -- Lock the invitation row first: the single-use check below must be serializable
@@ -80,18 +82,18 @@ begin
      or v_inv.revoked_at is not null
      or v_inv.expires_at <= now() then
     raise exception 'invitation invalid, expired, revoked or already used'
-      using errcode = 'P0001';
+      using errcode = '28000';
   end if;
 
   v_invited_by := v_inv.invited_by;
 
   -- The Better Auth user row. The password hash is produced by the application (scrypt
   -- via the Better Auth library); the database never sees a plaintext password.
-  insert into auth.users (id, email, email_verified, name, created_at, updated_at)
+  insert into auth.auth_users (id, email, email_verified, name, created_at, updated_at)
   values (gen_random_uuid(), v_inv.email, true, nullif(btrim(p_full_name), ''), now(), now())
   returning id into v_new_auth_user_id;
 
-  insert into auth.accounts (id, user_id, account_id, provider_id, password, created_at, updated_at)
+  insert into auth.auth_accounts (id, user_id, account_id, provider_id, password, created_at, updated_at)
   values (
     gen_random_uuid(), v_new_auth_user_id, v_inv.email, 'credential',
     p_password_hash, now(), now()
@@ -111,23 +113,29 @@ begin
 
     if not found then
       raise exception 'the person named by this invitation cannot accept it'
-        using errcode = 'P0001';
+        using errcode = '55000';
     end if;
 
     update public.people
     set auth_user_id = v_new_auth_user_id,
-        full_name = nullif(btrim(p_full_name), ''),
+        full_legal_name = nullif(btrim(p_full_name), ''),
         updated_at = now()
     where id = v_existing_person_id;
 
     v_new_person_id := v_existing_person_id;
   else
+    -- The person code comes from the same identity-code generator as every other
+    -- person row (bootstrap uses 'EMP' too): the people_code_format check rejects
+    -- anything else, and reusing the generator keeps codes unique per org and year.
     insert into public.people (
-      org_id, code, full_name, work_email, person_status, auth_user_id
+      org_id, code, full_legal_name, work_email, person_status, auth_user_id
     )
     values (
       v_inv.org_id,
-      'INV-' || substr(md5(gen_random_uuid()::text), 1, 8),
+      authz.next_identity_code(
+        v_inv.org_id, 'EMP',
+        to_char(now() at time zone (select o.timezone from public.organizations o where o.id = v_inv.org_id), 'YYYY')
+      ),
       nullif(btrim(p_full_name), ''),
       v_inv.email,
       'ACTIVE',
@@ -155,7 +163,7 @@ begin
        or v_inv.department_id is null
        or v_inv.start_date is null then
       raise exception 'this invitation carries no engagement and the person has none'
-        using errcode = 'P0001';
+        using errcode = '55000';
     end if;
 
     insert into public.engagements (
@@ -190,23 +198,46 @@ begin
     values (v_new_person_id, v_role_id, v_inv.org_id, v_invited_by);
   end loop;
 
+  -- Blueprint R21: EMPLOYEE is the baseline for every active engagement. The
+  -- invitation names the extra roles; the baseline is granted unconditionally so a
+  -- new login never lands with zero permissions. Found by seeded identity like the
+  -- bootstrap's SUPER_ADMIN grant, and required to exist — fail closed, never silent.
+  select r.id into v_role_id
+  from public.roles r
+  where r.org_id = v_inv.org_id
+    and r.key = 'EMPLOYEE'
+    and r.is_system
+    and r.status = 'ACTIVE'
+    and r.deleted_at is null;
+
+  if v_role_id is null then
+    raise exception 'accept: the organization has no active system EMPLOYEE role'
+      using errcode = '55000';
+  end if;
+
+  insert into public.person_roles (person_id, role_id, org_id, granted_by)
+  values (v_new_person_id, v_role_id, v_inv.org_id, v_invited_by)
+  on conflict do nothing;
+
   perform set_config('app.person_id', v_new_person_id::text, true);
 
   -- Mark the invitation used. The write-once trigger (0018) rejects any later attempt
-  -- to clear accepted_at, and the partial unique index kept the token single-use.
+  -- to clear accepted_at, and the row lock taken above kept a concurrent accept from
+  -- interleaving with this one.
   update public.invitations
   set accepted_at = now(),
       updated_at = now()
   where id = v_inv.id;
 
   -- Audit: who accepted what, and on whose authority the roles were granted.
-  v_actor_label := 'invitation ' || v_inv.id::text || ' accepted by ' || v_inv.email::text;
+  -- The actor's email is denormalised into actor_email_snapshot so the entry still
+  -- names them after the person record is gone; the invitation id is the entity.
   insert into public.audit_logs (
-    org_id, actor_person_id, actor_label, action, entity_type, entity_id,
+    org_id, actor_person_id, actor_email_snapshot, action, entity_type, entity_id,
     result, metadata
   )
   values (
-    v_inv.org_id, v_new_person_id, v_actor_label,
+    v_inv.org_id, v_new_person_id, v_inv.email,
     'invitation.accept', 'invitation', v_inv.id,
     'SUCCESS',
     jsonb_build_object(
@@ -266,7 +297,7 @@ begin
   if p_event_type not in (
     'LOGIN_SUCCESS', 'LOGIN_FAILURE', 'MFA_CHALLENGE', 'MFA_FAILURE',
     'PASSWORD_RESET_REQUESTED', 'PASSWORD_RESET_COMPLETED',
-    'INVITATION_ACCEPTED', 'SESSION_REVOKED'
+    'INVITATION_ACCEPTED', 'INVITATION_REJECTED', 'SESSION_REVOKED'
   ) then
     raise exception 'unknown login event type: %', p_event_type
       using errcode = 'P0001';
@@ -331,10 +362,10 @@ begin
   where id = v_inv.id;
 
   insert into public.audit_logs (
-    org_id, actor_person_id, actor_label, action, entity_type, entity_id, result, metadata
+    org_id, actor_person_id, actor_email_snapshot, action, entity_type, entity_id, result, metadata
   )
   values (
-    v_inv.org_id, v_actor, 'invitation revoked',
+    v_inv.org_id, v_actor, v_inv.email,
     'invitation.revoke', 'invitation', v_inv.id, 'SUCCESS',
     jsonb_build_object('email', v_inv.email)
   );

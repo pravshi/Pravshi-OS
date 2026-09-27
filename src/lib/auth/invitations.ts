@@ -66,16 +66,16 @@ export async function acceptInvitation(input: AcceptInvitationInput): Promise<Ac
 
   try {
     const res = await authDb.execute<{
-      linked_person_id: string;
-      linked_org_id: string;
-      linked_auth_user_id: string;
+      person_id: string;
+      auth_user_id: string;
+      org_id: string;
     }>(sql`
-      select linked_person_id, linked_org_id, linked_auth_user_id
-      from public.accept_invitation(${digest}, ${passwordHash}, ${input.fullName})
+      select person_id, auth_user_id, org_id
+      from public.accept_invitation(${digest}, ${input.fullName}, ${passwordHash})
     `);
     const row = res.rows[0];
     if (!row) throw new InvitationError('INVITATION_CANNOT_COMPLETE', 'The invitation could not be accepted.');
-    return { personId: row.linked_person_id, orgId: row.linked_org_id };
+    return { personId: row.person_id, orgId: row.org_id };
   } catch (e) {
     const code = sqlstateOf(e);
     // 28000: unknown, expired, accepted or revoked — deliberately indistinguishable.

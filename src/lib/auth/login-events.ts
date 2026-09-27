@@ -12,11 +12,25 @@ import { authDb } from '@/lib/db/auth-client';
  * missing event row.
  */
 
+/**
+ * Closed login-event vocabulary, mirroring the login_events_type_format CHECK in
+ * drizzle/0018 and the accepted list in record_login_event() in drizzle/0019.
+ *
+ * Only LOGIN_SUCCESS / LOGIN_FAILURE / MFA_CHALLENGE / MFA_FAILURE are emitted
+ * today (the login route). The rest are reserved for the flows that will emit them:
+ * the password-reset flow, the invitation decline flow (INVITATION_REJECTED — kept
+ * even though nothing emits it yet), and session revocation.
+ */
 export type LoginEventType =
   | 'LOGIN_SUCCESS'
   | 'LOGIN_FAILURE'
   | 'MFA_CHALLENGE'
-  | 'MFA_FAILURE';
+  | 'MFA_FAILURE'
+  | 'PASSWORD_RESET_REQUESTED'
+  | 'PASSWORD_RESET_COMPLETED'
+  | 'INVITATION_ACCEPTED'
+  | 'INVITATION_REJECTED'
+  | 'SESSION_REVOKED';
 
 export async function resolveLoginOrg(email: string): Promise<string | null> {
   try {
