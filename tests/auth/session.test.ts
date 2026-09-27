@@ -366,7 +366,9 @@ describe('the authorization boundary is unmoved', () => {
       consume_password_reset: ['password_resets'],
       update_credential_password: ['auth_accounts'],
       check_rate_limit: ['api_rate_limits'],
-      record_password_reset_audit: ['auth_users'],
+      // record_password_reset_audit reads auth.auth_users; 'password_reset' is the
+      // audit action name string ('auth.password_reset'), not a table reference.
+      record_password_reset_audit: ['auth_users', 'password_reset'],
     };
     for (const r of rows) {
       // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of
