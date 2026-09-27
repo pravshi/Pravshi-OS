@@ -127,6 +127,34 @@
       "when": 1758038400000,
       "tag": "0017_scope_aware_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790537221622,
+      "tag": "0018_invitations_and_login_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790537279653,
+      "tag": "0019_invitation_accept_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790537546479,
+      "tag": "0020_resolve_login_org",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790537759404,
+      "tag": "0021_set_person_roles",
+      "breakpoints": true
     }
   ]
 }

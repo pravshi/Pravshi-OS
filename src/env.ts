@@ -25,6 +25,14 @@ const runtimeSchema = z.object({
    * floor HEALTH_CHECK_TOKEN uses.
    */
   BETTER_AUTH_SECRET: z.string().min(32),
+  /**
+   * Invitation email delivery. Both optional: when either is unset, invitation emails
+   * are not sent and the create-invitation endpoint returns the token to the admin
+   * instead, so the link can be shared another way. EMAIL_FROM must be an address on
+   * a domain verified in Resend — there is no safe default to invent.
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().email().optional(),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */

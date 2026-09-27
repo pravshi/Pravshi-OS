@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  *   Server Action  the first statement of every exported function awaits requirePermission(),
  *                  and Server Actions live only in modules that start with 'use server'
  *
- * The only exceptions are the four routes below, each of which is pre-authentication or gated
+ * The only exceptions are the eight routes below, each of which is pre-authentication or gated
  * by its own credential. The list is exact: a new entry is a reviewed change to this file, there
  * is no annotation or comment that exempts a file, and a stale entry fails the build.
  *
@@ -28,6 +28,15 @@ const PRE_AUTH_ROUTES = [
   'src/app/api/auth/[...all]/route.ts',
   // Task 1.14: the one-time setup token is the credential; no session exists yet.
   'src/app/api/bootstrap/complete/route.ts',
+  // Task 1.17: the invitation token is the credential; no session exists yet. The accept
+  // page reads it from the URL fragment and posts it in the body, so it never appears
+  // in a request line or an access log.
+  'src/app/api/invitations/preview/route.ts',
+  'src/app/api/invitations/accept/route.ts',
+  // Task 1.18: these routes establish identity, so they cannot require one. They
+  // delegate to Better Auth and record every outcome as a login event.
+  'src/app/api/auth/login/route.ts',
+  'src/app/api/auth/mfa/verify/route.ts',
   // Public liveness. Touches nothing, by guard.
   'src/app/health/route.ts',
   // Database reachability for CI and humans, gated by HEALTH_CHECK_TOKEN.
@@ -210,7 +219,7 @@ describe('the analysers themselves', () => {
 
 describe('every protected entry point authorizes first', () => {
   it('keeps the pre-authentication allow-list exact, and every entry real', () => {
-    expect(PRE_AUTH_ROUTES).toHaveLength(4);
+    expect(PRE_AUTH_ROUTES).toHaveLength(8);
     for (const file of PRE_AUTH_ROUTES) expect(existsSync(file), file).toBe(true);
   });
 
