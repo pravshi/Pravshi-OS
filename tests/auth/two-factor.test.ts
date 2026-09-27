@@ -834,10 +834,26 @@ describe('the rest of the model is untouched', () => {
        join pg_namespace n on n.oid=p.pronamespace where n.nspname='authz'`,
     );
     expect(rows.length).toBe(18);
+    // Migrations 0023-0025 added narrow password-reset helpers. They are the only
+    // helpers besides aal() allowed to see the auth schema, and each may touch ONLY
+    // the tables listed here. The allow-list pins the exception so a future helper
+    // cannot silently widen it.
+    const allowedAuthTables: Record<string, string[]> = {
+      request_password_reset: ['auth_users', 'password_resets'],
+      consume_password_reset: ['password_resets'],
+      update_credential_password: ['auth_accounts'],
+      check_rate_limit: ['api_rate_limits'],
+      record_password_reset_audit: ['auth_users'],
+    };
     for (const r of rows) {
-      // aal() is the one helper this task touches, and the only one allowed to see `auth`.
+      // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of
+      // aal2 against whether a second factor actually exists.
       if (r.proname === 'aal') continue;
-      expect(r.src, `${r.proname} must not consult the auth schema`).not.toMatch(/auth\./);
+      const allowed = allowedAuthTables[r.proname] ?? [];
+      const touched = [...r.src.matchAll(/auth\.([a-z_]+)/g)].map((m) => m[1]!);
+      for (const t of touched) {
+        expect(allowed, `${r.proname} must not consult auth.${t}`).toContain(t);
+      }
     }
     expect(rows.find((r) => r.proname === 'has')!.src).toContain(
       'authz.scope_for(p_permission) is not null',
