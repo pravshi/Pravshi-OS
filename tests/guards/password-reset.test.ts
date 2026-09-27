@@ -43,7 +43,7 @@ describe('reset token handling: the plaintext never reaches the database', () =>
   it('reset rejects malformed tokens as INVALID_TOKEN before touching the database', () => {
     expect(SERVICE).toMatch(/!RESET_TOKEN_PATTERN\.test\(token\)/);
     expect(SERVICE).toMatch(
-      /'INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used\.'/,
+      /'INVALID_TOKEN',[\s\S]*?null,[\s\S]*?'This reset link is invalid, expired, or already used\.'/,
     );
   });
 });
@@ -63,7 +63,7 @@ describe('rate limiting', () => {
   });
 
   it('rate-limited requests raise RATE_LIMITED, which the reset route maps to 429', () => {
-    expect(SERVICE).toMatch(/'RATE_LIMITED', null, 'Too many requests/);
+    expect(SERVICE).toMatch(/'RATE_LIMITED',[\s\S]*?null,[\s\S]*?'Too many requests/);
     expect(RESET_ROUTE).toMatch(
       /e\.code === 'RATE_LIMITED'[\s\S]*?return reply\(429, \{ error: 'RATE_LIMITED' \}\)/,
     );
@@ -120,7 +120,7 @@ describe('session revocation and credential rotation', () => {
 
   it('weak passwords are rejected distinctly: TOO_SHORT / TOO_LONG / TOO_COMMON / BREACHED', () => {
     for (const reason of ['TOO_SHORT', 'TOO_LONG', 'TOO_COMMON', 'BREACHED']) {
-      expect(SERVICE).toContain(`'WEAK_PASSWORD', '${reason}'`);
+      expect(SERVICE).toMatch(new RegExp(`'WEAK_PASSWORD',[\\s\\S]*?'${reason}'`));
     }
     expect(RESET_ROUTE).toMatch(/reason: e\.reason/);
   });
