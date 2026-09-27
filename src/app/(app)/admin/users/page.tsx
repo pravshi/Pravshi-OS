@@ -23,6 +23,7 @@ export default async function AdminUsersPage() {
         users={data.users}
         invitations={data.invitations}
         roles={data.roles}
+        departments={data.departments}
       />
     </div>
   );

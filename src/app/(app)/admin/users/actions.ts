@@ -5,8 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/authz/require-permission';
 import { listUsers, listPendingInvitations, suspendUser, unsuspendUser } from '@/lib/admin/users';
 import { listRoles, setPersonRoles } from '@/lib/admin/roles';
+import { listDepartments } from '@/lib/admin/departments';
 import { createInvitation, revokeInvitation } from '@/lib/invitations/service';
-import { CreateInvitationSchema } from '@/lib/invitations/schema';
+import { CreateInvitationSchema, type CreateInvitationInput } from '@/lib/invitations/schema';
 import { buildInviteUrl } from '@/lib/invitations/tokens';
 import { env } from '@/env';
 
@@ -21,20 +22,18 @@ import { env } from '@/env';
 
 export async function getUsersPageData() {
   const auth = await requirePermission(await headers(), { permission: 'users.view' });
-  const [users, invitations, roles] = await Promise.all([
+  const [users, invitations, roles, departments] = await Promise.all([
     listUsers(auth),
     listPendingInvitations(auth),
     listRoles(auth),
+    // Departments the viewer may see: their own, plus every ACTIVE one when they
+    // hold users.create at GLOBAL (the invite dialog places the invitee).
+    listDepartments(auth),
   ]);
-  return { users, invitations, roles };
+  return { users, invitations, roles, departments };
 }
 
-export async function inviteUserAction(input: {
-  email: string;
-  personId?: string;
-  roleIds: string[];
-  expiresInDays?: number;
-}) {
+export async function inviteUserAction(input: CreateInvitationInput) {
   // minScope GLOBAL: the invitations RLS policies require scope_for('users.create')
   // = 'GLOBAL', so the breadth check denies cleanly here instead of failing at the
   // database later.

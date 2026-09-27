@@ -38,8 +38,10 @@
 -- ── accept_invitation ──────────────────────────────────────────────────────────
 --
 -- Fulfil a single valid invitation: create the auth user, create or link the person,
--- grant the invitation's roles, mark the invitation used, write the audit and login
--- events. Single-use is enforced by the partial unique index on invitations (accepted_at
+-- create the engagement when the person has none (authz.is_active() requires one —
+-- without it the new login would authenticate but see no business data), grant the
+-- invitation's roles, mark the invitation used, write the audit and login events.
+-- Single-use is enforced by the partial unique index on invitations (accepted_at
 -- is null), re-checked inside the function under row lock: two concurrent accepts of
 -- the same token cannot both succeed.
 --
@@ -64,6 +66,7 @@ declare
   v_role_id uuid;
   v_invited_by uuid;
   v_actor_label text;
+  v_engagement_created boolean := false;
 begin
   -- Lock the invitation row first: the single-use check below must be serializable
   -- against a concurrent accept of the same token.
@@ -133,6 +136,40 @@ begin
     returning id into v_new_person_id;
   end if;
 
+  -- Engagement. The new login is useless without one: authz.is_active() requires a
+  -- live engagement, and every business-data RLS policy builds on it. A linked
+  -- person who already holds a live engagement keeps it; otherwise the invitation's
+  -- engagement terms create one now. It is ACTIVE immediately — Phase 1 has no
+  -- onboarding workflow that could transition a PRE_ONBOARDING row, so anything less
+  -- would lock the invitee out with no path forward.
+  if not exists (
+    select 1
+    from public.engagements e
+    where e.person_id = v_new_person_id
+      and e.org_id = v_inv.org_id
+      and e.status in ('PRE_ONBOARDING', 'ONBOARDING', 'ACTIVE', 'NOTICE_PERIOD')
+      and e.is_primary
+      and e.deleted_at is null
+  ) then
+    if v_inv.engagement_type is null
+       or v_inv.department_id is null
+       or v_inv.start_date is null then
+      raise exception 'this invitation carries no engagement and the person has none'
+        using errcode = 'P0001';
+    end if;
+
+    insert into public.engagements (
+      org_id, person_id, engagement_type, status, department_id,
+      start_date, is_primary, created_by
+    )
+    values (
+      v_inv.org_id, v_new_person_id, v_inv.engagement_type, 'ACTIVE',
+      v_inv.department_id, v_inv.start_date, true, v_invited_by
+    );
+
+    v_engagement_created := true;
+  end if;
+
   -- The role grants. The actor for these inserts is the INVITER: the protected-role
   -- trigger (migration 0008) judges the grant against the inviter's live roles.manage
   -- at GLOBAL scope, which is the authorization this invitation was issued under. The
@@ -175,7 +212,8 @@ begin
     jsonb_build_object(
       'invited_by', v_invited_by,
       'roles_granted_by', v_invited_by,
-      'auth_user_id', v_new_auth_user_id
+      'auth_user_id', v_new_auth_user_id,
+      'engagement_created', v_engagement_created
     )
   );
 

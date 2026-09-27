@@ -36,20 +36,42 @@ interface Invitation {
   roles: string[];
 }
 
+interface Department {
+  id: string;
+  code: string;
+  name: string;
+  status: string;
+}
+
+const ENGAGEMENT_TYPES = [
+  'EMPLOYEE',
+  'INTERN',
+  'TRAINEE',
+  'CONTRACTOR',
+  'CONSULTANT',
+  'PART_TIME',
+  'TEMPORARY',
+] as const;
+
 /** Client interactivity for /admin/users: dialogs and confirmations. The Server
  *  Component above fetched the data; every mutation re-authorizes server-side. */
 export function UsersClient({
   users,
   invitations,
   roles,
+  departments,
 }: {
   users: User[];
   invitations: Invitation[];
   roles: Role[];
+  departments: Department[];
 }) {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRoles, setInviteRoles] = useState<string[]>([]);
+  const [inviteEngagementType, setInviteEngagementType] = useState<string>('EMPLOYEE');
+  const [inviteDepartmentId, setInviteDepartmentId] = useState('');
+  const [inviteStartDate, setInviteStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [inviteResult, setInviteResult] = useState<{ inviteUrl: string; email: string } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [invitePending, setInvitePending] = useState(false);
@@ -73,16 +95,24 @@ export function UsersClient({
       setInviteError('Choose at least one role.');
       return;
     }
+    if (!inviteDepartmentId) {
+      setInviteError('Choose the department — the invitation creates the engagement there.');
+      return;
+    }
     setInvitePending(true);
     try {
       const result = await inviteUserAction({
         email: inviteEmail.trim(),
         roleIds: inviteRoles,
         expiresInDays: 7,
+        engagementType: inviteEngagementType as (typeof ENGAGEMENT_TYPES)[number],
+        departmentId: inviteDepartmentId,
+        startDate: inviteStartDate,
       });
       setInviteResult(result);
       setInviteEmail('');
       setInviteRoles([]);
+      setInviteDepartmentId('');
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Could not create the invitation.');
     } finally {
@@ -329,6 +359,56 @@ export function UsersClient({
                       </label>
                     ))}
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-engagement">Engagement</Label>
+                  <p className="text-xs text-ink-muted">
+                    The acceptance creates this engagement — without it the new login
+                    would see no data.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      id="invite-engagement"
+                      className="rounded border border-line bg-white px-2 py-2 text-sm"
+                      value={inviteEngagementType}
+                      onChange={(e) => setInviteEngagementType(e.target.value)}
+                      disabled={invitePending}
+                    >
+                      {ENGAGEMENT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t.charAt(0) + t.slice(1).toLowerCase().replace('_', ' ')}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      type="date"
+                      aria-label="Start date"
+                      value={inviteStartDate}
+                      onChange={(e) => setInviteStartDate(e.target.value)}
+                      disabled={invitePending}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-department">Department</Label>
+                  <select
+                    id="invite-department"
+                    className="w-full rounded border border-line bg-white px-2 py-2 text-sm"
+                    value={inviteDepartmentId}
+                    onChange={(e) => setInviteDepartmentId(e.target.value)}
+                    disabled={invitePending}
+                    required
+                  >
+                    <option value="">Choose a department…</option>
+                    {departments
+                      .filter((d) => d.status === 'ACTIVE')
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                  </select>
                 </div>
                 {inviteError && (
                   <p role="alert" className="text-sm text-destructive">

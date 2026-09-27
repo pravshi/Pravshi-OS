@@ -59,6 +59,15 @@ create table public.invitations (
   accepted_at timestamptz,
   revoked_at timestamptz,
 
+  -- The engagement the acceptance creates. The invitee arrives with no engagement,
+  -- and authz.is_active() requires one — without this, a brand-new person's login
+  -- would authenticate but see no business data. Nullable: a linked person who
+  -- already holds a live engagement needs none, and the accept function ignores
+  -- these columns for them.
+  engagement_type public.engagement_type,
+  department_id uuid,
+  start_date date,
+
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
 
@@ -81,9 +90,18 @@ create table public.invitations (
     foreign key (person_id, org_id) references public.people (id, org_id),
   constraint invitations_invited_by_same_org
     foreign key (invited_by, org_id) references public.people (id, org_id),
+  -- The engagement's department must belong to the invitation's organization.
+  constraint invitations_department_same_org
+    foreign key (department_id, org_id) references public.departments (id, org_id),
   -- Supports the invitation_roles composite FK below: a roles row must point at an
   -- invitation living in the same organization as the row itself.
-  constraint invitations_id_org_unique unique (id, org_id)
+  constraint invitations_id_org_unique unique (id, org_id),
+  -- Engagement terms are all-or-nothing: a partial engagement (type but no
+  -- department) could never be created at acceptance time.
+  constraint invitations_engagement_all_or_nothing check (
+    (engagement_type is null and department_id is null and start_date is null)
+    or (engagement_type is not null and department_id is not null and start_date is not null)
+  )
 );
 
 comment on table public.invitations is
@@ -142,10 +160,13 @@ begin
      or new.token_hash is distinct from old.token_hash
      or new.person_id is distinct from old.person_id
      or new.invited_by is distinct from old.invited_by
+     or new.engagement_type is distinct from old.engagement_type
+     or new.department_id is distinct from old.department_id
+     or new.start_date is distinct from old.start_date
      or new.expires_at is distinct from old.expires_at
      or new.created_at is distinct from old.created_at then
     raise exception
-      'an invitation identifies one invitee, one token and one inviter; those columns are immutable'
+      'an invitation identifies one invitee, one token, one inviter and one engagement; those columns are immutable'
       using errcode = '23514';
   end if;
 

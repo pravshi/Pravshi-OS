@@ -24,6 +24,8 @@ export class InvitationError extends Error {
       | 'PERSON_NOT_FOUND'
       | 'PERSON_NOT_INVITABLE'
       | 'PERSON_EMAIL_MISMATCH'
+      | 'ENGAGEMENT_REQUIRED'
+      | 'DEPARTMENT_NOT_FOUND'
       | 'ROLE_NOT_FOUND'
       | 'ROLE_PROTECTED'
       | 'INVITATION_NOT_FOUND'
@@ -150,6 +152,44 @@ export async function createInvitation(
       throw new InvitationError('EMAIL_HAS_LOGIN', 'This email already has a login.');
     }
 
+    // Engagement terms. The acceptance creates an engagement when the invitee has
+    // no live one — without it the new login authenticates but sees nothing. A
+    // brand-new person never has one, so the terms are required; a linked person
+    // is checked, and the terms are required only when they lack one.
+    let needsEngagement = !input.personId;
+    if (input.personId) {
+      const eng = await tx.execute<{ id: string }>(sql`
+        select e.id from public.engagements e
+        where e.person_id = ${input.personId}::uuid
+          and e.org_id = ${ctx.orgId}::uuid
+          and e.status in ('PRE_ONBOARDING', 'ONBOARDING', 'ACTIVE', 'NOTICE_PERIOD')
+          and e.is_primary and e.deleted_at is null
+        limit 1
+      `);
+      needsEngagement = !eng.rows[0];
+    }
+    const engagementType = input.engagementType ?? null;
+    const departmentId = input.departmentId ?? null;
+    const startDate = input.startDate ?? null;
+    if (needsEngagement && (!engagementType || !departmentId || !startDate)) {
+      throw new InvitationError(
+        'ENGAGEMENT_REQUIRED',
+        'This invitee has no engagement: choose an engagement type, department and start date.',
+      );
+    }
+    if (departmentId) {
+      const dept = await tx.execute<{ id: string }>(sql`
+        select d.id from public.departments d
+        where d.id = ${departmentId}::uuid
+          and d.org_id = ${ctx.orgId}::uuid
+          and d.deleted_at is null
+        limit 1
+      `);
+      if (!dept.rows[0]) {
+        throw new InvitationError('DEPARTMENT_NOT_FOUND', 'The chosen department does not exist.');
+      }
+    }
+
     const token = generateInvitationToken();
     const tokenHash = hashInvitationToken(token);
 
@@ -165,11 +205,14 @@ export async function createInvitation(
 
     const inserted = await tx.execute<{ id: string; expires_at: Date }>(sql`
       insert into public.invitations
-        (org_id, code, email, token_hash, person_id, invited_by, expires_at)
+        (org_id, code, email, token_hash, person_id, invited_by, expires_at,
+         engagement_type, department_id, start_date)
       values
         (${ctx.orgId}::uuid, ${code}, ${input.email}::public.citext, ${tokenHash},
          ${input.personId ?? null}::uuid, ${ctx.personId}::uuid,
-         now() + make_interval(days => ${input.expiresInDays}))
+         now() + make_interval(days => ${input.expiresInDays}),
+         ${engagementType}::public.engagement_type, ${departmentId}::uuid,
+         ${startDate}::date)
       returning id, expires_at
     `);
     const invitationId = inserted.rows[0]?.id;
@@ -201,6 +244,9 @@ export async function createInvitation(
           role_count: input.roleIds.length,
           person_id: input.personId ?? null,
           expires_in_days: input.expiresInDays,
+          engagement_type: engagementType,
+          department_id: departmentId,
+          start_date: startDate,
         })}::jsonb
       )
     `);
