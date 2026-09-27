@@ -18,7 +18,10 @@ import { describe, expect, it } from 'vitest';
  * fails closed on any shape it does not recognise.
  */
 
-const MIGRATION_19 = readFileSync(join(process.cwd(), 'drizzle/0019_invitation_accept_functions.sql'), 'utf8');
+const MIGRATION_19 = readFileSync(
+  join(process.cwd(), 'drizzle/0019_invitation_accept_functions.sql'),
+  'utf8',
+);
 const CALLER = readFileSync(join(process.cwd(), 'src/lib/auth/invitations.ts'), 'utf8');
 
 describe('accept_invitation call contract', () => {
@@ -43,13 +46,19 @@ describe('accept_invitation call contract', () => {
   });
 
   it('0019: invalid/expired/used/revoked raises 28000, the code the app maps to "invalid link"', () => {
-    expect(MIGRATION_19).toMatch(/invitation invalid, expired, revoked or already used'[\s\S]*?using errcode = '28000'/);
+    expect(MIGRATION_19).toMatch(
+      /invitation invalid, expired, revoked or already used'[\s\S]*?using errcode = '28000'/,
+    );
     expect(CALLER).toMatch(/if \(code === '28000'\)/);
   });
 
   it('0019: cannot-complete states raise 55000, the code the app maps to "cannot complete"', () => {
-    expect(MIGRATION_19).toMatch(/the person named by this invitation cannot accept it'[\s\S]*?using errcode = '55000'/);
-    expect(MIGRATION_19).toMatch(/this invitation carries no engagement and the person has none'[\s\S]*?using errcode = '55000'/);
+    expect(MIGRATION_19).toMatch(
+      /the person named by this invitation cannot accept it'[\s\S]*?using errcode = '55000'/,
+    );
+    expect(MIGRATION_19).toMatch(
+      /this invitation carries no engagement and the person has none'[\s\S]*?using errcode = '55000'/,
+    );
     expect(CALLER).toMatch(/if \(code === '55000' \|\| code === '23505'\)/);
   });
 });

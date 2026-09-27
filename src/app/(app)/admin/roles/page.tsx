@@ -14,8 +14,8 @@ export default async function AdminRolesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Roles</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          What each role grants. Roles marked admin carry administrative capability and
-          can only be assigned by a global roles manager.
+          What each role grants. Roles marked admin carry administrative capability and can only be
+          assigned by a global roles manager.
         </p>
       </div>
 
@@ -35,24 +35,17 @@ export default async function AdminRolesPage() {
                 {r.holderCount} holder{r.holderCount === 1 ? '' : 's'}
               </span>
             </div>
-            {r.description && (
-              <p className="mt-1 text-sm text-ink-muted">{r.description}</p>
-            )}
+            {r.description && <p className="mt-1 text-sm text-ink-muted">{r.description}</p>}
             <div className="mt-3 flex flex-wrap gap-1">
               {r.permissions.map((p) => (
-                <span
-                  key={p}
-                  className="rounded bg-cream-dark px-1.5 py-0.5 font-mono text-xs"
-                >
+                <span key={p} className="rounded bg-cream-dark px-1.5 py-0.5 font-mono text-xs">
                   {p}
                 </span>
               ))}
             </div>
           </div>
         ))}
-        {roles.length === 0 && (
-          <p className="text-sm text-ink-muted">No roles defined.</p>
-        )}
+        {roles.length === 0 && <p className="text-sm text-ink-muted">No roles defined.</p>}
       </div>
     </div>
   );

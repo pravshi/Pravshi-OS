@@ -71,8 +71,12 @@ export function UsersClient({
   const [inviteRoles, setInviteRoles] = useState<string[]>([]);
   const [inviteEngagementType, setInviteEngagementType] = useState<string>('EMPLOYEE');
   const [inviteDepartmentId, setInviteDepartmentId] = useState('');
-  const [inviteStartDate, setInviteStartDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [inviteResult, setInviteResult] = useState<{ inviteUrl: string; email: string } | null>(null);
+  const [inviteStartDate, setInviteStartDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  const [inviteResult, setInviteResult] = useState<{ inviteUrl: string; email: string } | null>(
+    null,
+  );
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [invitePending, setInvitePending] = useState(false);
 
@@ -321,7 +325,13 @@ export function UsersClient({
                   Copy link
                 </Button>
                 <div>
-                  <Button variant="outline" onClick={() => { setShowInvite(false); refresh(); }}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowInvite(false);
+                      refresh();
+                    }}
+                  >
                     Done
                   </Button>
                 </div>
@@ -363,8 +373,8 @@ export function UsersClient({
                 <div className="space-y-2">
                   <Label htmlFor="invite-engagement">Engagement</Label>
                   <p className="text-xs text-ink-muted">
-                    The acceptance creates this engagement — without it the new login
-                    would see no data.
+                    The acceptance creates this engagement — without it the new login would see no
+                    data.
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     <select

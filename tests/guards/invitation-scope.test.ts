@@ -33,7 +33,9 @@ describe('invitation entry points require users.create at GLOBAL scope', () => {
       // object it sits in also names minScope: 'GLOBAL'.
       const specPattern = /\{\s*permission:\s*'users\.create'[^}]*\}/g;
       const specs = source.match(specPattern) ?? [];
-      expect(specs.length, `${file} should authorize users.create at least once`).toBeGreaterThan(0);
+      expect(specs.length, `${file} should authorize users.create at least once`).toBeGreaterThan(
+        0,
+      );
       for (const spec of specs) {
         expect(
           spec,

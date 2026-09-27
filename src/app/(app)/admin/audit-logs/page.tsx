@@ -83,9 +83,7 @@ export default async function AdminAuditLogsPage({
                   <td className="px-4 py-2 text-ink-muted">{e.entityType ?? '—'}</td>
                   <td className="px-4 py-2">
                     <span
-                      className={
-                        e.result === 'DENIED' ? 'text-destructive' : 'text-emerald-700'
-                      }
+                      className={e.result === 'DENIED' ? 'text-destructive' : 'text-emerald-700'}
                     >
                       {e.result}
                     </span>

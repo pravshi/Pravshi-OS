@@ -12,8 +12,8 @@ export default function AccessDeniedPage() {
     <div className="text-center">
       <h1 className="text-2xl font-semibold tracking-tight">Access denied</h1>
       <p className="mt-3 text-sm text-ink-muted">
-        You don&apos;t have access to this area. If you believe this is a mistake,
-        contact your administrator.
+        You don&apos;t have access to this area. If you believe this is a mistake, contact your
+        administrator.
       </p>
       <Link
         href="/"

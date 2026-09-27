@@ -37,7 +37,10 @@ export async function inviteUserAction(input: CreateInvitationInput) {
   // minScope GLOBAL: the invitations RLS policies require scope_for('users.create')
   // = 'GLOBAL', so the breadth check denies cleanly here instead of failing at the
   // database later.
-  const auth = await requirePermission(await headers(), { permission: 'users.create', minScope: 'GLOBAL' });
+  const auth = await requirePermission(await headers(), {
+    permission: 'users.create',
+    minScope: 'GLOBAL',
+  });
   const parsed = CreateInvitationSchema.parse(input);
   const created = await createInvitation(auth, parsed);
   revalidatePath('/admin/users');
@@ -47,7 +50,10 @@ export async function inviteUserAction(input: CreateInvitationInput) {
 }
 
 export async function revokeInvitationAction(id: string) {
-  const auth = await requirePermission(await headers(), { permission: 'users.create', minScope: 'GLOBAL' });
+  const auth = await requirePermission(await headers(), {
+    permission: 'users.create',
+    minScope: 'GLOBAL',
+  });
   await revokeInvitation(auth, id);
   revalidatePath('/admin/users');
   return { ok: true };
@@ -68,7 +74,10 @@ export async function unsuspendUserAction(personId: string) {
 }
 
 export async function setPersonRolesAction(personId: string, roleIds: string[]) {
-  const auth = await requirePermission(await headers(), { permission: 'roles.manage', minScope: 'GLOBAL' });
+  const auth = await requirePermission(await headers(), {
+    permission: 'roles.manage',
+    minScope: 'GLOBAL',
+  });
   await setPersonRoles(auth, personId, roleIds);
   revalidatePath('/admin/users');
   return { ok: true };

@@ -201,7 +201,11 @@ export async function createInvitation(
       from public.organizations o where o.id = ${ctx.orgId}::uuid
     `);
     const code = codeRow.rows[0]?.code;
-    if (!code) throw new InvitationError('INVITATION_CANNOT_COMPLETE', 'Could not issue an invitation code.');
+    if (!code)
+      throw new InvitationError(
+        'INVITATION_CANNOT_COMPLETE',
+        'Could not issue an invitation code.',
+      );
 
     const inserted = await tx.execute<{ id: string; expires_at: Date }>(sql`
       insert into public.invitations
@@ -283,7 +287,8 @@ export async function revokeInvitation(authorization: Authorization, id: string)
 function mapRevokeError(e: unknown): InvitationError {
   const code = sqlstateOf(e);
   if (code === '02000') return new InvitationError('INVITATION_NOT_FOUND', 'Invitation not found.');
-  if (code === '42501') return new InvitationError('INVITATION_INVALID', 'Not permitted to revoke invitations.');
+  if (code === '42501')
+    return new InvitationError('INVITATION_INVALID', 'Not permitted to revoke invitations.');
   if (code === '23514') {
     return new InvitationError(
       'INVITATION_ALREADY_ACCEPTED',

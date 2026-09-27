@@ -356,12 +356,29 @@ describe('the authorization boundary is unmoved', () => {
       `select p.proname, pg_get_functiondef(p.oid) src from pg_proc p
        join pg_namespace n on n.oid=p.pronamespace where n.nspname='authz'`,
     );
-    expect(rows.length).toBe(12);
+    expect(rows.length).toBe(18);
+    // Migrations 0023-0025 added narrow password-reset helpers. They are the only
+    // helpers besides aal() allowed to see the auth schema, and each may touch ONLY
+    // the tables listed here. The allow-list pins the exception so a future helper
+    // cannot silently widen it.
+    const allowedAuthTables: Record<string, string[]> = {
+      request_password_reset: ['auth_users', 'password_resets'],
+      consume_password_reset: ['password_resets'],
+      update_credential_password: ['auth_accounts'],
+      check_rate_limit: ['api_rate_limits'],
+      // record_password_reset_audit reads auth.auth_users; 'password_reset' is the
+      // audit action name string ('auth.password_reset'), not a table reference.
+      record_password_reset_audit: ['auth_users', 'password_reset'],
+    };
     for (const r of rows) {
-      // aal() reads auth.auth_users from Task 1.13 onward, and is the only helper that may:
-      // it has to check a claim of aal2 against whether a second factor actually exists.
+      // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of
+      // aal2 against whether a second factor actually exists.
       if (r.proname === 'aal') continue;
-      expect(r.src, `${r.proname} must not consult the auth schema`).not.toMatch(/auth\./);
+      const allowed = allowedAuthTables[r.proname] ?? [];
+      const touched = [...r.src.matchAll(/auth\.([a-z_]+)/g)].map((m) => m[1]!);
+      for (const t of touched) {
+        expect(allowed, `${r.proname} must not consult auth.${t}`).toContain(t);
+      }
     }
   });
 
@@ -371,7 +388,7 @@ describe('the authorization boundary is unmoved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    expect(Number(policies.rows[0]!.n)).toBe(15);
+    expect(Number(policies.rows[0]!.n)).toBe(21);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

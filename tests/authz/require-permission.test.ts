@@ -598,13 +598,15 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has twelve authz helpers, and still one app_user policy per table', async () => {
+  it('has eighteen authz helpers, and still one app_user policy per table', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
     );
     expect(helpers.rows.map((r) => r.proname)).toEqual([
       'aal',
+      'check_rate_limit',
+      'consume_password_reset',
       'has',
       'has_record_grant',
       'in_my_departments',
@@ -614,14 +616,18 @@ describe('the rest of the authorization model is unchanged', () => {
       'next_identity_code',
       'org_id',
       'person_id',
+      'record_password_reset_audit',
       'reports_to_me',
+      'request_password_reset',
       'scope_for',
+      'stamp_sessions_revoked',
+      'update_credential_password',
     ]);
     const policies = await owner.query<{ n: number }>(
       `select count(*)::int n from pg_policies
        where schemaname = 'public' and 'app_user' = any(roles) and tablename not like '\\_%'`,
     );
-    expect(policies.rows[0]!.n).toBe(15);
+    expect(policies.rows[0]!.n).toBe(21);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

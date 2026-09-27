@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
-import {
-  clientIp,
-  recordLoginEvent,
-  resolveLoginOrg,
-} from '@/lib/auth/login-events';
+import { clientIp, recordLoginEvent, resolveLoginOrg } from '@/lib/auth/login-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,7 +80,12 @@ export async function POST(req: Request) {
   } catch {
     // The library throws rather than returning a response for some failures.
     await recordLoginEvent({
-      orgId, eventType: 'LOGIN_FAILURE', email: body.email, authUserId: null, ip, userAgent,
+      orgId,
+      eventType: 'LOGIN_FAILURE',
+      email: body.email,
+      authUserId: null,
+      ip,
+      userAgent,
     });
     return reply(401, { error: 'INVALID_CREDENTIALS' });
   }
@@ -105,23 +106,36 @@ export async function POST(req: Request) {
   if (!res.ok || !data) {
     // Deliberately generic: unknown email and wrong password answer the same.
     await recordLoginEvent({
-      orgId, eventType: 'LOGIN_FAILURE', email: body.email, authUserId: null, ip, userAgent,
+      orgId,
+      eventType: 'LOGIN_FAILURE',
+      email: body.email,
+      authUserId: null,
+      ip,
+      userAgent,
     });
     return reply(401, { error: 'INVALID_CREDENTIALS' });
   }
 
   if (data.twoFactorRedirect === true) {
     await recordLoginEvent({
-      orgId, eventType: 'MFA_CHALLENGE', email: body.email,
-      authUserId: data.user?.id ?? null, ip, userAgent,
+      orgId,
+      eventType: 'MFA_CHALLENGE',
+      email: body.email,
+      authUserId: data.user?.id ?? null,
+      ip,
+      userAgent,
       metadata: { twoFactorMethods: true },
     });
     return forward(res, JSON.stringify({ twoFactorRedirect: true }));
   }
 
   await recordLoginEvent({
-    orgId, eventType: 'LOGIN_SUCCESS', email: body.email,
-    authUserId: data.user?.id ?? null, ip, userAgent,
+    orgId,
+    eventType: 'LOGIN_SUCCESS',
+    email: body.email,
+    authUserId: data.user?.id ?? null,
+    ip,
+    userAgent,
   });
   return forward(res, bodyText);
 }

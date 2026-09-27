@@ -17,7 +17,7 @@ export type AdminUser = {
   hasLogin: boolean;
   suspended: boolean;
   roles: string[];
-}
+};
 
 export async function listUsers(auth: Authorization): Promise<AdminUser[]> {
   return withAuthorizedDb(auth.ctx, async (tx) => {
@@ -55,7 +55,7 @@ export type PendingInvitation = {
   createdAt: Date;
   inviterName: string | null;
   roles: string[];
-}
+};
 
 export async function listPendingInvitations(auth: Authorization): Promise<PendingInvitation[]> {
   return withAuthorizedDb(auth.ctx, async (tx) => {

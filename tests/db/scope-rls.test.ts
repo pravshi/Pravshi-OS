@@ -836,7 +836,7 @@ describe('the authorization model around these policies', () => {
     expect(names).toContain('reports_to_me');
     expect(names).toContain('in_my_departments');
     expect(names, 'PROJECT scope is Phase 4').not.toContain('is_project_member');
-    expect(names.length).toBe(12);
+    expect(names.length).toBe(18);
   });
 
   it('leaves internships SELF-scoped, because no catalogue key gates it', async () => {

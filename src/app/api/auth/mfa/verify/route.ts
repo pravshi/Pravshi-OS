@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
-import {
-  clientIp,
-  recordLoginEvent,
-  resolveLoginOrg,
-} from '@/lib/auth/login-events';
+import { clientIp, recordLoginEvent, resolveLoginOrg } from '@/lib/auth/login-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,8 +82,12 @@ export async function POST(req: Request) {
   } catch {
     const orgId = body.email ? await resolveLoginOrg(body.email) : null;
     await recordLoginEvent({
-      orgId, eventType: 'MFA_FAILURE', email: body.email ?? null,
-      authUserId: null, ip, userAgent,
+      orgId,
+      eventType: 'MFA_FAILURE',
+      email: body.email ?? null,
+      authUserId: null,
+      ip,
+      userAgent,
     });
     return reply(401, { error: 'INVALID_CODE' });
   }
@@ -107,8 +107,12 @@ export async function POST(req: Request) {
   if (!res.ok || !data?.user?.id) {
     const orgId = body.email ? await resolveLoginOrg(body.email) : null;
     await recordLoginEvent({
-      orgId, eventType: 'MFA_FAILURE', email: body.email ?? null,
-      authUserId: null, ip, userAgent,
+      orgId,
+      eventType: 'MFA_FAILURE',
+      email: body.email ?? null,
+      authUserId: null,
+      ip,
+      userAgent,
     });
     return reply(401, { error: 'INVALID_CODE' });
   }
@@ -116,8 +120,13 @@ export async function POST(req: Request) {
   const verifiedEmail = data.user.email ?? body.email ?? null;
   const orgId = verifiedEmail ? await resolveLoginOrg(verifiedEmail) : null;
   await recordLoginEvent({
-    orgId, eventType: 'LOGIN_SUCCESS', email: verifiedEmail,
-    authUserId: data.user.id, ip, userAgent, metadata: { via: 'mfa' },
+    orgId,
+    eventType: 'LOGIN_SUCCESS',
+    email: verifiedEmail,
+    authUserId: data.user.id,
+    ip,
+    userAgent,
+    metadata: { via: 'mfa' },
   });
   return forward(res, bodyText);
 }

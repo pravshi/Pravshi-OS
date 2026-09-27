@@ -913,6 +913,8 @@ describe('the rest of the authorization model is untouched', () => {
     const names = rows.map((r) => r.proname);
     expect(names).toEqual([
       'aal',
+      'check_rate_limit',
+      'consume_password_reset',
       'has',
       'has_record_grant',
       'in_my_departments',
@@ -922,8 +924,12 @@ describe('the rest of the authorization model is untouched', () => {
       'next_identity_code',
       'org_id',
       'person_id',
+      'record_password_reset_audit',
       'reports_to_me',
+      'request_password_reset',
       'scope_for',
+      'stamp_sessions_revoked',
+      'update_credential_password',
     ]);
     for (const deferred of ['is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
@@ -947,9 +953,10 @@ describe('the rest of the authorization model is untouched', () => {
     );
     // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10, and Task
     // 1.16 replaced people, engagements and engagement_events in place: still one policy per
-    // table, now four branching on scope. record_grants itself stays SELF-scoped.
-    expect(Number(policies.rows[0]!.n)).toBe(15);
-    expect(Number(policies.rows[0]!.with_scope)).toBe(4);
+    // table. Four more scope-driven policies arrived with the invitation flow
+    // (0018/0022). record_grants itself stays SELF-scoped.
+    expect(Number(policies.rows[0]!.n)).toBe(21);
+    expect(Number(policies.rows[0]!.with_scope)).toBe(8);
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
