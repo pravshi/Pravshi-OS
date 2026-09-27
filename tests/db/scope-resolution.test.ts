@@ -880,7 +880,7 @@ describe('RLS', () => {
     expect(rows).toEqual([]);
   });
 
-  it('keeps one app_user policy per table, four of them scope-driven', async () => {
+  it('keeps one app_user policy per table, eight of them scope-driven', async () => {
     // Scope resolution arrived in Task 1.8; Task 1.16 gave people, engagements and
     // engagement_events the database.md 4.2 template, replacing their SELF policies in place.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
@@ -892,9 +892,11 @@ describe('RLS', () => {
     // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7, record_grants from
     // Task 1.9, and audit_logs from Task 1.10.
     expect(Number(rows[0]!.n)).toBe(21);
-    // Four branch on scope_for: audit_logs from Task 1.10, and people, engagements and
-    // engagement_events from Task 1.16. The rest stay relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(4);
+    // Eight branch on scope_for: audit_logs from Task 1.10; people, engagements and
+    // engagement_events from Task 1.16; invitations, invitation_roles, login_events
+    // and departments (inviter view) from the invitation flow. The rest stay
+    // relationship-scoped.
+    expect(Number(rows[0]!.with_scope)).toBe(8);
   });
 });
 

@@ -908,8 +908,10 @@ describe('the rest of the model is untouched', () => {
     );
     // Fourteen through Task 1.9, plus audit_logs — the first one driven by a permission.
     // Task 1.16 replaced three more in place, so the count holds and four branch on scope.
+    // Migrations 0018/0022 added four more scope-driven policies for the invitation
+    // flow (invitations, invitation_roles, login_events, departments inviter view).
     expect(Number(rows[0]!.n)).toBe(21);
-    expect(Number(rows[0]!.with_scope)).toBe(4);
+    expect(Number(rows[0]!.with_scope)).toBe(8);
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {
@@ -929,6 +931,8 @@ describe('the rest of the model is untouched', () => {
     );
     expect(rows.map((r) => r.proname)).toEqual([
       'aal',
+      'check_rate_limit',
+      'consume_password_reset',
       'has',
       'has_record_grant',
       'in_my_departments',
@@ -938,8 +942,12 @@ describe('the rest of the model is untouched', () => {
       'next_identity_code',
       'org_id',
       'person_id',
+      'record_password_reset_audit',
       'reports_to_me',
+      'request_password_reset',
       'scope_for',
+      'stamp_sessions_revoked',
+      'update_credential_password',
     ]);
   });
 

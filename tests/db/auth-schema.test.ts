@@ -25,6 +25,12 @@ const AUTH_TABLES = [
   'auth_verifications',
 ] as const;
 
+// App-managed tables in the auth schema (migration 0024). These are NOT Better Auth
+// tables: Better Auth never touches them. They are reached exclusively through narrow
+// SECURITY DEFINER functions, so unlike the Better Auth tables they carry FORCE RLS
+// with an owner-only policy.
+const APP_AUTH_TABLES = ['api_rate_limits', 'password_resets'] as const;
+
 let orgA = '';
 let deptA = '';
 
@@ -90,11 +96,11 @@ describe('the auth schema', () => {
     expect(rows[0]!.owner).toBe('app_owner');
   });
 
-  it('holds exactly the Better Auth tables and nothing else', async () => {
+  it('holds exactly the Better Auth tables plus the two app-managed auth tables', async () => {
     const { rows } = await owner.query<{ tablename: string }>(
       `select tablename from pg_tables where schemaname='auth' order by tablename`,
     );
-    expect(rows.map((r) => r.tablename)).toEqual([...AUTH_TABLES]);
+    expect(rows.map((r) => r.tablename)).toEqual([...AUTH_TABLES, ...APP_AUTH_TABLES].sort());
   });
 
   it('puts none of them in public, so the RLS guard keeps its promise', async () => {
@@ -118,7 +124,9 @@ describe('the auth schema', () => {
       `select table_name, data_type from information_schema.columns
        where table_schema='auth' and column_name='id' order by table_name`,
     );
-    expect(rows.length).toBe(AUTH_TABLES.length);
+    expect(rows.length).toBe(AUTH_TABLES.length + 1);
+    // +1 is password_resets (uuid PK). api_rate_limits is keyed by its text
+    // lookup key and has no id column, so it is absent from this result.
     for (const r of rows) expect(r.data_type, r.table_name).toBe('uuid');
 
     const personCol = await owner.query<{ data_type: string }>(
@@ -203,15 +211,26 @@ describe('privilege posture', () => {
     await expect(asUser.query(`delete from auth.auth_users`)).rejects.toThrow(/permission denied/i);
   });
 
-  it('does not enable RLS here, and says so rather than leaving it ambiguous', async () => {
-    const { rows } = await owner.query<{ relname: string; rls: boolean }>(
-      `select c.relname, c.relrowsecurity rls from pg_class c
+  it('does not enable RLS on Better Auth tables, and says so rather than leaving it ambiguous', async () => {
+    const { rows } = await owner.query<{ relname: string; rls: boolean; forced: boolean }>(
+      `select c.relname, c.relrowsecurity rls, c.relforcerowsecurity forced from pg_class c
        join pg_namespace n on n.oid=c.relnamespace
        where n.nspname='auth' and c.relkind='r'`,
     );
     // Deliberate: the auth server is the only reader and must see the rows it owns. The
     // boundary is the schema and the enumerated grants, documented in 0013.
-    for (const r of rows) expect(r.rls, r.relname).toBe(false);
+    for (const r of rows) {
+      if ((APP_AUTH_TABLES as readonly string[]).includes(r.relname)) {
+        // The two app-managed tables are the deliberate exception: Better Auth never
+        // touches them, they are reached only through narrow SECURITY DEFINER
+        // functions, and the owner-only policy keeps app_owner working. FORCE RLS
+        // here is defense in depth, not ambiguity.
+        expect(r.rls, r.relname).toBe(true);
+        expect(r.forced, r.relname).toBe(true);
+        continue;
+      }
+      expect(r.rls, r.relname).toBe(false);
+    }
 
     const comment = await owner.query<{ c: string }>(
       `select obj_description(oid, 'pg_namespace') c from pg_namespace where nspname='auth'`,
