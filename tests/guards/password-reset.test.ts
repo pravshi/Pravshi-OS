@@ -42,14 +42,18 @@ describe('reset token handling: the plaintext never reaches the database', () =>
 
   it('reset rejects malformed tokens as INVALID_TOKEN before touching the database', () => {
     expect(SERVICE).toMatch(/!RESET_TOKEN_PATTERN\.test\(token\)/);
-    expect(SERVICE).toMatch(/'INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used\.'/);
+    expect(SERVICE).toMatch(
+      /'INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used\.'/,
+    );
   });
 });
 
 describe('rate limiting', () => {
   it('request path checks pwreset:req:{ip} at 5 per 60s via check_rate_limit', () => {
     expect(SERVICE).toMatch(/pwreset:req:/);
-    expect(SERVICE).toMatch(/authz\.check_rate_limit\(\$\{key\}, \$\{RATE_LIMIT_MAX\}, \$\{RATE_LIMIT_WINDOW_SECONDS\}\)/);
+    expect(SERVICE).toMatch(
+      /authz\.check_rate_limit\(\$\{key\}, \$\{RATE_LIMIT_MAX\}, \$\{RATE_LIMIT_WINDOW_SECONDS\}\)/,
+    );
     expect(SERVICE).toMatch(/RATE_LIMIT_MAX = 5/);
     expect(SERVICE).toMatch(/RATE_LIMIT_WINDOW_SECONDS = 60/);
   });
@@ -60,11 +64,15 @@ describe('rate limiting', () => {
 
   it('rate-limited requests raise RATE_LIMITED, which the reset route maps to 429', () => {
     expect(SERVICE).toMatch(/'RATE_LIMITED', null, 'Too many requests/);
-    expect(RESET_ROUTE).toMatch(/e\.code === 'RATE_LIMITED'[\s\S]*?return reply\(429, \{ error: 'RATE_LIMITED' \}\)/);
+    expect(RESET_ROUTE).toMatch(
+      /e\.code === 'RATE_LIMITED'[\s\S]*?return reply\(429, \{ error: 'RATE_LIMITED' \}\)/,
+    );
   });
 
   it('the forgot route answers 200 { ok: true } even when rate-limited — no oracle', () => {
-    expect(FORGOT_ROUTE).toMatch(/PasswordResetError && e\.code === 'RATE_LIMITED'[\s\S]*?return reply\(200, \{ ok: true \}\)/);
+    expect(FORGOT_ROUTE).toMatch(
+      /PasswordResetError && e\.code === 'RATE_LIMITED'[\s\S]*?return reply\(200, \{ ok: true \}\)/,
+    );
   });
 });
 
@@ -104,7 +112,9 @@ describe('session revocation and credential rotation', () => {
   });
 
   it('password policy comes from better-auth config, never invented', () => {
-    expect(SERVICE).toMatch(/const \{ minPasswordLength, maxPasswordLength \} = context\.password\.config;/);
+    expect(SERVICE).toMatch(
+      /const \{ minPasswordLength, maxPasswordLength \} = context\.password\.config;/,
+    );
     expect(SERVICE).not.toMatch(/password\.length < 12[^}]/);
   });
 
@@ -134,7 +144,9 @@ describe('session revocation and credential rotation', () => {
 describe('audit entry', () => {
   it('0025: record_password_reset_audit is SECURITY DEFINER, granted to app_user only', () => {
     expect(MIGRATION_25).toMatch(/security definer/);
-    expect(MIGRATION_25).toMatch(/grant execute on function authz\.record_password_reset_audit\(uuid, inet, text\) to app_user/);
+    expect(MIGRATION_25).toMatch(
+      /grant execute on function authz\.record_password_reset_audit\(uuid, inet, text\) to app_user/,
+    );
     expect(MIGRATION_25).toMatch(/'auth\.password_reset'/);
   });
 

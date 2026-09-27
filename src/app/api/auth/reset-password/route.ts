@@ -61,7 +61,8 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof PasswordResetError) {
       if (e.code === 'RATE_LIMITED') return reply(429, { error: 'RATE_LIMITED' });
-      if (e.code === 'INVALID_TOKEN') return reply(400, { error: 'INVALID_TOKEN', message: e.message });
+      if (e.code === 'INVALID_TOKEN')
+        return reply(400, { error: 'INVALID_TOKEN', message: e.message });
       if (e.code === 'WEAK_PASSWORD') {
         return reply(400, { error: 'WEAK_PASSWORD', reason: e.reason, message: e.message });
       }

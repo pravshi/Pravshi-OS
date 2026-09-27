@@ -40,8 +40,8 @@ export default function ForgotPasswordPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Check your inbox</h1>
         <p className="mt-2 text-sm text-ink-muted">
-          If an account exists for that email, a single-use reset link is on its way.
-          It expires in one hour.
+          If an account exists for that email, a single-use reset link is on its way. It expires in
+          one hour.
         </p>
         <p className="mt-6 text-sm">
           <Link href="/login" className="underline underline-offset-4">

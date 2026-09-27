@@ -72,7 +72,9 @@ function ResetPasswordForm() {
         if (data?.error === 'WEAK_PASSWORD' && data.reason && REASON_TEXT[data.reason]) {
           setError(REASON_TEXT[data.reason]);
         } else if (data?.error === 'INVALID_TOKEN') {
-          setError('This reset link is invalid, expired, or already used. Please request a new one.');
+          setError(
+            'This reset link is invalid, expired, or already used. Please request a new one.',
+          );
         } else if (data?.error === 'RATE_LIMITED') {
           setError('Too many attempts. Please wait a minute and try again.');
         } else {

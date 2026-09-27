@@ -77,7 +77,10 @@ async function underRateLimit(key: string): Promise<boolean> {
  * login is never revealed, and the login event is emitted only server-side when a
  * login actually exists, so the response carries no enumeration signal at all.
  */
-export async function requestPasswordReset(email: string, ip: string | null): Promise<{ ok: true }> {
+export async function requestPasswordReset(
+  email: string,
+  ip: string | null,
+): Promise<{ ok: true }> {
   const parsed = EmailSchema.safeParse(email);
   if (!parsed.success) {
     // Malformed input answers the same generic success: even the shape of the
@@ -88,7 +91,11 @@ export async function requestPasswordReset(email: string, ip: string | null): Pr
   const cleanEmail = parsed.data;
 
   if (!(await underRateLimit(`pwreset:req:${ip ?? 'unknown'}`))) {
-    throw new PasswordResetError('RATE_LIMITED', null, 'Too many requests. Please try again later.');
+    throw new PasswordResetError(
+      'RATE_LIMITED',
+      null,
+      'Too many requests. Please try again later.',
+    );
   }
 
   const token = generateResetToken();
@@ -130,28 +137,52 @@ export async function resetPassword(
   ip: string | null,
 ): Promise<{ ok: true }> {
   if (!(await underRateLimit(`pwreset:complete:${ip ?? 'unknown'}`))) {
-    throw new PasswordResetError('RATE_LIMITED', null, 'Too many requests. Please try again later.');
+    throw new PasswordResetError(
+      'RATE_LIMITED',
+      null,
+      'Too many requests. Please try again later.',
+    );
   }
 
   if (typeof token !== 'string' || !RESET_TOKEN_PATTERN.test(token)) {
-    throw new PasswordResetError('INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used.');
+    throw new PasswordResetError(
+      'INVALID_TOKEN',
+      null,
+      'This reset link is invalid, expired, or already used.',
+    );
   }
 
   const context = await auth.$context;
   const { minPasswordLength, maxPasswordLength } = context.password.config;
   if (password.length < minPasswordLength) {
-    throw new PasswordResetError('WEAK_PASSWORD', 'TOO_SHORT', `Password must be at least ${minPasswordLength} characters.`);
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_SHORT',
+      `Password must be at least ${minPasswordLength} characters.`,
+    );
   }
   if (password.length > maxPasswordLength) {
-    throw new PasswordResetError('WEAK_PASSWORD', 'TOO_LONG', `Password must be at most ${maxPasswordLength} characters.`);
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_LONG',
+      `Password must be at most ${maxPasswordLength} characters.`,
+    );
   }
   if (isCommonPassword(password)) {
-    throw new PasswordResetError('WEAK_PASSWORD', 'TOO_COMMON', 'That password is too common. Choose a less predictable one.');
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_COMMON',
+      'That password is too common. Choose a less predictable one.',
+    );
   }
   // The expensive hash is computed only after every cheap check passed, so
   // unauthenticated callers cannot use this endpoint as a CPU sink.
   if (await isBreachedPassword(password)) {
-    throw new PasswordResetError('WEAK_PASSWORD', 'BREACHED', 'That password has appeared in a data breach. Choose a different one.');
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'BREACHED',
+      'That password has appeared in a data breach. Choose a different one.',
+    );
   }
 
   const digest = hashResetToken(token);
@@ -162,12 +193,21 @@ export async function resetPassword(
       select authz.consume_password_reset(${digest}) as auth_user_id
     `);
     const row = res.rows[0];
-    if (!row) throw new PasswordResetError('INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used.');
+    if (!row)
+      throw new PasswordResetError(
+        'INVALID_TOKEN',
+        null,
+        'This reset link is invalid, expired, or already used.',
+      );
     authUserId = row.auth_user_id;
   } catch (e) {
     // 28000: unknown, expired or already-used token — deliberately indistinguishable.
     if (sqlstateOf(e) === '28000') {
-      throw new PasswordResetError('INVALID_TOKEN', null, 'This reset link is invalid, expired, or already used.');
+      throw new PasswordResetError(
+        'INVALID_TOKEN',
+        null,
+        'This reset link is invalid, expired, or already used.',
+      );
     }
     throw e instanceof Error ? e : new Error(String(e));
   }
@@ -180,7 +220,11 @@ export async function resetPassword(
   } catch (e) {
     // 55000: the login has no credential account — fail closed, never create one.
     if (sqlstateOf(e) === '55000') {
-      throw new PasswordResetError('RESET_CANNOT_COMPLETE', null, 'This account cannot reset its password this way.');
+      throw new PasswordResetError(
+        'RESET_CANNOT_COMPLETE',
+        null,
+        'This account cannot reset its password this way.',
+      );
     }
     throw e instanceof Error ? e : new Error(String(e));
   }
