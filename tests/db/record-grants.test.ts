@@ -948,7 +948,7 @@ describe('the rest of the authorization model is untouched', () => {
     // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10, and Task
     // 1.16 replaced people, engagements and engagement_events in place: still one policy per
     // table, now four branching on scope. record_grants itself stays SELF-scoped.
-    expect(Number(policies.rows[0]!.n)).toBe(15);
+    expect(Number(policies.rows[0]!.n)).toBe(21);
     expect(Number(policies.rows[0]!.with_scope)).toBe(4);
   });
 

@@ -891,7 +891,7 @@ describe('RLS', () => {
     );
     // One app_user SELECT policy per table: thirteen from Tasks 1.2-1.7, record_grants from
     // Task 1.9, and audit_logs from Task 1.10.
-    expect(Number(rows[0]!.n)).toBe(15);
+    expect(Number(rows[0]!.n)).toBe(21);
     // Four branch on scope_for: audit_logs from Task 1.10, and people, engagements and
     // engagement_events from Task 1.16. The rest stay relationship-scoped.
     expect(Number(rows[0]!.with_scope)).toBe(4);

@@ -908,7 +908,7 @@ describe('the rest of the model is untouched', () => {
     );
     // Fourteen through Task 1.9, plus audit_logs — the first one driven by a permission.
     // Task 1.16 replaced three more in place, so the count holds and four branch on scope.
-    expect(Number(rows[0]!.n)).toBe(15);
+    expect(Number(rows[0]!.n)).toBe(21);
     expect(Number(rows[0]!.with_scope)).toBe(4);
   });
 

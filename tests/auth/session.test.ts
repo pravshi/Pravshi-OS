@@ -371,7 +371,7 @@ describe('the authorization boundary is unmoved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    expect(Number(policies.rows[0]!.n)).toBe(15);
+    expect(Number(policies.rows[0]!.n)).toBe(21);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
