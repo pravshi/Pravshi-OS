@@ -80,7 +80,10 @@ create table public.invitations (
   constraint invitations_person_same_org
     foreign key (person_id, org_id) references public.people (id, org_id),
   constraint invitations_invited_by_same_org
-    foreign key (invited_by, org_id) references public.people (id, org_id)
+    foreign key (invited_by, org_id) references public.people (id, org_id),
+  -- Supports the invitation_roles composite FK below: a roles row must point at an
+  -- invitation living in the same organization as the row itself.
+  constraint invitations_id_org_unique unique (id, org_id)
 );
 
 comment on table public.invitations is
@@ -92,8 +95,8 @@ comment on column public.invitations.token_hash is
 
 create index invitations_org_idx on public.invitations (org_id);
 create index invitations_email_idx on public.invitations (email);
--- The accept flow's lookup: hash the presented token, probe this index.
-create unique index invitations_token_hash_idx on public.invitations (token_hash);
+-- The accept flow's lookup — hash the presented token, probe the unique index backing
+-- the invitations_token_hash_unique constraint above.
 
 create trigger invitations_set_updated_at
   before update on public.invitations
@@ -179,11 +182,17 @@ revoke all on function public.enforce_invitation_integrity() from public;
 -- than silently at accept time.
 
 create table public.invitation_roles (
-  invitation_id uuid not null references public.invitations (id) on delete cascade,
+  invitation_id uuid not null,
   role_id uuid not null,
   org_id uuid not null references public.organizations (id),
 
   constraint invitation_roles_pkey primary key (invitation_id, role_id),
+  -- The invitation itself must live in the same organization as this row: without
+  -- this, a row could pair an invitation from org A with org B's roles, and the
+  -- role-side composite FK alone would not catch it.
+  constraint invitation_roles_invitation_same_org
+    foreign key (invitation_id, org_id) references public.invitations (id, org_id)
+    on delete cascade,
   -- The Task 1.4 composite-key strategy again: the role must belong to the same
   -- organization as the invitation, so an invite cannot smuggle in a foreign role.
   constraint invitation_roles_role_same_org

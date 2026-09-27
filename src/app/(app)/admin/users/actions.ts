@@ -35,7 +35,10 @@ export async function inviteUserAction(input: {
   roleIds: string[];
   expiresInDays?: number;
 }) {
-  const auth = await requirePermission(await headers(), { permission: 'users.create' });
+  // minScope GLOBAL: the invitations RLS policies require scope_for('users.create')
+  // = 'GLOBAL', so the breadth check denies cleanly here instead of failing at the
+  // database later.
+  const auth = await requirePermission(await headers(), { permission: 'users.create', minScope: 'GLOBAL' });
   const parsed = CreateInvitationSchema.parse(input);
   const created = await createInvitation(auth, parsed);
   revalidatePath('/admin/users');
@@ -45,7 +48,7 @@ export async function inviteUserAction(input: {
 }
 
 export async function revokeInvitationAction(id: string) {
-  const auth = await requirePermission(await headers(), { permission: 'users.create' });
+  const auth = await requirePermission(await headers(), { permission: 'users.create', minScope: 'GLOBAL' });
   await revokeInvitation(auth, id);
   revalidatePath('/admin/users');
   return { ok: true };

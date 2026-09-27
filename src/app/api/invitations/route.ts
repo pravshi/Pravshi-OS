@@ -19,7 +19,10 @@ export const dynamic = 'force-dynamic';
  * so a failed or unconfigured email never strands an invitation.
  */
 export const POST = withPermission(
-  { permission: 'users.create' },
+  // GLOBAL, matching the database: the invitations RLS policies require
+  // scope_for('users.create') = 'GLOBAL', so the denial happens here cleanly
+  // instead of as a database error later.
+  { permission: 'users.create', minScope: 'GLOBAL' },
   async (request, authorization) => {
     let input: CreateInvitationInput;
     try {

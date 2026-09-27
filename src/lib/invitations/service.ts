@@ -23,6 +23,7 @@ export class InvitationError extends Error {
       | 'INVITATION_ALREADY_LIVE'
       | 'PERSON_NOT_FOUND'
       | 'PERSON_NOT_INVITABLE'
+      | 'PERSON_EMAIL_MISMATCH'
       | 'ROLE_NOT_FOUND'
       | 'ROLE_PROTECTED'
       | 'INVITATION_NOT_FOUND'
@@ -96,8 +97,9 @@ export async function createInvitation(
       const person = await tx.execute<{
         person_status: string;
         auth_user_id: string | null;
+        work_email: string;
       }>(sql`
-        select person_status, auth_user_id from public.people
+        select person_status, auth_user_id, work_email from public.people
         where id = ${input.personId}::uuid and org_id = ${ctx.orgId}::uuid
       `);
       const row = person.rows[0];
@@ -106,6 +108,15 @@ export async function createInvitation(
         throw new InvitationError(
           'PERSON_NOT_INVITABLE',
           'Only an active person without a login can be invited.',
+        );
+      }
+      // The invitation email becomes the login email; it must be the person's work
+      // email, or login-time email resolution (resolve_login_org) and the person's
+      // own address would disagree about who this account belongs to.
+      if (row.work_email.toLowerCase() !== input.email.toLowerCase()) {
+        throw new InvitationError(
+          'PERSON_EMAIL_MISMATCH',
+          'The invitation email must match the linked person\u2019s work email.',
         );
       }
     }
@@ -173,6 +184,26 @@ export async function createInvitation(
         values (${invitationId}::uuid, ${roleId}::uuid, ${ctx.orgId}::uuid)
       `);
     }
+
+    // Audit the issuance in the same transaction: accept and revoke already write
+    // their events, and an issuance with no audit entry would leave a gap between
+    // them. Same-transaction (not the audit module's own-transaction writer) so a
+    // rolled-back invitation cannot leave a phantom "created" entry behind.
+    await tx.execute(sql`
+      select public.write_audit_log(
+        p_action := 'invitation.create',
+        p_entity_type := 'invitation',
+        p_result := 'SUCCESS',
+        p_entity_id := ${invitationId}::uuid,
+        p_severity := 'MEDIUM',
+        p_metadata := ${JSON.stringify({
+          email: input.email,
+          role_count: input.roleIds.length,
+          person_id: input.personId ?? null,
+          expires_in_days: input.expiresInDays,
+        })}::jsonb
+      )
+    `);
 
     const meta = await tx.execute<{ inviter_name: string; org_name: string }>(sql`
       select

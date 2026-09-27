@@ -10,7 +10,9 @@ export const dynamic = 'force-dynamic';
  * login exists now, and ending it is users.suspend.
  */
 export const POST = withPermission(
-  { permission: 'users.create' },
+  // GLOBAL, matching the database: revoke_invitation runs as the inviter's
+  // organization and the invitations policies require users.create at GLOBAL.
+  { permission: 'users.create', minScope: 'GLOBAL' },
   async (_request, authorization, params) => {
     const parsed = RevokeInvitationSchema.safeParse({ id: params.id });
     if (!parsed.success) {
