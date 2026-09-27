@@ -17,7 +17,7 @@ export type RoleWithPermissions = {
   isProtected: boolean;
   permissions: string[];
   holderCount: number;
-}
+};
 
 export async function listRoles(auth: Authorization): Promise<RoleWithPermissions[]> {
   return withAuthorizedDb(auth.ctx, async (tx) => {

@@ -11,7 +11,7 @@ export type Department = {
   parentId: string | null;
   status: string;
   memberCount: number;
-}
+};
 
 export async function listDepartments(auth: Authorization): Promise<Department[]> {
   return withAuthorizedDb(auth.ctx, async (tx) => {

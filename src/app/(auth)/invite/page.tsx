@@ -108,8 +108,8 @@ export default function InvitePage() {
       <div className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Invitation not found</h1>
         <p className="mt-3 text-sm text-ink-muted">
-          This invitation link is invalid, expired, or already used. Ask your
-          administrator to send a new one.
+          This invitation link is invalid, expired, or already used. Ask your administrator to send
+          a new one.
         </p>
       </div>
     );

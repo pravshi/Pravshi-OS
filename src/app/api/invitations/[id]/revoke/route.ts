@@ -24,10 +24,7 @@ export const POST = withPermission(
 
     try {
       await revokeInvitation(authorization, parsed.data.id);
-      return Response.json(
-        { status: 'REVOKED' },
-        { headers: { 'Cache-Control': 'no-store' } },
-      );
+      return Response.json({ status: 'REVOKED' }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (e) {
       if (e instanceof InvitationError) {
         const status = e.code === 'INVITATION_NOT_FOUND' ? 404 : 400;

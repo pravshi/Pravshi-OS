@@ -37,7 +37,10 @@ export const CreateInvitationSchema = z.strictObject({
   engagementType: z.enum(ENGAGEMENT_TYPES).optional(),
   departmentId: uuid.optional(),
   /** First day of the engagement. Defaults to the acceptance day. */
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD').optional(),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD')
+    .optional(),
 });
 
 export type CreateInvitationInput = z.infer<typeof CreateInvitationSchema>;

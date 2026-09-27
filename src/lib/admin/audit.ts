@@ -15,7 +15,7 @@ export type AuditLogEntry = {
   action: string;
   entityType: string | null;
   result: string;
-}
+};
 
 export interface AuditLogFilters {
   action?: string;
@@ -53,7 +53,7 @@ export type LoginEventEntry = {
   occurredAt: Date;
   eventType: string;
   email: string | null;
-}
+};
 
 export async function queryLoginEvents(
   auth: Authorization,

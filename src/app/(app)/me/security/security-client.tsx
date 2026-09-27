@@ -15,18 +15,21 @@ import { authClient } from '@/lib/auth/client';
 export function SecurityClient() {
   const { data: session } = authClient.useSession();
 
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState<boolean | null>(null);  const [enrolling, setEnrolling] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState<boolean | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
   const [totpUri, setTotpUri] = useState<string | null>(null);
   const [verifyCode, setVerifyCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
-  const [sessions, setSessions] = useState<{ token: string; createdAt: Date; userAgent?: string | null }[]>([]);
+  const [sessions, setSessions] = useState<
+    { token: string; createdAt: Date; userAgent?: string | null }[]
+  >([]);
 
   useEffect(() => {
     setTwoFactorEnabled(
-      (session?.user as { twoFactorEnabled?: boolean | null } | undefined)
-        ?.twoFactorEnabled ?? false,
+      (session?.user as { twoFactorEnabled?: boolean | null } | undefined)?.twoFactorEnabled ??
+        false,
     );
   }, [session]);
 
@@ -123,7 +126,9 @@ export function SecurityClient() {
                 <p className="text-sm font-medium">Your new backup codes — save them now:</p>
                 <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">
                   {backupCodes.map((c) => (
-                    <li key={c} className="rounded bg-cream-dark px-2 py-1">{c}</li>
+                    <li key={c} className="rounded bg-cream-dark px-2 py-1">
+                      {c}
+                    </li>
                   ))}
                 </ul>
                 <Button className="mt-3" variant="outline" onClick={() => setBackupCodes(null)}>
@@ -147,7 +152,10 @@ export function SecurityClient() {
                 </Button>
               </form>
             )}
-            <form onSubmit={disableTwoFactor} className="flex items-end gap-2 border-t border-line pt-4">
+            <form
+              onSubmit={disableTwoFactor}
+              className="flex items-end gap-2 border-t border-line pt-4"
+            >
               <div className="space-y-2">
                 <Label htmlFor="disable-pw">Password</Label>
                 <Input
@@ -166,8 +174,8 @@ export function SecurityClient() {
         ) : totpUri ? (
           <div className="mt-3 space-y-4">
             <p className="text-sm">
-              Add this key to your authenticator app (Google Authenticator, 1Password, …),
-              then enter the 6-digit code to finish.
+              Add this key to your authenticator app (Google Authenticator, 1Password, …), then
+              enter the 6-digit code to finish.
             </p>
             <p className="break-all rounded bg-cream-dark p-2 font-mono text-xs">{totpUri}</p>
             <Button
@@ -182,7 +190,9 @@ export function SecurityClient() {
                 <p className="text-sm font-medium">Backup codes — save these now:</p>
                 <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">
                   {backupCodes.map((c) => (
-                    <li key={c} className="rounded bg-cream-dark px-2 py-1">{c}</li>
+                    <li key={c} className="rounded bg-cream-dark px-2 py-1">
+                      {c}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -245,21 +255,18 @@ export function SecurityClient() {
               className="flex items-center justify-between rounded border border-line px-3 py-2 text-sm"
             >
               <span className="text-ink-muted">
-                {s.userAgent ?? 'Unknown device'} ·{' '}
-                {new Date(s.createdAt).toLocaleString()}
+                {s.userAgent ?? 'Unknown device'} · {new Date(s.createdAt).toLocaleString()}
               </span>
               <Button variant="outline" size="sm" onClick={() => revokeSession(s.token)}>
                 Sign out
               </Button>
             </li>
           ))}
-          {sessions.length === 0 && (
-            <li className="text-sm text-ink-muted">No active sessions.</li>
-          )}
+          {sessions.length === 0 && <li className="text-sm text-ink-muted">No active sessions.</li>}
         </ul>
         <p className="mt-3 text-xs text-ink-muted">
-          Signed in as {session?.user?.email ?? '…'}. Sessions that need a second factor
-          are marked when you sign in.
+          Signed in as {session?.user?.email ?? '…'}. Sessions that need a second factor are marked
+          when you sign in.
         </p>
       </section>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -55,9 +56,7 @@ export default function LoginPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-      <p className="mt-2 text-sm text-ink-muted">
-        Use the work email your administrator invited.
-      </p>
+      <p className="mt-2 text-sm text-ink-muted">Use the work email your administrator invited.</p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <div className="space-y-2">
@@ -95,6 +94,12 @@ export default function LoginPage() {
           {pending ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
+
+      <p className="mt-4 text-center text-sm text-ink-muted">
+        <Link href="/forgot-password" className="underline underline-offset-4">
+          Forgot password?
+        </Link>
+      </p>
     </div>
   );
 }

@@ -37,6 +37,12 @@ const PRE_AUTH_ROUTES = [
   // delegate to Better Auth and record every outcome as a login event.
   'src/app/api/auth/login/route.ts',
   'src/app/api/auth/mfa/verify/route.ts',
+  // Password reset: the emailed token is the credential; no session exists yet.
+  // The forgot endpoint answers generic success to every caller so it cannot
+  // become an account-enumeration oracle; the reset endpoint's token is
+  // single-use and unguessable.
+  'src/app/api/auth/forgot-password/route.ts',
+  'src/app/api/auth/reset-password/route.ts',
   // Public liveness. Touches nothing, by guard.
   'src/app/health/route.ts',
   // Database reachability for CI and humans, gated by HEALTH_CHECK_TOKEN.
@@ -219,7 +225,7 @@ describe('the analysers themselves', () => {
 
 describe('every protected entry point authorizes first', () => {
   it('keeps the pre-authentication allow-list exact, and every entry real', () => {
-    expect(PRE_AUTH_ROUTES).toHaveLength(8);
+    expect(PRE_AUTH_ROUTES).toHaveLength(10);
     for (const file of PRE_AUTH_ROUTES) expect(existsSync(file), file).toBe(true);
   });
 
