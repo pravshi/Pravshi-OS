@@ -598,7 +598,7 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has eighteen authz helpers, and still one app_user policy per table', async () => {
+  it('has eighteen authz helpers, and one app_user policy per table (two on login_events)', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
@@ -627,7 +627,9 @@ describe('the rest of the authorization model is unchanged', () => {
       `select count(*)::int n from pg_policies
        where schemaname = 'public' and 'app_user' = any(roles) and tablename not like '\\_%'`,
     );
-    expect(policies.rows[0]!.n).toBe(21);
+    // 22: login_events carries two app_user policies by design — the invitation flow's
+    // scope-driven one plus login_events_select_self from the self-service migration.
+    expect(policies.rows[0]!.n).toBe(22);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

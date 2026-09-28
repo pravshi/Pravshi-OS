@@ -954,8 +954,10 @@ describe('the rest of the authorization model is untouched', () => {
     // Thirteen from Tasks 1.2-1.7, record_grants from 1.9, audit_logs from 1.10, and Task
     // 1.16 replaced people, engagements and engagement_events in place: still one policy per
     // table. Four more scope-driven policies arrived with the invitation flow
-    // (0018/0022). record_grants itself stays SELF-scoped.
-    expect(Number(policies.rows[0]!.n)).toBe(21);
+    // (0018/0022). record_grants itself stays SELF-scoped. The self-service migration
+    // (0029) adds one more: login_events_select_self, the narrow SELF read on
+    // login_events — the only table with two app_user policies, by design.
+    expect(Number(policies.rows[0]!.n)).toBe(22);
     expect(Number(policies.rows[0]!.with_scope)).toBe(8);
   });
 
