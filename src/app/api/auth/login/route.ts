@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
+import { mfaEnrollmentRequired } from '@/lib/auth/mfa-enforcement';
 import { clientIp, recordLoginEvent, resolveLoginOrg } from '@/lib/auth/login-events';
+import { isLockedOut, noteLoginFailure, noteLoginSuccess } from '@/lib/auth/login-lockout';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +19,15 @@ export const dynamic = 'force-dynamic';
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts: this route
  * establishes identity, so it cannot require one. Rate limiting rides along with the
  * delegated call: /sign-in/email is limited to ten attempts a minute per address.
+ *
+ * ── LOGIN LOCKOUT ──────────────────────────────────────────────────────────────
+ *
+ * Lockout bookkeeping lives in src/lib/auth/login-lockout.ts (authDb is auth-module
+ * only per tests/guards/single-db-path.test.ts): 5 failures within 15 minutes locks
+ * the account for 15 minutes, checked before the credential check. A locked account
+ * answers the same generic 401 as a wrong password; the HIGH audit entry
+ * (auth.login.lockout) is written inside authz.record_login_failure() when the
+ * threshold is crossed. A successful login clears the counter.
  */
 
 const MAX_BODY_CHARS = 4096;
@@ -70,6 +81,20 @@ export async function POST(req: Request) {
   const userAgent = req.headers.get('user-agent');
   const orgId = await resolveLoginOrg(body.email);
 
+  // Lockout is checked before the credential check, and answers the same generic
+  // 401 as a wrong password: the client never learns a lockout exists.
+  if (await isLockedOut(body.email)) {
+    await recordLoginEvent({
+      orgId,
+      eventType: 'LOGIN_FAILURE',
+      email: body.email,
+      authUserId: null,
+      ip,
+      userAgent,
+    });
+    return reply(401, { error: 'INVALID_CREDENTIALS' });
+  }
+
   let res: Response;
   try {
     res = await auth.api.signInEmail({
@@ -79,6 +104,7 @@ export async function POST(req: Request) {
     });
   } catch {
     // The library throws rather than returning a response for some failures.
+    await noteLoginFailure(body.email, ip, userAgent);
     await recordLoginEvent({
       orgId,
       eventType: 'LOGIN_FAILURE',
@@ -104,7 +130,9 @@ export async function POST(req: Request) {
   }
 
   if (!res.ok || !data) {
-    // Deliberately generic: unknown email and wrong password answer the same.
+    // Deliberately generic: unknown email, wrong password and locked account
+    // answer the same.
+    await noteLoginFailure(body.email, ip, userAgent);
     await recordLoginEvent({
       orgId,
       eventType: 'LOGIN_FAILURE',
@@ -117,6 +145,7 @@ export async function POST(req: Request) {
   }
 
   if (data.twoFactorRedirect === true) {
+    await noteLoginSuccess(body.email);
     await recordLoginEvent({
       orgId,
       eventType: 'MFA_CHALLENGE',
@@ -129,6 +158,7 @@ export async function POST(req: Request) {
     return forward(res, JSON.stringify({ twoFactorRedirect: true }));
   }
 
+  await noteLoginSuccess(body.email);
   await recordLoginEvent({
     orgId,
     eventType: 'LOGIN_SUCCESS',
@@ -137,5 +167,11 @@ export async function POST(req: Request) {
     ip,
     userAgent,
   });
-  return forward(res, bodyText);
+
+  // Privileged roles must enroll in TOTP: steer the client to /me/security when
+  // the freshly authenticated person holds users.manage/roles.manage and has no
+  // verified factor. The session is valid; the admin layout enforces the gate.
+  const enrollmentRequired = data.user?.id != null && (await mfaEnrollmentRequired(data.user.id));
+  const out = { ...data, mfaEnrollmentRequired: enrollmentRequired };
+  return forward(res, JSON.stringify(out));
 }
