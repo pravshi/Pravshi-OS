@@ -23,6 +23,10 @@ import { hashPassword } from 'better-auth/crypto';
 const MIGRATE_URL = process.env.DATABASE_URL_MIGRATE;
 const RUN = randomBytes(4).toString('hex');
 
+// people.code must satisfy the people_code_format check
+// (^[A-Z]{2,8}-[0-9]{4}-[0-9]{4,}$); hex RUN segments are rejected.
+const PERSON_CODE = `EMP-2026-${Date.now().toString().slice(-10).padStart(10, '0')}`;
+
 const ADMIN_EMAIL = `journey.admin.${RUN}@example.test`;
 const ADMIN_PASSWORD = `Journey-Admin-${RUN}!`;
 const INVITEE_EMAIL = `journey.invitee.${RUN}@example.test`;
@@ -74,7 +78,7 @@ test.describe('invitation journey', () => {
         `insert into public.people
            (org_id, code, full_legal_name, work_email, person_status, auth_user_id)
          values ($1, $2, 'Journey Admin', $3::citext, 'ACTIVE', $4) returning id`,
-        [orgId, `EMP-${RUN}`.toUpperCase(), ADMIN_EMAIL, authUserId],
+        [orgId, PERSON_CODE, ADMIN_EMAIL, authUserId],
       );
       const personId = person.rows[0]!.id;
 

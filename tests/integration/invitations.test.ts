@@ -24,6 +24,19 @@ const asUser = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_TE
 
 const RUN = randomBytes(4).toString('hex');
 
+let personSeq = 0;
+/**
+ * people.code must satisfy the people_code_format check
+ * (^[A-Z]{2,8}-[0-9]{4}-[0-9]{4,}$) — random hex segments are rejected, so codes
+ * are generated as EMP-<year>-<digits>. Sequential within the run, keeping
+ * (org_id, code) unique; CI provisions a fresh ephemeral branch per run.
+ */
+const personCode = () => {
+  personSeq += 1;
+  const rand = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+  return `EMP-2026-${rand}${String(personSeq).padStart(4, '0')}`;
+};
+
 const newToken = () => randomBytes(32).toString('hex');
 const digestOf = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');
 
@@ -175,7 +188,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       const p = await owner!.query<{ id: string }>(
         `insert into public.people (org_id, code, full_legal_name, work_email, person_status)
          values ($1, $2, $3, $4::citext, 'ACTIVE') returning id`,
-        [orgId, `EMP-${RUN}-${randomBytes(2).toString('hex')}`.toUpperCase(), name, email],
+        [orgId, personCode(), name, email],
       );
       const personId = p.rows[0]!.id;
       await owner!.query(
@@ -250,7 +263,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
     const linked = await owner!.query<{ id: string }>(
       `insert into public.people (org_id, code, full_legal_name, work_email, person_status)
        values ($1, $2, 'Linked Person', $3::citext, 'ACTIVE') returning id`,
-      [orgA, `EMP-${RUN}-LINK`.toUpperCase(), email],
+      [orgA, personCode(), email],
     );
     const personId = linked.rows[0]!.id;
     const eng = await owner!.query<{ id: string }>(
@@ -413,7 +426,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
     const holder = await owner!.query<{ id: string }>(
       `insert into public.people (org_id, code, full_legal_name, work_email, person_status)
        values ($1, $2, 'Last Holder', $3::citext, 'ACTIVE') returning id`,
-      [orgB, `EMP-${RUN}-LAST`.toUpperCase(), `last.holder.${RUN}@example.test`],
+      [orgB, personCode(), `last.holder.${RUN}@example.test`],
     );
     const holderId = holder.rows[0]!.id;
     await owner!.query(
