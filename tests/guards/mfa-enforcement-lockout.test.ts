@@ -180,3 +180,4 @@ describe('audit logs: severity visibility', () => {
     expect(AUDIT_LIB).toMatch(/a\.severity/);
   });
 });
+// ci-trigger
