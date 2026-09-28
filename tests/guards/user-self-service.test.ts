@@ -16,7 +16,7 @@ const root = (...p: string[]) => join(process.cwd(), ...p);
 const SERVICE = readFileSync(root('src/lib/auth/change-password.ts'), 'utf8');
 const ACTIONS = readFileSync(root('src/app/(app)/me/security/actions.ts'), 'utf8');
 const CLIENT = readFileSync(root('src/app/(app)/me/security/security-client.tsx'), 'utf8');
-const MIGRATION_26 = readFileSync(root('drizzle/0026_login_events_self_read.sql'), 'utf8');
+const MIGRATION_29 = readFileSync(root('drizzle/0029_login_events_self_read.sql'), 'utf8');
 const JOURNAL = readFileSync(root('drizzle/meta/_journal.json'), 'utf8');
 
 describe('change password: current password is verified first', () => {
@@ -79,17 +79,17 @@ describe('change password: sessions and audit', () => {
 });
 
 describe('login history: narrow SELF read', () => {
-  it('0026 installs a SELECT-only self policy on login_events', () => {
-    expect(MIGRATION_26).toMatch(/create policy login_events_select_self/);
-    expect(MIGRATION_26).toMatch(/for select to app_user/);
-    expect(MIGRATION_26).toMatch(/authz\.person_id\(\)/);
-    expect(MIGRATION_26).toMatch(/authz\.is_active\(\)/);
+  it('0029 installs a SELECT-only self policy on login_events', () => {
+    expect(MIGRATION_29).toMatch(/create policy login_events_select_self/);
+    expect(MIGRATION_29).toMatch(/for select to app_user/);
+    expect(MIGRATION_29).toMatch(/authz\.person_id\(\)/);
+    expect(MIGRATION_29).toMatch(/authz\.is_active\(\)/);
     // Still no write policy for app_user in this migration.
-    expect(MIGRATION_26).not.toMatch(/for (insert|update|delete)/);
+    expect(MIGRATION_29).not.toMatch(/for (insert|update|delete)/);
   });
 
-  it('0026 is registered in the drizzle journal', () => {
-    expect(JOURNAL).toMatch(/0026_login_events_self_read/);
+  it('0029 is registered in the drizzle journal', () => {
+    expect(JOURNAL).toMatch(/0029_login_events_self_read/);
   });
 
   it('both actions open with requirePermission (people.view, SELF)', () => {

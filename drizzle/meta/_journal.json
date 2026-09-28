@@ -188,7 +188,14 @@
       "idx": 26,
       "version": "7",
       "when": 1790542363566,
-      "tag": "0026_login_events_self_read",
+      "tag": "0026_bootstrap_setup_pending",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1790542363566,
+      "tag": "0029_login_events_self_read",
       "breakpoints": true
     }
   ]
