@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { env } from '@/env';
 import { previewInvitation } from '@/lib/auth/invitations';
 import { INVITATION_TOKEN_PATTERN } from '@/lib/invitations/tokens';
+import { clientIp } from '@/lib/auth/login-events';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,9 @@ export const dynamic = 'force-dynamic';
  *
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts alongside
  * /api/bootstrap/complete: the token is the credential, no session exists yet.
+ *
+ * Rate limited to 10 a minute per IP: the valid/invalid answer is a token oracle,
+ * so probing it is throttled even though tokens are unguessable.
  */
 
 const MAX_BODY_CHARS = 4096;
@@ -48,6 +53,11 @@ export async function POST(req: Request) {
     token = parsed.data.token;
   } catch {
     return reply(400, { error: 'INVALID_REQUEST' });
+  }
+
+  // Pre-auth token oracle: throttle per IP before consulting the token.
+  if (!(await checkIpRateLimit(ipRateLimitKey('invite:preview', clientIp(req)), 10, 60))) {
+    return reply(429, { error: 'RATE_LIMITED' });
   }
 
   try {
