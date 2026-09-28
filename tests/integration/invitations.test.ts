@@ -410,10 +410,15 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       )
     ).rows[0]!.token_hash;
 
-    await owner!.query(`delete from public.person_roles where person_id = $1 and role_id = $2`, [
-      superAdminA,
-      roleSuperAdminA,
-    ]);
+    // A bare delete as owner (no identity) is refused by the
+    // person_roles_enforce_protection trigger: revoking a protected role requires
+    // a live roles.manage holder to perform the revocation. superAdminA revokes
+    // its own grant, which the trigger allows while it still holds the role.
+    await inContext(
+      { personId: superAdminA, orgId: orgA },
+      `delete from public.person_roles where person_id = $1 and role_id = $2`,
+      [superAdminA, roleSuperAdminA],
+    );
 
     await expect(acceptAsUser(tokenHash, 'Demoted Invitee')).rejects.toMatchObject({
       code: '42501',
