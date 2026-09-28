@@ -1,6 +1,10 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
-import { authDb } from '@/lib/db/auth-client';
+import {
+  listSessionsForLogin,
+  revokeSessionForLogin,
+  type AdminSessionSummary,
+} from '@/lib/auth/admin-credentials';
 import { revokeSessionsFor } from '@/lib/auth/session';
 import type { Authorization } from '@/lib/authz/require-permission';
 
@@ -10,18 +14,14 @@ import type { Authorization } from '@/lib/authz/require-permission';
  * sessions.revoke permission), the service never re-decides.
  *
  * The person lookup is org-scoped through withAuthorizedDb(), so an admin can only
- * reach people in their own tenant. Session rows live in auth.auth_sessions, a
- * Better Auth-owned table with RLS disabled, so they are read and deleted through
- * authDb — the same sanctioned auth-schema path the password-reset module uses.
+ * reach people in their own tenant. Session rows and login credentials live in the
+ * Better Auth-owned tables (no RLS), so they are reached through the auth module
+ * (src/lib/auth/admin-credentials.ts) — the only sanctioned auth-schema path.
+ * Feature code never touches authDb or those tables directly;
+ * tests/guards/single-db-path.test.ts pins that boundary.
  */
 
-export type AdminSession = {
-  id: string;
-  createdAt: Date;
-  expiresAt: Date;
-  ipAddress: string | null;
-  userAgent: string | null;
-};
+export type AdminSession = AdminSessionSummary;
 
 /**
  * Resolve the target person's login id, scoped to the admin's org. Throws when the
@@ -50,19 +50,7 @@ export async function listUserSessions(
   personId: string,
 ): Promise<AdminSession[]> {
   const authUserId = await resolveTargetLogin(auth, personId);
-  const res = await authDb.execute<AdminSession>(sql`
-    select
-      s.id,
-      s.created_at as "createdAt",
-      s.expires_at as "expiresAt",
-      s.ip_address as "ipAddress",
-      s.user_agent as "userAgent"
-    from auth.auth_sessions s
-    where s.user_id = ${authUserId}::uuid
-      and s.expires_at > now()
-    order by s.created_at desc
-  `);
-  return res.rows;
+  return listSessionsForLogin(authUserId);
 }
 
 /**
@@ -75,13 +63,7 @@ export async function revokeUserSession(
   sessionId: string,
 ): Promise<void> {
   const authUserId = await resolveTargetLogin(auth, personId);
-  const res = await authDb.execute<{ id: string }>(sql`
-    delete from auth.auth_sessions
-    where id = ${sessionId}::uuid
-      and user_id = ${authUserId}::uuid
-    returning id
-  `);
-  if (!res.rows[0]) throw new Error('Session not found.');
+  await revokeSessionForLogin(authUserId, sessionId);
 }
 
 /**

@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
-import { authDb } from '@/lib/db/auth-client';
-import { env } from '@/env';
-import { generateResetToken, hashResetToken, buildResetUrl } from '@/lib/auth/password-reset';
+import { issueAdminPasswordReset, loginEmailFor } from '@/lib/auth/admin-credentials';
+import { buildResetUrl } from '@/lib/auth/password-reset';
 import { sendResetEmail } from '@/lib/auth/password-reset-email';
 import { writeAuditEntry, type RequestMetadata } from '@/lib/audit/log';
 import type { Authorization } from '@/lib/authz/require-permission';
+import { env } from '@/env';
 
 /**
  * Admin-triggered credential reset. Every function takes the Authorization that
@@ -30,9 +30,6 @@ export type AdminCredentialReset = {
   emailSent: boolean;
 };
 
-const RATE_LIMIT_MAX = 5;
-const RATE_LIMIT_WINDOW_SECONDS = 60;
-
 export async function adminResetCredential(
   auth: Authorization,
   personId: string,
@@ -53,31 +50,10 @@ export async function adminResetCredential(
   if (!target.auth_user_id) throw new Error('This person has no login.');
 
   // The credential lives on the login, so the login's own email addresses the token.
-  const login = await authDb.execute<{ email: string }>(sql`
-    select u.email from auth.auth_users u where u.id = ${target.auth_user_id}::uuid
-  `);
-  const loginEmail = login.rows[0]?.email;
+  const loginEmail = await loginEmailFor(target.auth_user_id);
   if (!loginEmail) throw new Error('Login not found.');
 
-  const rl = await authDb.execute<{ allowed: boolean }>(sql`
-    select authz.check_rate_limit(
-      ${`pwreset:req:${meta.ip ?? 'unknown'}`},
-      ${RATE_LIMIT_MAX},
-      ${RATE_LIMIT_WINDOW_SECONDS}
-    ) as allowed
-  `);
-  if (!rl.rows[0]?.allowed) {
-    throw new Error('Too many reset requests. Please try again later.');
-  }
-
-  const token = generateResetToken();
-  const digest = hashResetToken(token);
-  const issued = await authDb.execute<{ reset_id: string | null }>(sql`
-    select authz.request_password_reset(${loginEmail}, ${digest}) as reset_id
-  `);
-  if (!issued.rows[0]?.reset_id) {
-    throw new Error('Could not issue a reset for this login.');
-  }
+  const token = await issueAdminPasswordReset(loginEmail, meta.ip);
 
   const resetUrl = buildResetUrl(env.APP_URL, token);
   const emailSent = await sendResetEmail(loginEmail, resetUrl);

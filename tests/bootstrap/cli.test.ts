@@ -16,6 +16,7 @@ vi.mock('@/lib/db/auth-client', () => ({ authDb: {} }));
 
 const cli = await import('../../scripts/bootstrap/run.mjs');
 const runtime = await import('@/lib/auth/bootstrap-setup');
+const { SETUP_TOKEN_PATTERN } = await import('@/lib/auth/setup-token');
 
 // Assembled at runtime: this file is itself scanned for credential-shaped literals.
 const PASSWORD = 'fixture-only-password';
@@ -47,7 +48,7 @@ describe('the setup token', () => {
   it('is 32 CSPRNG bytes, base64url, in exactly the shape the runtime accepts', () => {
     const token = cli.generateSetupToken();
     expect(cli.SETUP_TOKEN_BYTES).toBe(32);
-    expect(token).toMatch(runtime.SETUP_TOKEN_PATTERN);
+    expect(token).toMatch(SETUP_TOKEN_PATTERN);
     expect(Buffer.from(token, 'base64url').length).toBe(32);
   });
 
@@ -183,7 +184,7 @@ describe('runBootstrap()', () => {
     expect(delivered.length).toBe(1);
     expect(delivered[0]!.committed).toBe(true);
     const token = new URL(delivered[0]!.link).hash.replace('#token=', '');
-    expect(token).toMatch(runtime.SETUP_TOKEN_PATTERN);
+    expect(token).toMatch(SETUP_TOKEN_PATTERN);
 
     const everythingSent = JSON.stringify(calls);
     expect(everythingSent).not.toContain(token);

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
+import { SETUP_TOKEN_PATTERN } from './setup-token';
 
 /**
  * Completion of the first-run bootstrap: the single moment a login is created for the person
@@ -36,9 +37,6 @@ import { authDb } from '@/lib/db/auth-client';
  * must cover this path as well as the PASSWORD_SETTING_PATHS listed in server.ts.
  */
 
-/** 32 bytes from a CSPRNG, base64url and unpadded: exactly what the bootstrap script issues. */
-export const SETUP_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-
 /** Hex SHA-256 of the token string. scripts/bootstrap/run.mjs computes the same digest. */
 export const hashSetupToken = (token: string): string =>
   createHash('sha256').update(token, 'utf8').digest('hex');
@@ -59,6 +57,21 @@ export class BootstrapSetupError extends Error {
     super('bootstrap setup could not be completed');
     this.name = 'BootstrapSetupError';
   }
+}
+
+/**
+ * Whether the one-time bootstrap setup is still pending — the /setup page's server guard.
+ *
+ * True only while a live, unconsumed setup token exists (migration 0026). False both when
+ * the database was never bootstrapped (no token can be valid) and when setup completed or
+ * the token expired. The page redirects to /login on false; the narrow SECURITY DEFINER
+ * function answers a single bit and names nothing.
+ */
+export async function isBootstrapSetupPending(): Promise<boolean> {
+  const r = await authDb.execute<{ pending: boolean }>(sql`
+    select public.bootstrap_setup_pending() as pending
+  `);
+  return r.rows[0]?.pending === true;
 }
 
 /** drizzle wraps the driver error, so the SQLSTATE may be on the error or on its cause. */
