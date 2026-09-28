@@ -719,7 +719,9 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    expect(Number(policies.rows[0]!.n)).toBe(21);
+    // 22: the audit-triggers migration itself added none; the 22nd is
+    // login_events_select_self from the self-service migration (0029).
+    expect(Number(policies.rows[0]!.n)).toBe(22);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

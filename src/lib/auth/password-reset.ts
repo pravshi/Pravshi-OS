@@ -64,6 +64,48 @@ const EmailSchema = z.string().trim().email().max(254);
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 
+/**
+ * The shared new-password policy: Better Auth's configured min/max length, the
+ * local common-password list, then the HIBP k-anonymity breach check (which
+ * fails open with a warning — availability over strictness, the local list is
+ * the backstop). The change-password flow reuses this; the policy must never
+ * drift between the two entry points.
+ */
+export async function validateNewPasswordPolicy(password: string): Promise<void> {
+  const context = await auth.$context;
+  const { minPasswordLength, maxPasswordLength } = context.password.config;
+  if (password.length < minPasswordLength) {
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_SHORT',
+      `Password must be at least ${minPasswordLength} characters.`,
+    );
+  }
+  if (password.length > maxPasswordLength) {
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_LONG',
+      `Password must be at most ${maxPasswordLength} characters.`,
+    );
+  }
+  if (isCommonPassword(password)) {
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'TOO_COMMON',
+      'That password is too common. Choose a less predictable one.',
+    );
+  }
+  // The expensive hash is computed only after every cheap check passed, so
+  // unauthenticated callers cannot use this endpoint as a CPU sink.
+  if (await isBreachedPassword(password)) {
+    throw new PasswordResetError(
+      'WEAK_PASSWORD',
+      'BREACHED',
+      'That password has appeared in a data breach. Choose a different one.',
+    );
+  }
+}
+
 /** Fixed-window check via authz.check_rate_limit(); false means the caller is over allowance. */
 async function underRateLimit(key: string): Promise<boolean> {
   const res = await authDb.execute<{ allowed: boolean }>(sql`
@@ -156,37 +198,9 @@ export async function resetPassword(
   }
 
   const context = await auth.$context;
-  const { minPasswordLength, maxPasswordLength } = context.password.config;
-  if (password.length < minPasswordLength) {
-    throw new PasswordResetError(
-      'WEAK_PASSWORD',
-      'TOO_SHORT',
-      `Password must be at least ${minPasswordLength} characters.`,
-    );
-  }
-  if (password.length > maxPasswordLength) {
-    throw new PasswordResetError(
-      'WEAK_PASSWORD',
-      'TOO_LONG',
-      `Password must be at most ${maxPasswordLength} characters.`,
-    );
-  }
-  if (isCommonPassword(password)) {
-    throw new PasswordResetError(
-      'WEAK_PASSWORD',
-      'TOO_COMMON',
-      'That password is too common. Choose a less predictable one.',
-    );
-  }
-  // The expensive hash is computed only after every cheap check passed, so
-  // unauthenticated callers cannot use this endpoint as a CPU sink.
-  if (await isBreachedPassword(password)) {
-    throw new PasswordResetError(
-      'WEAK_PASSWORD',
-      'BREACHED',
-      'That password has appeared in a data breach. Choose a different one.',
-    );
-  }
+  // Shared policy (length, common-password list, HIBP) — identical for reset
+  // and change; see validateNewPasswordPolicy.
+  await validateNewPasswordPolicy(password);
 
   const digest = hashResetToken(token);
 
