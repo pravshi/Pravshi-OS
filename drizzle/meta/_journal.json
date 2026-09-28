@@ -185,17 +185,10 @@
       "breakpoints": true
     },
     {
-      "idx": 28,
+      "idx": 26,
       "version": "7",
-      "when": 1790542363565,
-      "tag": "0028_mfa_enforcement_lockout",
-      "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "7",
-      "when": 1790542363565,
-      "tag": "0029_admin_write_functions",
+      "when": 1790542363566,
+      "tag": "0026_bootstrap_setup_pending",
       "breakpoints": true
     }
   ]
