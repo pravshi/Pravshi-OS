@@ -10,6 +10,10 @@ import {
   suspendUserAction,
   unsuspendUserAction,
   setPersonRolesAction,
+  getUserSessionsAction,
+  revokeUserSessionAction,
+  revokeAllUserSessionsAction,
+  adminResetCredentialAction,
 } from './actions';
 
 interface Role {
@@ -41,6 +45,14 @@ interface Department {
   code: string;
   name: string;
   status: string;
+}
+
+interface AdminSession {
+  id: string;
+  createdAt: Date;
+  expiresAt: Date;
+  ipAddress: string | null;
+  userAgent: string | null;
 }
 
 const ENGAGEMENT_TYPES = [
@@ -86,6 +98,19 @@ export function UsersClient({
 
   const [confirmSuspend, setConfirmSuspend] = useState<User | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  const [sessionsUser, setSessionsUser] = useState<User | null>(null);
+  const [sessions, setSessions] = useState<AdminSession[] | null>(null);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+
+  const [resetUser, setResetUser] = useState<User | null>(null);
+  const [resetResult, setResetResult] = useState<{
+    resetUrl: string;
+    email: string;
+    emailSent: boolean;
+  } | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   async function refresh() {
     window.location.reload();
@@ -179,6 +204,71 @@ export function UsersClient({
     }
   }
 
+  async function loadSessions(user: User) {
+    setSessionsError(null);
+    try {
+      const rows = await getUserSessionsAction(user.id);
+      setSessions(rows);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Could not load sessions.');
+      setSessions([]);
+    }
+  }
+
+  function openSessions(user: User) {
+    setSessionsUser(user);
+    setSessions(null);
+    setConfirmRevokeAll(false);
+    void loadSessions(user);
+  }
+
+  async function onRevokeSession(sessionId: string) {
+    if (!sessionsUser) return;
+    setBusy(sessionId);
+    try {
+      await revokeUserSessionAction(sessionsUser.id, sessionId);
+      await loadSessions(sessionsUser);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Could not revoke session.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onRevokeAllSessions() {
+    if (!sessionsUser) return;
+    setBusy(sessionsUser.id);
+    try {
+      await revokeAllUserSessionsAction(sessionsUser.id);
+      setConfirmRevokeAll(false);
+      await loadSessions(sessionsUser);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Could not revoke sessions.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function openResetCredential(user: User) {
+    setResetUser(user);
+    setResetResult(null);
+    setResetError(null);
+  }
+
+  async function onResetCredential() {
+    if (!resetUser) return;
+    setResetError(null);
+    setBusy(resetUser.id);
+    try {
+      const result = await adminResetCredentialAction(resetUser.id);
+      setResetResult(result);
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : 'Could not issue a credential reset.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const toggle = (list: string[], id: string) =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
@@ -219,10 +309,24 @@ export function UsersClient({
                     {u.roles.length > 0 ? u.roles.join(', ') : '—'}
                   </td>
                   <td className="px-4 py-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button variant="outline" size="sm" onClick={() => openRoleEditor(u)}>
                         Roles
                       </Button>
+                      {u.hasLogin && (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => openSessions(u)}>
+                            Sessions
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openResetCredential(u)}
+                          >
+                            Reset credential
+                          </Button>
+                        </>
+                      )}
                       {u.hasLogin &&
                         (u.suspended ? (
                           <Button
@@ -501,6 +605,157 @@ export function UsersClient({
                 Cancel
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── sessions dialog ── */}
+      {sessionsUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-medium">
+              Sessions for {sessionsUser.fullName ?? sessionsUser.email}
+            </h3>
+            {sessions === null ? (
+              <p className="mt-4 text-sm text-ink-muted">Loading sessions…</p>
+            ) : sessions.length === 0 ? (
+              <p className="mt-4 text-sm text-ink-muted">No active sessions.</p>
+            ) : (
+              <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto">
+                {sessions.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center justify-between gap-3 rounded border border-line p-3 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-ink-muted">
+                        {s.ipAddress ?? 'unknown IP'}
+                        {s.userAgent ? ` · ${s.userAgent.slice(0, 60)}` : ''}
+                      </p>
+                      <p className="text-xs text-ink-muted">
+                        Created {new Date(s.createdAt).toLocaleString()} · expires{' '}
+                        {new Date(s.expiresAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy === s.id}
+                      onClick={() => onRevokeSession(s.id)}
+                    >
+                      Revoke
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {sessionsError && (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {sessionsError}
+              </p>
+            )}
+            {confirmRevokeAll ? (
+              <div className="mt-4 rounded border border-destructive/40 p-3">
+                <p className="text-sm">
+                  Revoke <strong>all</strong> sessions for{' '}
+                  {sessionsUser.fullName ?? sessionsUser.email}? They will be signed out everywhere
+                  immediately.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={busy === sessionsUser.id}
+                    onClick={onRevokeAllSessions}
+                  >
+                    Revoke all sessions
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setConfirmRevokeAll(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={sessions === null || sessions.length === 0}
+                  onClick={() => setConfirmRevokeAll(true)}
+                >
+                  Revoke all sessions
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setSessionsUser(null)}>
+                  Close
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── credential reset dialog ── */}
+      {resetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-medium">Reset credential</h3>
+            {resetResult ? (
+              <div className="mt-4 space-y-3">
+                <p className="text-sm">
+                  A single-use reset link was issued for <strong>{resetResult.email}</strong>, valid
+                  for one hour.
+                  {resetResult.emailSent
+                    ? ' It was also emailed to them.'
+                    : ' Email delivery is not configured, so share the link directly.'}
+                </p>
+                <p className="text-sm text-ink-muted">
+                  Share this link — it is shown exactly once:
+                </p>
+                <p className="break-all rounded bg-cream-dark p-2 text-xs">
+                  {resetResult.resetUrl}
+                </p>
+                <Button
+                  onClick={() => {
+                    navigator.clipboard.writeText(resetResult.resetUrl);
+                  }}
+                >
+                  Copy link
+                </Button>
+                <div>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setResetUser(null);
+                      refresh();
+                    }}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-ink-muted">
+                  Issue a single-use, one-hour reset link for{' '}
+                  {resetUser.fullName ?? resetUser.email}. The link is emailed when delivery is
+                  configured, and shown to you exactly once either way. Their current password keeps
+                  working until the link is used.
+                </p>
+                {resetError && (
+                  <p role="alert" className="mt-3 text-sm text-destructive">
+                    {resetError}
+                  </p>
+                )}
+                <div className="mt-4 flex gap-2">
+                  <Button disabled={busy === resetUser.id} onClick={onResetCredential}>
+                    {busy === resetUser.id ? 'Issuing…' : 'Issue reset link'}
+                  </Button>
+                  <Button variant="outline" onClick={() => setResetUser(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
