@@ -61,6 +61,21 @@ export class BootstrapSetupError extends Error {
   }
 }
 
+/**
+ * Whether the one-time bootstrap setup is still pending — the /setup page's server guard.
+ *
+ * True only while a live, unconsumed setup token exists (migration 0026). False both when
+ * the database was never bootstrapped (no token can be valid) and when setup completed or
+ * the token expired. The page redirects to /login on false; the narrow SECURITY DEFINER
+ * function answers a single bit and names nothing.
+ */
+export async function isBootstrapSetupPending(): Promise<boolean> {
+  const r = await authDb.execute<{ pending: boolean }>(sql`
+    select public.bootstrap_setup_pending() as pending
+  `);
+  return r.rows[0]?.pending === true;
+}
+
 /** drizzle wraps the driver error, so the SQLSTATE may be on the error or on its cause. */
 function sqlstateOf(e: unknown): string | null {
   for (const candidate of [e, (e as { cause?: unknown } | null)?.cause]) {
