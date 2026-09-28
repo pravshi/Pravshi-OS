@@ -4,6 +4,8 @@ import { createInvitation, InvitationError } from '@/lib/invitations/service';
 import { CreateInvitationSchema, type CreateInvitationInput } from '@/lib/invitations/schema';
 import { buildInviteUrl } from '@/lib/invitations/tokens';
 import { sendInvitationEmail } from '@/lib/invitations/email';
+import { clientIp } from '@/lib/auth/login-events';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +16,9 @@ export const dynamic = 'force-dynamic';
  * The invitation row is the source of truth; the email is best-effort. The response
  * always carries the accept URL (and the token, to the authorizing admin's own session)
  * so a failed or unconfigured email never strands an invitation.
+ *
+ * Rate limited to 30 a minute per IP: an authenticated admin endpoint, but cheap to
+ * call in a loop, so it gets the same per-IP throttle as the other mutating routes.
  */
 export const POST = withPermission(
   // GLOBAL, matching the database: the invitations RLS policies require
@@ -21,6 +26,10 @@ export const POST = withPermission(
   // instead of as a database error later.
   { permission: 'users.create', minScope: 'GLOBAL' },
   async (request, authorization) => {
+    if (!(await checkIpRateLimit(ipRateLimitKey('invite:create', clientIp(request)), 30, 60))) {
+      return Response.json({ error: 'RATE_LIMITED' }, { status: 429 });
+    }
+
     let input: CreateInvitationInput;
     try {
       input = CreateInvitationSchema.parse(await request.json());

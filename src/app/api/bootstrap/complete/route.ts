@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { env } from '@/env';
 import { BootstrapSetupError, completeBootstrapSetup } from '@/lib/auth/bootstrap-setup';
+import { clientIp } from '@/lib/auth/login-events';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,9 @@ export const dynamic = 'force-dynamic';
  *
  * Once the token is consumed — or if this database was never bootstrapped — every request is
  * answered SETUP_TOKEN_INVALID. There is nothing left behind it to reach.
+ *
+ * Rate limited to 5 attempts a minute per IP: this mints the owner's login, so
+ * token probing is throttled hard even though the token is unguessable.
  */
 
 /** A token and a password are a few hundred bytes at most. */
@@ -61,6 +66,11 @@ export async function POST(req: Request) {
     body = parsed.data;
   } catch {
     return reply(400, { error: 'INVALID_REQUEST' });
+  }
+
+  // One-time owner token: throttle per IP before touching it.
+  if (!(await checkIpRateLimit(ipRateLimitKey('bootstrap:complete', clientIp(req)), 5, 60))) {
+    return reply(429, { error: 'RATE_LIMITED' });
   }
 
   try {

@@ -2,6 +2,8 @@ import { env } from '@/env';
 import { acceptInvitation } from '@/lib/auth/invitations';
 import { InvitationError } from '@/lib/invitations/service';
 import { AcceptInvitationSchema } from '@/lib/invitations/schema';
+import { clientIp } from '@/lib/auth/login-events';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +20,9 @@ export const dynamic = 'force-dynamic';
  *
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts: the token is
  * the credential, no session exists yet.
+ *
+ * Rate limited to 10 attempts a minute per IP: the token is unguessable, but the
+ * coarse error answers make this a cheap place to probe, so probing is throttled.
  */
 
 const MAX_BODY_CHARS = 4096;
@@ -53,6 +58,11 @@ export async function POST(req: Request) {
   }
   const parsed = AcceptInvitationSchema.safeParse(body);
   if (!parsed.success) return reply(400, { error: 'INVALID_REQUEST' });
+
+  // Pre-auth token endpoint: throttle per IP before touching the token.
+  if (!(await checkIpRateLimit(ipRateLimitKey('invite:accept', clientIp(req)), 10, 60))) {
+    return reply(429, { error: 'RATE_LIMITED' });
+  }
 
   try {
     await acceptInvitation(parsed.data);
