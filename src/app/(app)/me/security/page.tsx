@@ -11,7 +11,8 @@ export default function SecurityPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Security</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Your sign-in security: two-factor authentication and active sessions.
+          Your sign-in security: password, two-factor authentication, active sessions, and login
+          history.
         </p>
       </div>
       <SecurityClient />

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authClient } from '@/lib/auth/client';
+import { changePasswordAction, getLoginHistoryAction, type LoginHistoryRow } from './actions';
 
 /**
  * /me/security — the user's own security settings. No special permission needed:
@@ -26,6 +27,20 @@ export function SecurityClient() {
     { token: string; createdAt: Date; userAgent?: string | null }[]
   >([]);
 
+  // ── change password ──
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwOk, setPwOk] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+
+  // ── login history ──
+  const [history, setHistory] = useState<LoginHistoryRow[]>([]);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
   useEffect(() => {
     setTwoFactorEnabled(
       (session?.user as { twoFactorEnabled?: boolean | null } | undefined)?.twoFactorEnabled ??
@@ -38,6 +53,24 @@ export function SecurityClient() {
       .listSessions()
       .then(({ data }) => setSessions((data ?? []) as typeof sessions))
       .catch(() => setSessions([]));
+  }, []);
+
+  async function loadHistory(page: number) {
+    setHistoryLoading(true);
+    try {
+      const res = await getLoginHistoryAction(page);
+      setHistory(res.rows);
+      setHistoryPage(res.page);
+      setHistoryHasMore(res.hasMore);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadHistory(0);
   }, []);
 
   async function startEnrollment(e: React.FormEvent) {
@@ -96,6 +129,33 @@ export function SecurityClient() {
       return;
     }
     setBackupCodes(data.backupCodes);
+  }
+
+  async function submitPasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError(null);
+    setPwOk(false);
+    if (newPw !== confirmPw) {
+      setPwError('The new passwords do not match.');
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const res = await changePasswordAction(currentPw, newPw);
+      if (!res.ok) {
+        setPwError(res.error ?? 'Could not change your password.');
+        return;
+      }
+      setCurrentPw('');
+      setNewPw('');
+      setConfirmPw('');
+      setPwOk(true);
+      // Other sessions were revoked server-side; refresh the visible list.
+      const { data } = await authClient.listSessions();
+      setSessions((data ?? []) as typeof sessions);
+    } finally {
+      setPwBusy(false);
+    }
   }
 
   async function revokeSession(token: string) {
@@ -238,6 +298,65 @@ export function SecurityClient() {
         )}
       </section>
 
+      {/* ── change password ── */}
+      <section className="rounded-lg border border-line bg-white p-5">
+        <h2 className="text-lg font-medium">Change password</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Your current password is required. Every other session is signed out; this one stays.
+        </p>
+        <form onSubmit={submitPasswordChange} className="mt-4 max-w-sm space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="pw-current">Current password</Label>
+            <Input
+              id="pw-current"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={currentPw}
+              onChange={(e) => setCurrentPw(e.target.value)}
+              disabled={pwBusy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pw-new">New password</Label>
+            <Input
+              id="pw-new"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              disabled={pwBusy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pw-confirm">Confirm new password</Label>
+            <Input
+              id="pw-confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              disabled={pwBusy}
+            />
+          </div>
+          <Button type="submit" disabled={pwBusy}>
+            {pwBusy ? 'Changing…' : 'Change password'}
+          </Button>
+        </form>
+        {pwError && (
+          <p role="alert" className="mt-3 text-sm text-destructive">
+            {pwError}
+          </p>
+        )}
+        {pwOk && (
+          <p role="status" className="mt-3 text-sm text-emerald-700">
+            Password changed. Your other sessions were signed out.
+          </p>
+        )}
+      </section>
+
       {/* ── sessions ── */}
       <section className="rounded-lg border border-line bg-white p-5">
         <div className="flex items-center justify-between">
@@ -269,6 +388,65 @@ export function SecurityClient() {
           when you sign in.
         </p>
       </section>
+
+      {/* ── login history ── */}
+      <section className="rounded-lg border border-line bg-white p-5">
+        <h2 className="text-lg font-medium">Login history</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Recent sign-in activity on your account, including failed attempts.
+        </p>
+        {historyLoading ? (
+          <p className="mt-3 text-sm text-ink-muted">Loading…</p>
+        ) : history.length === 0 ? (
+          <p className="mt-3 text-sm text-ink-muted">No login activity recorded yet.</p>
+        ) : (
+          <>
+            <ul className="mt-3 space-y-2">
+              {history.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-line px-3 py-2 text-sm"
+                >
+                  <span className="font-medium">{formatEventType(row.eventType)}</span>
+                  <span className="text-ink-muted">
+                    {new Date(row.occurredAt).toLocaleString()}
+                    {row.ipAddress ? ` · ${row.ipAddress}` : ''}
+                  </span>
+                  {row.userAgent && (
+                    <span className="w-full truncate text-xs text-ink-muted">{row.userAgent}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={historyPage === 0 || historyLoading}
+                onClick={() => loadHistory(historyPage - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!historyHasMore || historyLoading}
+                onClick={() => loadHistory(historyPage + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
+}
+
+function formatEventType(t: string): string {
+  return t
+    .toLowerCase()
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 }
