@@ -33,7 +33,7 @@ export async function queryAuditLogs(
       select
         a.id,
         a.occurred_at as "occurredAt",
-        a.actor_label as "actorLabel",
+        a.actor_email_snapshot as "actorLabel",
         a.action,
         a.entity_type as "entityType",
         a.result

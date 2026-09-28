@@ -49,6 +49,11 @@ const linked = () =>
     rows: [{ linked_person_id: 'p', linked_org_id: 'o', linked_auth_user_id: 'u' }],
   });
 
+// The route rate-limits per IP before touching the token logic, so every POST
+// that survives body parsing consumes one extra execute call first.
+const rateLimitOk = () => mocks.execute.mockResolvedValueOnce({ rows: [{ allowed: true }] });
+const rateLimitExceeded = () => mocks.execute.mockResolvedValueOnce({ rows: [{ allowed: false }] });
+
 beforeEach(() => {
   mocks.execute.mockReset();
   mocks.hash.mockClear();
@@ -168,14 +173,16 @@ describe('POST /api/bootstrap/complete', () => {
   });
 
   it('accepts a same-origin request, and a request carrying no Origin at all', async () => {
+    rateLimitOk();
     deadToken();
     expect(
       (await post({ token: TOKEN, password: PASSWORD }, { origin: 'https://os.pravshi.com' }))
         .status,
     ).toBe(400);
+    rateLimitOk();
     deadToken();
     expect((await post({ token: TOKEN, password: PASSWORD })).status).toBe(400);
-    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(mocks.execute).toHaveBeenCalledTimes(4);
   });
 
   it('refuses an oversized, unparseable or unexpected body', async () => {
@@ -187,6 +194,7 @@ describe('POST /api/bootstrap/complete', () => {
   });
 
   it('reports the password policy by name', async () => {
+    rateLimitOk();
     const res = await post({ token: TOKEN, password: 'too short' });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
@@ -196,10 +204,24 @@ describe('POST /api/bootstrap/complete', () => {
     });
   });
 
+  it('answers 429 when the IP is over the rate limit, before touching the token', async () => {
+    rateLimitExceeded();
+    const res = await post({ token: TOKEN, password: PASSWORD });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'RATE_LIMITED' });
+    // One query only: the rate-limit check. The token was never consulted.
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    const queries = rendered();
+    expect(queries.length).toBe(1);
+    expect(queries[0]!.sql).toContain('check_rate_limit');
+  });
+
   it('answers 409 when the database refuses to link, and 400 for any dead token', async () => {
+    rateLimitOk();
     liveToken();
     mocks.execute.mockRejectedValueOnce(dbError('55000'));
     expect((await post({ token: TOKEN, password: PASSWORD })).status).toBe(409);
+    rateLimitOk();
     deadToken();
     const dead = await post({ token: TOKEN, password: PASSWORD });
     expect(dead.status).toBe(400);
@@ -209,6 +231,7 @@ describe('POST /api/bootstrap/complete', () => {
   it('logs a failure by SQLSTATE alone and returns nothing about it', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
+      rateLimitOk();
       liveToken();
       mocks.execute.mockRejectedValueOnce(dbError('XX000'));
       const res = await post({ token: TOKEN, password: PASSWORD });
@@ -223,6 +246,7 @@ describe('POST /api/bootstrap/complete', () => {
   });
 
   it('completes, and marks the response uncacheable', async () => {
+    rateLimitOk();
     liveToken();
     linked();
     const res = await post({ token: TOKEN, password: PASSWORD });
