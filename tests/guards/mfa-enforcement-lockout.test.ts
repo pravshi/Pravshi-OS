@@ -142,8 +142,11 @@ describe('login route: lockout + enrollment', () => {
   });
 
   it('records failures and clears the counter on success', () => {
-    expect(LOGIN_ROUTE).toMatch(/noteFailure\(body\.email, ip, userAgent\)/);
-    expect(LOGIN_ROUTE).toMatch(/noteSuccess\(body\.email\)/);
+    // Lockout bookkeeping lives in the auth module (single-db-path guard:
+    // authDb is auth-module only); the route delegates to it.
+    expect(LOGIN_ROUTE).toMatch(/from '@\/lib\/auth\/login-lockout'/);
+    expect(LOGIN_ROUTE).toMatch(/noteLoginFailure\(body\.email, ip, userAgent\)/);
+    expect(LOGIN_ROUTE).toMatch(/noteLoginSuccess\(body\.email\)/);
   });
 
   it('adds the mfaEnrollmentRequired hint to the success response', () => {

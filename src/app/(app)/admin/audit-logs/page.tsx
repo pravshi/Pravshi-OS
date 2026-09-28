@@ -1,9 +1,11 @@
 import { requirePagePermission } from '@/lib/authz/page';
 import { getAuditPageData } from './actions';
+import { ExportButtons } from './export-buttons';
 
 /**
  * /admin/audit-logs — the append-only audit trail plus the login-event stream.
  * audit_logs.view. The logs cannot be edited or deleted; this page only reads.
+ * Exports (CSV/JSON) carry the page's current filters and are themselves audited.
  */
 export default async function AdminAuditLogsPage({
   searchParams,
@@ -20,11 +22,14 @@ export default async function AdminAuditLogsPage({
 
   return (
     <div className="space-y-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Audit logs</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          The append-only record of what happened. Entries cannot be edited or deleted.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Audit logs</h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            The append-only record of what happened. Entries cannot be edited or deleted.
+          </p>
+        </div>
+        <ExportButtons action={filters.action} result={filters.result} />
       </div>
 
       <section>
