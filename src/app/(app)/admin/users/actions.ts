@@ -1,9 +1,13 @@
 'use server';
 
 import { headers } from 'next/headers';
+import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/authz/require-permission';
+import { requestMetadata } from '@/lib/audit/log';
 import { listUsers, listPendingInvitations, suspendUser, unsuspendUser } from '@/lib/admin/users';
+import { listUserSessions, revokeUserSession, revokeAllUserSessions } from '@/lib/admin/sessions';
+import { adminResetCredential } from '@/lib/admin/credential-reset';
 import { listRoles, setPersonRoles } from '@/lib/admin/roles';
 import { listDepartments } from '@/lib/admin/departments';
 import { createInvitation, revokeInvitation } from '@/lib/invitations/service';
@@ -81,4 +85,31 @@ export async function setPersonRolesAction(personId: string, roleIds: string[]) 
   await setPersonRoles(auth, personId, roleIds);
   revalidatePath('/admin/users');
   return { ok: true };
+}
+
+export async function getUserSessionsAction(personId: string) {
+  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  return listUserSessions(auth, personId);
+}
+
+export async function revokeUserSessionAction(personId: string, sessionId: string) {
+  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  await revokeUserSession(auth, personId, sessionId);
+  revalidatePath('/admin/users');
+  return { ok: true };
+}
+
+export async function revokeAllUserSessionsAction(personId: string) {
+  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  await revokeAllUserSessions(auth, personId);
+  revalidatePath('/admin/users');
+  return { ok: true };
+}
+
+export async function adminResetCredentialAction(personId: string) {
+  const auth = await requirePermission(await headers(), { permission: 'users.edit' });
+  const meta = requestMetadata(new Headers(await headers()), randomUUID());
+  const result = await adminResetCredential(auth, personId, meta);
+  revalidatePath('/admin/users');
+  return result;
 }
