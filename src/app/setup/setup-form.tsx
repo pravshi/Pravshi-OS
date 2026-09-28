@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { SETUP_TOKEN_PATTERN } from '@/lib/auth/bootstrap-setup';
+import { SETUP_TOKEN_PATTERN } from '@/lib/auth/setup-token';
 import { isCommonPassword } from '@/lib/auth/common-passwords';
 
 /**

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
+import { SETUP_TOKEN_PATTERN } from './setup-token';
 
 /**
  * Completion of the first-run bootstrap: the single moment a login is created for the person
@@ -35,9 +36,6 @@ import { authDb } from '@/lib/db/auth-client';
  * WHEN THE BREACH-LIST CHECK LANDS (blueprint section 25, not yet implemented anywhere) it
  * must cover this path as well as the PASSWORD_SETTING_PATHS listed in server.ts.
  */
-
-/** 32 bytes from a CSPRNG, base64url and unpadded: exactly what the bootstrap script issues. */
-export const SETUP_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 /** Hex SHA-256 of the token string. scripts/bootstrap/run.mjs computes the same digest. */
 export const hashSetupToken = (token: string): string =>
