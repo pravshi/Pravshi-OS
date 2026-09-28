@@ -183,6 +183,20 @@
       "when": 1790542363565,
       "tag": "0025_password_reset_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1790542363565,
+      "tag": "0028_mfa_enforcement_lockout",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790542363565,
+      "tag": "0029_admin_write_functions",
+      "breakpoints": true
     }
   ]
 }
