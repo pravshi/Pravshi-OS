@@ -183,6 +183,13 @@
       "when": 1790542363565,
       "tag": "0025_password_reset_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790542363565,
+      "tag": "0028_admin_write_functions",
+      "breakpoints": true
     }
   ]
 }

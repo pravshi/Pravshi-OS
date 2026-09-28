@@ -44,11 +44,11 @@ export async function createDepartment(
   auth: Authorization,
   input: { code: string; name: string; parentId?: string },
 ): Promise<void> {
+  // Writes go through the SECURITY DEFINER function: app_user holds no
+  // INSERT on departments (migration 0004 revoked it).
   await withAuthorizedDb(auth.ctx, async (tx) => {
     await tx.execute(sql`
-      insert into public.departments (org_id, code, name, parent_id)
-      values (
-        ${auth.ctx.orgId}::uuid,
+      select public.create_department(
         ${input.code},
         ${input.name},
         ${input.parentId ?? null}::uuid
@@ -59,15 +59,6 @@ export async function createDepartment(
 
 export async function archiveDepartment(auth: Authorization, id: string): Promise<void> {
   await withAuthorizedDb(auth.ctx, async (tx) => {
-    const res = await tx.execute<{ id: string }>(sql`
-      update public.departments
-      set status = 'ARCHIVED', updated_at = now()
-      where id = ${id}::uuid
-        and org_id = ${auth.ctx.orgId}::uuid
-        and deleted_at is null
-        and status = 'ACTIVE'
-      returning id
-    `);
-    if (!res.rows[0]) throw new Error('Department not found or already archived.');
+    await tx.execute(sql`select public.archive_department(${id}::uuid)`);
   });
 }
