@@ -410,14 +410,23 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       )
     ).rows[0]!.token_hash;
 
-    // A bare delete as owner (no identity) is refused by the
-    // person_roles_enforce_protection trigger: revoking a protected role requires
-    // a live roles.manage holder to perform the revocation. superAdminA revokes
-    // its own grant, which the trigger allows while it still holds the role.
+    // A bare delete as owner (no identity) is refused twice over: RLS gives
+    // app_user no DELETE on person_roles at all, and the
+    // person_roles_enforce_protection trigger requires a live roles.manage holder
+    // to perform the revocation. So the demotion goes through the legitimate
+    // path instead: a second holder is appointed, then removes the grant with
+    // set_person_roles. The organization is never left without a holder, so the
+    // last-holder rail stays green — the point is only that the INVITER no
+    // longer holds roles.manage when the invitee accepts.
     await inContext(
       { personId: superAdminA, orgId: orgA },
-      `delete from public.person_roles where person_id = $1 and role_id = $2`,
-      [superAdminA, roleSuperAdminA],
+      `select public.set_person_roles($1::uuid, $2::uuid[])`,
+      [adminA, [roleAdminA, roleSuperAdminA]],
+    );
+    await inContext(
+      { personId: adminA, orgId: orgA },
+      `select public.set_person_roles($1::uuid, $2::uuid[])`,
+      [superAdminA, [roleAdminA]],
     );
 
     await expect(acceptAsUser(tokenHash, 'Demoted Invitee')).rejects.toMatchObject({
