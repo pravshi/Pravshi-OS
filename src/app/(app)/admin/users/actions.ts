@@ -88,19 +88,35 @@ export async function setPersonRolesAction(personId: string, roleIds: string[]) 
 }
 
 export async function getUserSessionsAction(personId: string) {
-  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  // minScope GLOBAL: session rows carry no department to scope them to, so a
+  // narrower holder of sessions.revoke could otherwise list any org user's
+  // sessions — including a SUPER_ADMIN's.
+  const auth = await requirePermission(await headers(), {
+    permission: 'sessions.revoke',
+    minScope: 'GLOBAL',
+  });
   return listUserSessions(auth, personId);
 }
 
 export async function revokeUserSessionAction(personId: string, sessionId: string) {
-  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  // minScope GLOBAL: revoking another person's session is an org-wide power;
+  // a DEPARTMENT-scoped holder must not end a SUPER_ADMIN's session.
+  const auth = await requirePermission(await headers(), {
+    permission: 'sessions.revoke',
+    minScope: 'GLOBAL',
+  });
   await revokeUserSession(auth, personId, sessionId);
   revalidatePath('/admin/users');
   return { ok: true };
 }
 
 export async function revokeAllUserSessionsAction(personId: string) {
-  const auth = await requirePermission(await headers(), { permission: 'sessions.revoke' });
+  // minScope GLOBAL: same as revokeUserSessionAction — ending every session of
+  // any org user, including a SUPER_ADMIN, is not a departmental operation.
+  const auth = await requirePermission(await headers(), {
+    permission: 'sessions.revoke',
+    minScope: 'GLOBAL',
+  });
   await revokeAllUserSessions(auth, personId);
   revalidatePath('/admin/users');
   return { ok: true };
