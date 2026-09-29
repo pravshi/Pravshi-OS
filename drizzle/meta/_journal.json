@@ -190,6 +190,13 @@
       "when": 1790542363566,
       "tag": "0026_bootstrap_setup_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1790542363567,
+      "tag": "0030_credential_reset_protected_target",
+      "breakpoints": true
     }
   ]
 }
