@@ -130,9 +130,9 @@ const auditRows = async (requestId: string) =>
 beforeAll(async () => {
   org = await mkOrg(owner, `credreset${RUN}`);
   otherOrg = await mkOrg(owner, `credresetx${RUN}`);
-  dept = await mkDept(owner, org, `CR${RUN}`);
+  dept = await mkDept(owner, org, `CR${RUN.toUpperCase()}`);
 
-  const editorRole = await mkCustomRole(owner, org, `CR_EDIT_${RUN}`, [
+  const editorRole = await mkCustomRole(owner, org, `CR_EDIT_${RUN.toUpperCase()}`, [
     ['users.edit', 'GLOBAL'],
     ['people.view', 'GLOBAL'],
   ]);
@@ -188,7 +188,9 @@ beforeAll(async () => {
   // Derived protection: an unflagged role carrying roles.manage. The grant rides
   // saTarget's identity because the permission trigger treats granting role
   // management as an act of role management.
-  const capRole = await mkCustomRole(owner, org, `CR_CAP_${RUN}`, [['users.edit', 'GLOBAL']]);
+  const capRole = await mkCustomRole(owner, org, `CR_CAP_${RUN.toUpperCase()}`, [
+    ['users.edit', 'GLOBAL'],
+  ]);
   await asIdentity(
     saTarget,
     org,

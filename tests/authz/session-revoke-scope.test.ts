@@ -33,8 +33,8 @@ let saCookie = '';
 
 beforeAll(async () => {
   const org = await mkOrg(owner, `sessscope${RUN}`);
-  const dept = await mkDept(owner, org, `SS${RUN}`);
-  const deptRole = await mkCustomRole(owner, org, `SESS_DEPT_${RUN}`, [
+  const dept = await mkDept(owner, org, `SS${RUN.toUpperCase()}`);
+  const deptRole = await mkCustomRole(owner, org, `SESS_DEPT_${RUN.toUpperCase()}`, [
     ['sessions.revoke', 'DEPARTMENT'],
   ]);
   const holder = await mkAccount(owner, {
