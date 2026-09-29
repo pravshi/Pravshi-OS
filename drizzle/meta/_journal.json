@@ -218,6 +218,13 @@
       "when": 1790542363566,
       "tag": "0029_login_events_self_read",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790720806366,
+      "tag": "0031_crm_core",
+      "breakpoints": true
     }
   ]
 }
