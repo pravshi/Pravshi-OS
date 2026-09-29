@@ -910,7 +910,8 @@ describe('the rest of the model is untouched', () => {
     // Task 1.16 replaced three more in place, so the count holds and four branch on scope.
     // Migrations 0018/0022 added four more scope-driven policies for the invitation
     // flow (invitations, invitation_roles, login_events, departments inviter view).
-    expect(Number(rows[0]!.n)).toBe(21);
+    // The self-service migration (0029) adds one more: login_events_select_self.
+    expect(Number(rows[0]!.n)).toBe(22);
     expect(Number(rows[0]!.with_scope)).toBe(8);
   });
 

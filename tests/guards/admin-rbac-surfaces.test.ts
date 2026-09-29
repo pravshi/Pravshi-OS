@@ -116,9 +116,8 @@ describe('narrow SECURITY DEFINER write pattern', () => {
     const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
       entries: { idx: number; tag: string }[];
     };
-    const last = journal.entries[journal.entries.length - 1];
-    expect(last).toBeDefined();
-    expect(last!.tag).toBe('0028_admin_write_functions');
+    const entry = journal.entries.find((e) => e.tag === '0028_admin_write_functions');
+    expect(entry).toBeDefined();
     const idxs = journal.entries.map((e) => e.idx);
     expect([...idxs].sort((a, b) => a - b)).toEqual(idxs);
   });
