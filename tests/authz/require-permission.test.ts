@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { revokeSessionsFor } from '@/lib/auth/session';
 import { toErrorEnvelope } from '@/lib/authz/errors';
 import { withPermission } from '@/lib/authz/http';
@@ -598,24 +600,29 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has eighteen authz helpers, and still one app_user policy per table', async () => {
+  it('has twenty-three authz helpers, and still one app_user policy per table', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
     );
     expect(helpers.rows.map((r) => r.proname)).toEqual([
       'aal',
+      'audit_two_factor_change',
+      'check_login_lockout',
       'check_rate_limit',
+      'clear_login_lockout',
       'consume_password_reset',
       'has',
       'has_record_grant',
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',
       'org_id',
       'person_id',
+      'record_login_failure',
       'record_password_reset_audit',
       'reports_to_me',
       'request_password_reset',
@@ -623,6 +630,23 @@ describe('the rest of the authorization model is unchanged', () => {
       'stamp_sessions_revoked',
       'update_credential_password',
     ]);
+    // The pin above must agree with the migration SQL (0027 added the five
+    // lockout/MFA helpers); if this fails the literal list is stale.
+    const migrationSql = readdirSync(join(process.cwd(), 'drizzle'))
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+      .join('\n');
+    const sqlNames = [
+      ...new Set(
+        [
+          ...migrationSql.matchAll(
+            /create\s+(?:or\s+replace\s+)?function\s+authz\.([a-z_][a-z0-9_]*)/gi,
+          ),
+        ].map((m) => m[1]!),
+      ),
+    ].sort();
+    expect(sqlNames).toEqual(helpers.rows.map((r) => r.proname));
     const policies = await owner.query<{ n: number }>(
       `select count(*)::int n from pg_policies
        where schemaname = 'public' and 'app_user' = any(roles) and tablename not like '\\_%'`,

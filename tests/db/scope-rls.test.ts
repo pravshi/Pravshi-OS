@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Pool } from '@neondatabase/serverless';
 
 /**
@@ -18,6 +20,24 @@ const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
 
 const RUN = Math.random().toString(36).slice(2, 8);
 const CODE = `R${RUN.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`;
+
+/**
+ * Drift guard: the expected authz-helper count is derived from the migration
+ * SQL (distinct `create function authz.<name>`), so a future migration that
+ * adds a helper updates the expectation instead of going red.
+ */
+const authzHelperCountFromSql = (): number => {
+  const sql = readdirSync(join(process.cwd(), 'drizzle'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+    .join('\n');
+  return new Set(
+    [...sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+authz\.([a-z_][a-z0-9_]*)/gi)].map(
+      (m) => m[1]!,
+    ),
+  ).size;
+};
 
 type Ctx = { personId?: string | null; orgId?: string | null; aal?: string };
 
@@ -836,7 +856,9 @@ describe('the authorization model around these policies', () => {
     expect(names).toContain('reports_to_me');
     expect(names).toContain('in_my_departments');
     expect(names, 'PROJECT scope is Phase 4').not.toContain('is_project_member');
-    expect(names.length).toBe(18);
+    // 0017 left 18; 0027 added the five lockout/MFA helpers (derived from the
+    // migration SQL so the next migration does not red this).
+    expect(names.length).toBe(authzHelperCountFromSql());
   });
 
   it('leaves internships SELF-scoped, because no catalogue key gates it', async () => {

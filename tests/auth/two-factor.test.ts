@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Pool } from '@neondatabase/serverless';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -8,6 +10,24 @@ import { auth, MIN_PASSWORD_LENGTH, sessionAssuranceFor } from '@/lib/auth/serve
 import { resolveAuthContext, revokeSessionsFor } from '@/lib/auth/session';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from '@/lib/auth/schema';
+
+/**
+ * Drift guard: the expected authz-helper count is derived from the migration
+ * SQL (distinct `create function authz.<name>`), so a future migration that
+ * adds a helper updates the expectation instead of going red.
+ */
+const authzHelperCountFromSql = (): number => {
+  const sql = readdirSync(join(process.cwd(), 'drizzle'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+    .join('\n');
+  return new Set(
+    [...sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+authz\.([a-z_][a-z0-9_]*)/gi)].map(
+      (m) => m[1]!,
+    ),
+  ).size;
+};
 
 /**
  * Task 1.13 — TOTP, and whether aal2 can be trusted.
@@ -747,13 +767,16 @@ describe('secret and recovery material', () => {
     );
     expect(Number(rows[0]!.n)).toBe(0);
 
-    // structurally, not just today: no audit trigger exists on the auth schema at all
+    // structurally, not just today: the only audit trigger on the auth schema is
+    // the deliberate TOTP-lifecycle one from 0027, which records action and ids
+    // only — the secret and backup codes never reach audit_logs (asserted above).
     const triggers = await owner.query(
-      `select 1 from pg_trigger t join pg_class c on c.oid=t.tgrelid
+      `select t.tgname name, c.relname tbl
+       from pg_trigger t join pg_class c on c.oid=t.tgrelid
        join pg_namespace n on n.oid=c.relnamespace
        where n.nspname='auth' and not t.tgisinternal`,
     );
-    expect(triggers.rows).toEqual([]);
+    expect(triggers.rows).toEqual([{ name: 'audit_two_factor_change', tbl: 'auth_two_factors' }]);
   });
 
   it('gives the runtime role the minimum it needs on the factor table', async () => {
@@ -833,9 +856,10 @@ describe('the rest of the model is untouched', () => {
       `select p.proname, pg_get_functiondef(p.oid) src from pg_proc p
        join pg_namespace n on n.oid=p.pronamespace where n.nspname='authz'`,
     );
-    expect(rows.length).toBe(18);
-    // Migrations 0023-0025 added narrow password-reset helpers. They are the only
-    // helpers besides aal() allowed to see the auth schema, and each may touch ONLY
+    expect(rows.length).toBe(authzHelperCountFromSql());
+    // Migrations 0023-0025 added narrow password-reset helpers; 0027 added the
+    // login-lockout and MFA-enforcement helpers. They are the only helpers
+    // besides aal() allowed to see the auth schema, and each may touch ONLY
     // the tables listed here. The allow-list pins the exception so a future helper
     // cannot silently widen it.
     const allowedAuthTables: Record<string, string[]> = {
@@ -846,6 +870,17 @@ describe('the rest of the model is untouched', () => {
       // record_password_reset_audit reads auth.auth_users; 'password_reset' is the
       // audit action name string ('auth.password_reset'), not a table reference.
       record_password_reset_audit: ['auth_users', 'password_reset'],
+      // 0027: the lockout helpers touch only the lockout ledger and the login
+      // row it is keyed by. 'login' is the audit action name string
+      // ('auth.login.lockout'), not a table reference.
+      check_login_lockout: ['login_lockouts', 'auth_users'],
+      record_login_failure: ['auth_users', 'login_lockouts', 'login'],
+      clear_login_lockout: ['login_lockouts', 'auth_users'],
+      // The TOTP trigger function reads auth.auth_users to attribute the audit
+      // entry; the auth_two_factors reference lives in the trigger binding, not
+      // the function body.
+      audit_two_factor_change: ['auth_users'],
+      mfa_enrollment_required: ['auth_two_factors'],
     };
     for (const r of rows) {
       // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of

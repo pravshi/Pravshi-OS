@@ -33,6 +33,7 @@ export default function LoginPage() {
       });
       const data = (await res.json().catch(() => null)) as {
         twoFactorRedirect?: boolean;
+        mfaEnrollmentRequired?: boolean;
         error?: string;
       } | null;
 
@@ -42,6 +43,12 @@ export default function LoginPage() {
       }
       if (data.twoFactorRedirect === true) {
         router.push(`/mfa?email=${encodeURIComponent(email.trim())}`);
+        return;
+      }
+      // Privileged roles without a verified TOTP factor are steered to enroll
+      // right after login. The admin layout enforces the same gate server-side.
+      if (data.mfaEnrollmentRequired === true) {
+        router.push('/me/security?enrollment=required');
         return;
       }
       router.push('/');

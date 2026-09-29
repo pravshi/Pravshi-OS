@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Pool } from '@neondatabase/serverless';
 
 /**
@@ -18,6 +20,28 @@ const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
 
 const RUN = Math.random().toString(36).slice(2, 8);
+
+/**
+ * Drift guard: the authz-helper pin below is checked against the migration SQL,
+ * so a future migration that adds a helper fails here with the SQL-derived list
+ * instead of silently drifting the count.
+ */
+const MIGRATION_SQL = readdirSync(join(process.cwd(), 'drizzle'))
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+  .join('\n');
+
+const authzHelperNamesFromSql = (): string[] =>
+  [
+    ...new Set(
+      [
+        ...MIGRATION_SQL.matchAll(
+          /create\s+(?:or\s+replace\s+)?function\s+authz\.([a-z_][a-z0-9_]*)/gi,
+        ),
+      ].map((m) => m[1]!),
+    ),
+  ].sort();
 const CODE = `G${RUN.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`;
 
 let orgA = '';
@@ -913,17 +937,22 @@ describe('the rest of the authorization model is untouched', () => {
     const names = rows.map((r) => r.proname);
     expect(names).toEqual([
       'aal',
+      'audit_two_factor_change',
+      'check_login_lockout',
       'check_rate_limit',
+      'clear_login_lockout',
       'consume_password_reset',
       'has',
       'has_record_grant',
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',
       'org_id',
       'person_id',
+      'record_login_failure',
       'record_password_reset_audit',
       'reports_to_me',
       'request_password_reset',
@@ -931,6 +960,9 @@ describe('the rest of the authorization model is untouched', () => {
       'stamp_sessions_revoked',
       'update_credential_password',
     ]);
+    // The pin above must agree with the migration SQL (0027 added the five
+    // lockout/MFA helpers); if this fails the literal list is stale.
+    expect(authzHelperNamesFromSql()).toEqual(names);
     for (const deferred of ['is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }

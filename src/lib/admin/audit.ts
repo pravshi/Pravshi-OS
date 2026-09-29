@@ -15,11 +15,13 @@ export type AuditLogEntry = {
   action: string;
   entityType: string | null;
   result: string;
+  severity: string | null;
 };
 
 export interface AuditLogFilters {
   action?: string;
   result?: string;
+  severity?: string;
   limit?: number;
 }
 
@@ -36,11 +38,13 @@ export async function queryAuditLogs(
         a.actor_email_snapshot as "actorLabel",
         a.action,
         a.entity_type as "entityType",
-        a.result
+        a.result,
+        a.severity
       from public.audit_logs a
       where a.org_id = ${auth.ctx.orgId}::uuid
         and (${filters.action ?? null}::text is null or a.action = ${filters.action ?? null}::text)
         and (${filters.result ?? null}::text is null or a.result = ${filters.result ?? null}::text)
+        and (${filters.severity ?? null}::text is null or a.severity = ${filters.severity ?? null}::text)
       order by a.occurred_at desc
       limit ${limit}
     `);
