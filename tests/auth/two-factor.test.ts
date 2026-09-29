@@ -767,13 +767,16 @@ describe('secret and recovery material', () => {
     );
     expect(Number(rows[0]!.n)).toBe(0);
 
-    // structurally, not just today: no audit trigger exists on the auth schema at all
+    // structurally, not just today: the only audit trigger on the auth schema is
+    // the deliberate TOTP-lifecycle one from 0027, which records action and ids
+    // only — the secret and backup codes never reach audit_logs (asserted above).
     const triggers = await owner.query(
-      `select 1 from pg_trigger t join pg_class c on c.oid=t.tgrelid
+      `select t.tgname name, c.relname tbl
+       from pg_trigger t join pg_class c on c.oid=t.tgrelid
        join pg_namespace n on n.oid=c.relnamespace
        where n.nspname='auth' and not t.tgisinternal`,
     );
-    expect(triggers.rows).toEqual([]);
+    expect(triggers.rows).toEqual([{ name: 'audit_two_factor_change', tbl: 'auth_two_factors' }]);
   });
 
   it('gives the runtime role the minimum it needs on the factor table', async () => {
