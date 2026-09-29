@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Pool } from '@neondatabase/serverless';
 import { authDbSchema } from '@/lib/auth/schema';
 import { getTableConfig } from 'drizzle-orm/pg-core';
@@ -16,20 +18,29 @@ const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
 
 const RUN = Math.random().toString(36).slice(2, 8);
 
-const AUTH_TABLES = [
-  'auth_accounts',
-  'auth_rate_limits',
-  'auth_sessions',
-  'auth_two_factors',
-  'auth_users',
-  'auth_verifications',
-] as const;
+const AUTH_TABLES = Object.keys(authDbSchema);
 
-// App-managed tables in the auth schema (migration 0024). These are NOT Better Auth
-// tables: Better Auth never touches them. They are reached exclusively through narrow
-// SECURITY DEFINER functions, so unlike the Better Auth tables they carry FORCE RLS
-// with an owner-only policy.
-const APP_AUTH_TABLES = ['api_rate_limits', 'password_resets'] as const;
+// App-managed tables in the auth schema (migrations 0024, 0027). These are NOT
+// Better Auth tables: Better Auth never touches them. They are reached
+// exclusively through narrow SECURITY DEFINER functions, so unlike the Better
+// Auth tables they carry FORCE RLS with an owner-only policy. Derived from the
+// migration SQL so a future app-managed auth table does not drift the pin.
+const APP_AUTH_TABLES: readonly string[] = (() => {
+  const sql = readdirSync(join(process.cwd(), 'drizzle'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+    .join('\n');
+  return [
+    ...new Set(
+      [...sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?auth\.([a-z_][a-z0-9_]*)/gi)].map(
+        (m) => m[1]!,
+      ),
+    ),
+  ]
+    .filter((t) => !AUTH_TABLES.includes(t))
+    .sort();
+})();
 
 let orgA = '';
 let deptA = '';
@@ -96,7 +107,7 @@ describe('the auth schema', () => {
     expect(rows[0]!.owner).toBe('app_owner');
   });
 
-  it('holds exactly the Better Auth tables plus the two app-managed auth tables', async () => {
+  it('holds exactly the Better Auth tables plus the app-managed auth tables', async () => {
     const { rows } = await owner.query<{ tablename: string }>(
       `select tablename from pg_tables where schemaname='auth' order by tablename`,
     );
@@ -126,7 +137,9 @@ describe('the auth schema', () => {
     );
     expect(rows.length).toBe(AUTH_TABLES.length + 1);
     // +1 is password_resets (uuid PK). api_rate_limits is keyed by its text
-    // lookup key and has no id column, so it is absent from this result.
+    // lookup key and has no id column, so it is absent from this result; so is
+    // auth.login_lockouts (0027), whose uuid PK lives on auth_user_id rather
+    // than an id column.
     for (const r of rows) expect(r.data_type, r.table_name).toBe('uuid');
 
     const personCol = await owner.query<{ data_type: string }>(
@@ -221,7 +234,7 @@ describe('privilege posture', () => {
     // boundary is the schema and the enumerated grants, documented in 0013.
     for (const r of rows) {
       if ((APP_AUTH_TABLES as readonly string[]).includes(r.relname)) {
-        // The two app-managed tables are the deliberate exception: Better Auth never
+        // The app-managed tables are the deliberate exception: Better Auth never
         // touches them, they are reached only through narrow SECURITY DEFINER
         // functions, and the owner-only policy keeps app_owner working. FORCE RLS
         // here is defense in depth, not ambiguity.

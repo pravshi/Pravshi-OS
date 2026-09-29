@@ -39,6 +39,18 @@ const Body = z.strictObject({
 const reply = (status: number, body: Record<string, unknown>) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
+/**
+ * Timing parity for the lockout path. A wrong password pays for password-hash
+ * verification inside Better Auth before the generic 401; the locked branch
+ * skips that work and would otherwise answer observably faster, turning the
+ * lockout into a timing oracle. This fixed delay is a coarse countermeasure —
+ * it narrows the gap but does not promise constant time. It runs after the
+ * login event is recorded so only the client-visible response is delayed.
+ */
+const LOCKOUT_TIMING_PARITY_MS = 250;
+const timingParityDelay = () =>
+  new Promise<void>((resolve) => setTimeout(resolve, LOCKOUT_TIMING_PARITY_MS));
+
 /** Threat T-17: state-changing route handlers verify origin. */
 function originAllowed(req: Request): boolean {
   const origin = req.headers.get('origin');
@@ -92,6 +104,8 @@ export async function POST(req: Request) {
       ip,
       userAgent,
     });
+    // Timing parity: do not answer faster than a wrong-password attempt.
+    await timingParityDelay();
     return reply(401, { error: 'INVALID_CREDENTIALS' });
   }
 

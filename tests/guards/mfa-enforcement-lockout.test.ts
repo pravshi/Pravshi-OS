@@ -158,6 +158,20 @@ describe('login route: lockout + enrollment', () => {
     expect(failures).not.toBeNull();
     expect(failures!.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('keeps the locked path timing-indistinguishable from a wrong password', () => {
+    // The locked branch skips password-hash verification, so without a delay it
+    // would answer observably faster and turn the lockout into a timing oracle.
+    // The parity delay must sit on the locked branch, immediately before the
+    // generic reply.
+    const lockedBranch = LOGIN_ROUTE.match(
+      /if \(await isLockedOut\(body\.email\)\) \{[\s\S]*?\n  \}/,
+    )?.[0];
+    expect(lockedBranch).toBeDefined();
+    expect(lockedBranch!).toMatch(/await timingParityDelay\(\)/);
+    expect(lockedBranch!).toMatch(/return reply\(401, \{ error: 'INVALID_CREDENTIALS' \}\)/);
+    expect(LOGIN_ROUTE).toMatch(/LOCKOUT_TIMING_PARITY_MS/);
+  });
 });
 
 describe('login page: enrollment steer', () => {
