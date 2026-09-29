@@ -14,7 +14,10 @@ import { requireAuthenticated } from './page';
 
 const NAV_PERMISSIONS = [
   'users.view',
+  'users.manage',
   'roles.view',
+  'roles.manage',
+  'teams.view',
   'departments.view',
   'audit_logs.view',
 ] as const;
