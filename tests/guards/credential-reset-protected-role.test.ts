@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
  * view of the role tables is self-only, so the target-side question cannot be a
  * join in the application: it would see none of the target's assignments and
  * conclude "not protected", failing OPEN. The truth comes from a SECURITY
- * DEFINER function (migration 0027) that answers as the owner through
+ * DEFINER function (migration 0030) that answers as the owner through
  * role_is_protected().
  *
  * Like the other guards this is a heuristic over source text, not a type proof:
@@ -20,12 +20,12 @@ import { describe, expect, it } from 'vitest';
  */
 
 const MIGRATION = readFileSync(
-  join(process.cwd(), 'drizzle/0027_credential_reset_protected_target.sql'),
+  join(process.cwd(), 'drizzle/0030_credential_reset_protected_target.sql'),
   'utf8',
 );
 const SERVICE = readFileSync(join(process.cwd(), 'src/lib/admin/credential-reset.ts'), 'utf8');
 
-describe('0027: person_holds_protected_role is an app-callable definer function', () => {
+describe('0030: person_holds_protected_role is an app-callable definer function', () => {
   it('is SECURITY DEFINER with a pinned search_path', () => {
     expect(MIGRATION).toMatch(/security definer/);
     expect(MIGRATION).toMatch(/set search_path = ''/);

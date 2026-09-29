@@ -22,7 +22,7 @@ import {
  * TARGET: a holder of users.edit who may not manage protected roles must not
  * reset a protected-role holder's credential — the latent account takeover.
  * The target-side truth comes from public.person_holds_protected_role()
- * (migration 0027), a SECURITY DEFINER function, because app_user's RLS view of
+ * (migration 0030), a SECURITY DEFINER function, because app_user's RLS view of
  * the role tables is self-only and a join in the application would fail OPEN.
  *
  * Everything here is real: a real organization, real role assignments through
@@ -220,7 +220,7 @@ afterAll(async () => {
   await asUser.end();
 });
 
-describe('person_holds_protected_role() (migration 0027)', () => {
+describe('person_holds_protected_role() (migration 0030)', () => {
   it('is true for a flagged protected role holder', async () => {
     expect((await guardRows(saTarget, org)).target_protected).toBe(true);
     expect((await guardRows(saTarget2, org)).target_protected).toBe(true);
