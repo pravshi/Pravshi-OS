@@ -308,6 +308,7 @@ export async function removeCompanyContact(
 ): Promise<void> {
   await withAuthorizedDb(auth.ctx, async (tx) => {
     await assertCompanyVisible(tx, auth, companyId);
+    await assertContactVisible(tx, auth, contactId);
   });
   await softDeleteRow(
     auth,

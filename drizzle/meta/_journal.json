@@ -257,6 +257,14 @@
       "tag": "0035_relationships",
       "breakpoints": true,
       "hash": "50688b8df7ffef56542b9955217bd5e08008877a3ca73b8323d24e811f61e2fd"
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790786703983,
+      "tag": "0036_trackb_security_hardening",
+      "breakpoints": true,
+      "hash": "6a9aee643d96477cda0a79efc235b9d2cce4104ed266a167c49be5f500468677"
     }
   ]
 }
