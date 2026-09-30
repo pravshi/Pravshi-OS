@@ -64,8 +64,12 @@ test.describe('R49 identity lifecycle', () => {
         `select id, key from public.roles where org_id = $1 and key = any('{SUPER_ADMIN,EMPLOYEE}')`,
         [orgId],
       );
-      const superAdminRole = (roles as { id: string; key: string }[]).find((r) => r.key === 'SUPER_ADMIN')!.id;
-      employeeRoleId = (roles as { id: string; key: string }[]).find((r) => r.key === 'EMPLOYEE')!.id;
+      const superAdminRole = (roles as { id: string; key: string }[]).find(
+        (r) => r.key === 'SUPER_ADMIN',
+      )!.id;
+      employeeRoleId = (roles as { id: string; key: string }[]).find(
+        (r) => r.key === 'EMPLOYEE',
+      )!.id;
 
       const passwordHash = await hashPassword(ADMIN_PASSWORD);
       const authUser = await owner.query(
@@ -111,9 +115,7 @@ test.describe('R49 identity lifecycle', () => {
   /** The table row for the invitee on /admin/users. */
   const inviteeRow = (page: Page) => page.getByRole('row', { name: new RegExp(INVITEE_EMAIL) });
 
-  test('1 · invite — admin issues an invitation through the application API', async ({
-    page,
-  }) => {
+  test('1 · invite — admin issues an invitation through the application API', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     const res = await page.request.post('/api/invitations', {
       data: {
@@ -171,10 +173,7 @@ test.describe('R49 identity lifecycle', () => {
     await inviteeRow(page).getByRole('button', { name: 'Suspend' }).click();
     await expect(page.getByRole('heading', { name: /suspend this login/i })).toBeVisible();
     // The confirm dialog has its own Suspend button.
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Suspend' })
-      .click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Suspend' }).click();
 
     await expect(inviteeRow(page).getByText('Suspended')).toBeVisible();
   });
