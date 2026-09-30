@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { Pool } from '@neondatabase/serverless';
 
 /**
@@ -135,10 +136,13 @@ const mkRoleFor = async (
   permission: string,
   scope: string,
 ) => {
+  // roles_key_format (migration 0008) requires ^[A-Z][A-Z0-9_]{1,39}$; the
+  // call-site suffixes are lowercase with hyphens, so normalize here.
+  const roleKey = key.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
   const role = (
     await owner.query<{ id: string }>(
       `insert into public.roles (org_id, key, name) values ($1,$2,$3) returning id`,
-      [org, key, `CRM ${key}`],
+      [org, roleKey, `CRM ${roleKey}`],
     )
   ).rows[0]!.id;
   await owner.query(
@@ -165,7 +169,7 @@ let vSelf = '';
 let vNone = '';
 let vSuspended = ''; // GLOBAL view but a suspended engagement
 // creators
-let c1 = ''; // companies.create + contacts.create + deals.create, SELF
+let c1 = ''; // companies.create/view + contacts.create/view + deals.create/view, SELF
 // editors (owner-laundering tests)
 let eDept = ''; // companies.edit DEPARTMENT
 let eSelf = ''; // s1 with companies.edit SELF, assigned in beforeAll
@@ -259,14 +263,19 @@ beforeAll(async () => {
   await mkRoleFor(orgA, vSelf, `${CODE}-s`, 'companies.view', 'SELF');
   await mkRoleFor(orgA, vSuspended, `${CODE}-susp`, 'companies.view', 'GLOBAL');
   await mkRoleFor(orgA, c1, `${CODE}-cc`, 'companies.create', 'SELF');
+  await mkRoleFor(orgA, c1, `${CODE}-ccv`, 'companies.view', 'SELF');
   await mkRoleFor(orgA, c1, `${CODE}-ctc`, 'contacts.create', 'SELF');
+  await mkRoleFor(orgA, c1, `${CODE}-ctcv`, 'contacts.view', 'SELF');
   await mkRoleFor(orgA, c1, `${CODE}-dc`, 'deals.create', 'SELF');
+  await mkRoleFor(orgA, c1, `${CODE}-dcv`, 'deals.view', 'SELF');
   await mkRoleFor(orgA, gContacts, `${CODE}-gc`, 'contacts.view', 'GLOBAL');
   await mkRoleFor(orgA, gDeals, `${CODE}-gd`, 'deals.view', 'GLOBAL');
   await mkRoleFor(orgA, dSelf, `${CODE}-ds`, 'deals.view', 'SELF');
   await mkRoleFor(orgA, vGlobal, `${CODE}-ge`, 'companies.edit', 'GLOBAL');
   await mkRoleFor(orgA, eDept, `${CODE}-ed`, 'companies.edit', 'DEPARTMENT');
+  await mkRoleFor(orgA, eDept, `${CODE}-edv`, 'companies.view', 'DEPARTMENT');
   await mkRoleFor(orgA, eSelf, `${CODE}-es`, 'companies.edit', 'SELF');
+  await mkRoleFor(orgB, sForeign, `${CODE}-sf`, 'companies.view', 'GLOBAL');
 
   // fixture rows, written as the owning actor so the audit trail names a person
   coS1 = (
@@ -454,18 +463,22 @@ describe('contacts and deals visibility', () => {
 
 describe('insert rules', () => {
   it('a holder of companies.create inserts a company they own, and forged stamps are overwritten', async () => {
-    const rows = await inContext<{ id: string }>(
+    // NB: no RETURNING — c1 holds companies.create but not companies.view, and
+    // Postgres requires a SELECT policy for INSERT...RETURNING. The id is
+    // generated up front so the test verifies the insert itself, not the read-back.
+    const id = randomUUID();
+    await inContext(
       ctxOf(c1),
-      `insert into public.companies (org_id, name, owner_person_id, created_by, updated_by)
-       values ($1,'C1 Co',$2,$3,$3) returning id`,
-      [orgA, c1, s1], // the caller tries to forge s1's attribution
+      `insert into public.companies (id, org_id, name, owner_person_id, created_by, updated_by)
+       values ($1,$2,'C1 Co',$3,$4,$4)`,
+      [id, orgA, c1, s1], // the caller tries to forge s1's attribution
     );
-    expect(rows).toHaveLength(1);
     // the stamp trigger overwrites whatever the caller supplied
     const stamped = await owner.query<{ created_by: string; updated_by: string }>(
       `select created_by, updated_by from public.companies where id=$1`,
-      [rows[0]!.id],
+      [id],
     );
+    expect(stamped.rows).toHaveLength(1);
     expect(stamped.rows[0]!.created_by).toBe(c1);
     expect(stamped.rows[0]!.updated_by).toBe(c1);
   });
@@ -708,6 +721,24 @@ describe('no DELETE for the runtime roles', () => {
   });
 });
 
+it('pg_class.relforcerowsecurity is true for companies, contacts and deals', async () => {
+  // FORCE ROW LEVEL SECURITY subjects even the table owner to the policies, so a
+  // privileged session cannot sidestep tenant isolation. The catalogue flag is
+  // the durable assertion; the behavioral suites above prove the policies bite.
+  const rows = await owner.query<{ tablename: string; rls: boolean; force: boolean }>(
+    `select c.relname as tablename, c.relrowsecurity as rls, c.relforcerowsecurity as force
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+       and c.relname in ('companies', 'contacts', 'deals')`,
+  );
+  expect(rows.rows.map((r) => r.tablename).sort()).toEqual(['companies', 'contacts', 'deals']);
+  for (const r of rows.rows) {
+    expect(r.rls).toBe(true);
+    expect(r.force).toBe(true);
+  }
+});
+
 // ═════════════════════════════════════════════════════════════════════════════════
 // no-identity fail-closed
 // ═════════════════════════════════════════════════════════════════════════════════
@@ -836,7 +867,29 @@ describe('referential integrity', () => {
     ).toBe('23514');
   });
 
-  it('ON DELETE SET NULL: deleting a company via owner detaches its contacts', async () => {
+  it('hard-deleting a company with live contacts fails closed', async () => {
+    const co = (
+      await owner.query<{ id: string }>(
+        `insert into public.companies (org_id, name, owner_person_id) values ($1,'Anchored',$2) returning id`,
+        [orgA, s1],
+      )
+    ).rows[0]!.id;
+    await owner.query(
+      `insert into public.contacts (org_id, company_id, first_name, owner_person_id)
+       values ($1,$2,'Live',$3)`,
+      [orgA, co, s1],
+    );
+    // contacts.company_id is (company_id, org_id) → companies(id, org_id)
+    // ON DELETE SET NULL. Postgres nulls EVERY column of a composite FK on the
+    // referenced delete, so this would null the contact's org_id — which is
+    // NOT NULL. The delete must error and the company must survive: fail closed.
+    const st = await sqlstateOf(owner.query(`delete from public.companies where id=$1`, [co]));
+    expect(st).not.toBe('NO ERROR');
+    const still = await owner.query(`select id from public.companies where id=$1`, [co]);
+    expect(still.rows).toHaveLength(1);
+  });
+
+  it('ON DELETE SET NULL: with contacts detached first, the company delete goes through', async () => {
     const co = (
       await owner.query<{ id: string }>(
         `insert into public.companies (org_id, name, owner_person_id) values ($1,'Doomed',$2) returning id`,
@@ -850,10 +903,10 @@ describe('referential integrity', () => {
         [orgA, co, s1],
       )
     ).rows[0]!.id;
-    // app_owner bypasses the runtime DELETE ban; the FK nulls company_id.
-    // (org_id stays put: only app_owner can do this, and only after contacts are gone
-    // or detached — here there are none left attached after the nulling.)
-    await owner.query(`delete from public.contacts where id=$1`, [ct]);
+    // Detach first: with nothing referencing the company, SET NULL has nothing
+    // to null and the delete succeeds. app_owner bypasses the runtime DELETE
+    // ban (app_user has no DELETE policy at all — see 'no DELETE' above).
+    await owner.query(`update public.contacts set company_id=null where id=$1`, [ct]);
     await owner.query(`delete from public.companies where id=$1`, [co]);
     const gone = await owner.query(`select id from public.companies where id=$1`, [co]);
     expect(gone.rows).toHaveLength(0);
@@ -975,17 +1028,20 @@ describe('permission catalogue', () => {
     'companies.view',
     'companies.create',
     'companies.edit',
+    'companies.delete',
     'contacts.view',
     'contacts.create',
     'contacts.edit',
+    'contacts.delete',
     'contacts.export',
     'deals.view',
     'deals.create',
     'deals.edit',
+    'deals.delete',
     'deals.export',
   ];
 
-  it('seeds exactly the 11 crm keys with the right sensitivity flags', async () => {
+  it('seeds exactly the 14 crm keys with the right sensitivity flags', async () => {
     const rows = await owner.query<{ key: string; module: string; is_sensitive: boolean }>(
       `select key, module, is_sensitive from public.permissions where module='crm' order by key`,
     );
@@ -999,7 +1055,7 @@ describe('permission catalogue', () => {
     }
   });
 
-  it('SUPER_ADMIN holds GLOBAL on all 11 keys in an existing org', async () => {
+  it('SUPER_ADMIN holds GLOBAL on all 14 keys in an existing org', async () => {
     const rows = await owner.query<{ n: string }>(
       `select count(*) n
        from public.role_permissions rp
@@ -1009,7 +1065,49 @@ describe('permission catalogue', () => {
          and rp.scope = 'GLOBAL'::public.access_scope`,
       [orgA],
     );
-    expect(Number(rows.rows[0]!.n)).toBe(11);
+    expect(Number(rows.rows[0]!.n)).toBe(14);
+  });
+
+  it('standard roles hold the crm grants from the seed matrix', async () => {
+    // orgA was created after migration 0033, so this exercises the replaced
+    // seed_system_roles(); the backfill in the same migration covers older orgs.
+    const rows = await owner.query<{ role: string; key: string; scope: string }>(
+      `select r.key as role, p.key as key, rp.scope::text as scope
+       from public.role_permissions rp
+       join public.roles r on r.id = rp.role_id
+       join public.permissions p on p.id = rp.permission_id
+       where r.org_id = $1
+         and r.key in ('ADMIN', 'SALES_MANAGER', 'SALES')
+         and p.module = 'crm'`,
+      [orgA],
+    );
+    const have = new Set(rows.rows.map((r) => `${r.role}|${r.key}|${r.scope}`));
+    for (const k of EXPECTED) {
+      expect(have.has(`ADMIN|${k}|GLOBAL`)).toBe(true);
+      expect(have.has(`SALES_MANAGER|${k}|DEPARTMENT`)).toBe(true);
+    }
+    const SALES_KEYS = [
+      'companies.view',
+      'companies.create',
+      'companies.edit',
+      'contacts.view',
+      'contacts.create',
+      'contacts.edit',
+      'deals.view',
+      'deals.create',
+      'deals.edit',
+    ];
+    for (const k of SALES_KEYS) expect(have.has(`SALES|${k}|SELF`)).toBe(true);
+    // SALES mirrors the leads.* SELF column: no delete, no export.
+    for (const k of [
+      'companies.delete',
+      'contacts.delete',
+      'contacts.export',
+      'deals.delete',
+      'deals.export',
+    ]) {
+      expect(have.has(`SALES|${k}|SELF`)).toBe(false);
+    }
   });
 });
 
