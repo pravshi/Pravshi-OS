@@ -58,7 +58,7 @@ const ROUTE_FILES = [
   'src/app/api/crm/pipelines/route.ts', // GET list · POST create
   'src/app/api/crm/pipelines/[id]/route.ts', // GET · PATCH · DELETE
   'src/app/api/crm/pipelines/[id]/stages/route.ts', // GET · POST
-  'src/app/api/crm/pipeline-stages/[stageId]/route.ts', // PATCH · DELETE (DELETE always 400)
+  'src/app/api/crm/pipeline-stages/[stageId]/route.ts', // PATCH only (no DELETE: append-only)
   'src/app/api/crm/deals/[id]/move/route.ts', // POST moveDealToStage
   'src/app/api/crm/pipelines/[id]/forecast/route.ts', // GET forecast
   'src/app/api/crm/pipelines/[id]/velocity/route.ts', // GET velocity
@@ -261,7 +261,7 @@ describe('pipelines entry points authorize first', () => {
     ],
     [
       'src/app/api/crm/pipeline-stages/[stageId]/route.ts',
-      ['pipeline_stages.manage', 'pipeline_stages.manage'],
+      ['pipeline_stages.manage'],
     ],
     ['src/app/api/crm/deals/[id]/move/route.ts', ['deals.edit']],
     ['src/app/api/crm/pipelines/[id]/forecast/route.ts', ['pipelines.view']],
