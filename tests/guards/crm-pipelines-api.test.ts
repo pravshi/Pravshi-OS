@@ -259,10 +259,7 @@ describe('pipelines entry points authorize first', () => {
       'src/app/api/crm/pipelines/[id]/stages/route.ts',
       ['pipeline_stages.manage', 'pipelines.view'],
     ],
-    [
-      'src/app/api/crm/pipeline-stages/[stageId]/route.ts',
-      ['pipeline_stages.manage'],
-    ],
+    ['src/app/api/crm/pipeline-stages/[stageId]/route.ts', ['pipeline_stages.manage']],
     ['src/app/api/crm/deals/[id]/move/route.ts', ['deals.edit']],
     ['src/app/api/crm/pipelines/[id]/forecast/route.ts', ['pipelines.view']],
     ['src/app/api/crm/pipelines/[id]/velocity/route.ts', ['pipelines.view']],

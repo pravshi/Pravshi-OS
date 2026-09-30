@@ -41,7 +41,13 @@ export function PipelinesList({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <form action="/crm/pipelines" method="get" className="flex gap-2">
-          <Input name="search" defaultValue={search} placeholder="Search pipelines…" maxLength={128} className="w-56" />
+          <Input
+            name="search"
+            defaultValue={search}
+            placeholder="Search pipelines…"
+            maxLength={128}
+            className="w-56"
+          />
           <Button type="submit" variant="outline">
             Search
           </Button>

@@ -6,11 +6,7 @@ import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/crm/empty-state';
-import type {
-  PipelineWithStages,
-  Velocity,
-  VelocityStageRow,
-} from '@/components/crm/types';
+import type { PipelineWithStages, Velocity, VelocityStageRow } from '@/components/crm/types';
 import { StageColumn } from './StageColumn';
 import { DealCard } from './DealCard';
 import type { BoardDeal } from './board-types';
@@ -63,10 +59,7 @@ export function PipelineKanban({
   const stages = pipeline.stages;
   const stageIds = useMemo(() => new Set(stages.map((s) => s.id)), [stages]);
 
-  const initial = useMemo(
-    () => groupDeals(initialDeals, stageIds),
-    [initialDeals, stageIds],
-  );
+  const initial = useMemo(() => groupDeals(initialDeals, stageIds), [initialDeals, stageIds]);
   const [columns, setColumns] = useState<ColumnsState>(initial.columns);
   const [unassigned, setUnassigned] = useState<BoardDeal[]>(initial.unassigned);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -209,13 +202,16 @@ export function PipelineKanban({
 
       {dealsUnavailable && (
         <p className="rounded-lg border border-line bg-ground px-4 py-3 text-sm text-ink-muted">
-          Deal cards are hidden because you don&apos;t hold <code>deals.view</code>. Stage
-          counts and the forecast above still reflect the full pipeline.
+          Deal cards are hidden because you don&apos;t hold <code>deals.view</code>. Stage counts
+          and the forecast above still reflect the full pipeline.
         </p>
       )}
 
       {unassigned.length > 0 && (
-        <section aria-label="Unassigned deals" className="rounded-lg border border-dashed border-line p-3">
+        <section
+          aria-label="Unassigned deals"
+          className="rounded-lg border border-dashed border-line p-3"
+        >
           <p className="mb-2 text-sm text-ink-muted">
             {unassigned.length} visible {unassigned.length === 1 ? 'deal is' : 'deals are'} not
             placed on any stage — the deals API does not expose stage membership yet. Drag{' '}

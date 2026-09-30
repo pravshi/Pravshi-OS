@@ -28,15 +28,14 @@ export default async function PipelineBoardPage({ params }: { params: Promise<{ 
   await requireCrmPagePermission('pipelines', 'view');
   const { id } = await params;
 
-  const [pipelineRes, pipelinesRes, forecastRes, velocityRes, dealsRes, held] =
-    await Promise.all([
-      getPipelineAction(id),
-      listPipelinesAction({ limit: 100, offset: 0 }),
-      getForecastAction(id),
-      getVelocityAction(id),
-      listBoardDealsAction(),
-      getCrmPermissions(),
-    ]);
+  const [pipelineRes, pipelinesRes, forecastRes, velocityRes, dealsRes, held] = await Promise.all([
+    getPipelineAction(id),
+    listPipelinesAction({ limit: 100, offset: 0 }),
+    getForecastAction(id),
+    getVelocityAction(id),
+    listBoardDealsAction(),
+    getCrmPermissions(),
+  ]);
 
   if (isErrorEnvelope(pipelineRes)) {
     return (

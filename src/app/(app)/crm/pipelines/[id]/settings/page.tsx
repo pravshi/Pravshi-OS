@@ -38,7 +38,9 @@ export default async function PipelineSettingsPage({
 
   const pipeline = pipelineRes;
   const perms = uiPermissionsFor(held, 'pipelines');
-  const stages = [...pipeline.stages].sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : 1));
+  const stages = [...pipeline.stages].sort(
+    (a, b) => a.position - b.position || (a.id < b.id ? -1 : 1),
+  );
 
   return (
     <div className="space-y-6">
@@ -70,8 +72,8 @@ export default async function PipelineSettingsPage({
         )}
         <AddStageForm pipelineId={pipeline.id} />
         <p className="rounded-lg border border-line bg-ground px-4 py-3 text-sm text-ink-muted">
-          Stages with history cannot be deleted — rename or repurpose them instead. Deleting a
-          stage would orphan its deal history, so the API refuses it by design.
+          Stages with history cannot be deleted — rename or repurpose them instead. Deleting a stage
+          would orphan its deal history, so the API refuses it by design.
         </p>
       </section>
     </div>
@@ -80,7 +82,10 @@ export default async function PipelineSettingsPage({
 
 function BackLink({ pipelineId }: { pipelineId: string }) {
   return (
-    <Link href={`/crm/pipelines/${pipelineId}`} className="text-sm text-ink-muted hover:text-foreground">
+    <Link
+      href={`/crm/pipelines/${pipelineId}`}
+      className="text-sm text-ink-muted hover:text-foreground"
+    >
       ← Back to board
     </Link>
   );

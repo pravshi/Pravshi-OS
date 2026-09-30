@@ -33,7 +33,12 @@ function terminalOf(stage: PipelineStage): Terminal {
   return 'open';
 }
 
-function toPayload(values: { name: string; probability: number; color: string | null; terminal: Terminal }) {
+function toPayload(values: {
+  name: string;
+  probability: number;
+  color: string | null;
+  terminal: Terminal;
+}) {
   return {
     name: values.name,
     probability: values.probability,
@@ -128,10 +133,22 @@ export function StageRowEditor({
           />
         </div>
         <div className="flex items-center gap-1" aria-label="Reorder stage">
-          <Button variant="outline" size="sm" disabled={isFirst || pending} onClick={() => void move(-1)} title="Move earlier">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isFirst || pending}
+            onClick={() => void move(-1)}
+            title="Move earlier"
+          >
             ↑
           </Button>
-          <Button variant="outline" size="sm" disabled={isLast || pending} onClick={() => void move(1)} title="Move later">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isLast || pending}
+            onClick={() => void move(1)}
+            title="Move later"
+          >
             ↓
           </Button>
         </div>
