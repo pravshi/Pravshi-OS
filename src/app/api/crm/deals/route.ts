@@ -4,7 +4,7 @@ import { invalidRequestResponse, noStoreHeaders } from '@/lib/crm/http';
 
 /**
  * /api/crm/deals — collection.
- * GET  ?search=&stage=&limit=&offset=  deals.view   → { rows, total, limit, offset }
+ * GET  ?search=&stage=&limit=&offset=&companyId=&contactId=  deals.view → { rows, total, limit, offset }
  *      (search matches title prefix; stage is one of NEW/QUALIFIED/PROPOSAL/NEGOTIATION/WON/LOST)
  * POST {…deal fields}                  deals.create → 201 + the created deal
  */
@@ -19,6 +19,8 @@ export const GET = withPermission({ permission: 'deals.view' }, async (request, 
       stage: url.searchParams.get('stage') ?? undefined,
       limit: url.searchParams.get('limit') ?? undefined,
       offset: url.searchParams.get('offset') ?? undefined,
+      companyId: url.searchParams.get('companyId') ?? undefined,
+      contactId: url.searchParams.get('contactId') ?? undefined,
     });
     return Response.json(page, { headers: noStoreHeaders });
   } catch (error) {

@@ -9,7 +9,7 @@ import { invalidRequestResponse, noStoreHeaders } from '@/lib/crm/http';
  * PATCH  deals.edit → 200 + the updated deal
  *        (a stage change also maintains closed_at: entering WON/LOST stamps it,
  *         leaving for an open stage clears it)
- * DELETE deals.edit → 200 { ok: true } (soft delete: deleted_at = now())
+ * DELETE deals.delete → 200 { ok: true } (soft delete: deleted_at = now())
  */
 
 export const dynamic = 'force-dynamic';
@@ -48,7 +48,7 @@ export const PATCH = withPermission<{ id: string }>(
 );
 
 export const DELETE = withPermission<{ id: string }>(
-  { permission: 'deals.edit' },
+  { permission: 'deals.delete' },
   async (_request, authorization, params) => {
     try {
       const id = uuid.parse(params.id);

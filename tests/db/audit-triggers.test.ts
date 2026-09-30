@@ -30,6 +30,12 @@ const AUDITED = [
   'engagements',
 ] as const;
 
+// Phase 2 CRM Core (migration 0031): the first app_user-WRITABLE audited tables, so they
+// cannot share AUDITED — the definer-chain test below asserts every AUDITED table is
+// SELECT-only for app_user, which is false for these by design.
+const AUDITED_CRM = ['companies', 'contacts', 'deals'] as const;
+const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM] as const;
+
 let orgA = '';
 let orgB = '';
 let deptA = '';
@@ -192,7 +198,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the seven approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the ten approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -202,7 +208,7 @@ describe('the trigger allow-list', () => {
        where n.nspname='public' and not t.tgisinternal and p.proname='audit_row_change'
        order by c.relname`,
     );
-    expect(rows.map((r) => r.relname)).toEqual([...AUDITED].sort());
+    expect(rows.map((r) => r.relname)).toEqual([...AUDITED_ALL].sort());
     for (const r of rows) {
       expect(r.tgname, r.relname).toBe(`${r.relname}_audit`);
       // AFTER (bit 1 clear), ROW (bit 0 set), INSERT|DELETE|UPDATE (bits 2,3,4)
@@ -242,7 +248,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where n.nspname='public' and p.proname='audit_row_change'`,
     );
-    expect(rows.map((r) => r.relname).sort()).toEqual([...AUDITED].sort());
+    expect(rows.map((r) => r.relname).sort()).toEqual([...AUDITED_ALL].sort());
   });
 
   it('leaves every audit trigger enabled', async () => {
@@ -252,7 +258,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(7);
+    expect(rows.length).toBe(10);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -719,9 +725,10 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 22: the audit-triggers migration itself added none; the 22nd is
-    // login_events_select_self from the self-service migration (0029).
-    expect(Number(policies.rows[0]!.n)).toBe(22);
+    // 31: the audit-triggers migration itself added none; the 22 pre-existing
+    // policies plus the 9 CRM policies (select/insert/update × companies,
+    // contacts, deals) from the CRM core migration (0033).
+    expect(Number(policies.rows[0]!.n)).toBe(31);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

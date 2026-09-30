@@ -7,7 +7,7 @@ import { invalidRequestResponse, noStoreHeaders } from '@/lib/crm/http';
  * /api/crm/contacts/[id] — single contact.
  * GET    contacts.view → the contact, or 404 when invisible/deleted
  * PATCH  contacts.edit → 200 + the updated contact
- * DELETE contacts.edit → 200 { ok: true } (soft delete: deleted_at = now())
+ * DELETE contacts.delete → 200 { ok: true } (soft delete: deleted_at = now())
  */
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +46,7 @@ export const PATCH = withPermission<{ id: string }>(
 );
 
 export const DELETE = withPermission<{ id: string }>(
-  { permission: 'contacts.edit' },
+  { permission: 'contacts.delete' },
   async (_request, authorization, params) => {
     try {
       const id = uuid.parse(params.id);

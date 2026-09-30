@@ -1,5 +1,6 @@
 'use server';
 
+import { z } from 'zod';
 import { headers } from 'next/headers';
 import { requirePermission } from '@/lib/authz/require-permission';
 import { actionError } from '@/lib/authz/http';
@@ -19,13 +20,17 @@ import {
 } from '@/lib/crm/contacts';
 import { listDeals, getDeal, createDeal, updateDeal, deleteDeal } from '@/lib/crm/deals';
 
+/** Boundary UUID check (A3): malformed ids fail before PostgreSQL ever sees them. */
+const uuid = z.string().uuid();
+
 /**
  * /crm Server Actions — authorize first, always.
  *
  * Each action takes untrusted `input: unknown`; the service layer validates it with
  * zod before any database access. Input shapes are the Create/Update inputs from
- * src/lib/crm/schema.ts; list inputs are { search?, limit?, offset? } (deals also
- * accept an optional stage). Failures return the actionError() envelope.
+ * src/lib/crm/schema.ts; list inputs are { search?, limit?, offset? } (contacts also
+ * accept an optional companyId; deals also accept optional stage, companyId,
+ * contactId). Failures return the actionError() envelope.
  */
 
 // ── Companies ────────────────────────────────────────────────────────────────────
@@ -46,7 +51,7 @@ export async function getCompanyAction(id: string) {
     const authorization = await requirePermission(await headers(), {
       permission: 'companies.view',
     });
-    return await getCompany(authorization, id);
+    return await getCompany(authorization, uuid.parse(id));
   } catch (error) {
     return actionError(error);
   }
@@ -68,7 +73,7 @@ export async function updateCompanyAction(id: string, input: unknown) {
     const authorization = await requirePermission(await headers(), {
       permission: 'companies.edit',
     });
-    return await updateCompany(authorization, id, input);
+    return await updateCompany(authorization, uuid.parse(id), input);
   } catch (error) {
     return actionError(error);
   }
@@ -77,9 +82,9 @@ export async function updateCompanyAction(id: string, input: unknown) {
 export async function deleteCompanyAction(id: string) {
   try {
     const authorization = await requirePermission(await headers(), {
-      permission: 'companies.edit',
+      permission: 'companies.delete',
     });
-    await deleteCompany(authorization, id);
+    await deleteCompany(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
     return actionError(error);
@@ -104,7 +109,7 @@ export async function getContactAction(id: string) {
     const authorization = await requirePermission(await headers(), {
       permission: 'contacts.view',
     });
-    return await getContact(authorization, id);
+    return await getContact(authorization, uuid.parse(id));
   } catch (error) {
     return actionError(error);
   }
@@ -126,7 +131,7 @@ export async function updateContactAction(id: string, input: unknown) {
     const authorization = await requirePermission(await headers(), {
       permission: 'contacts.edit',
     });
-    return await updateContact(authorization, id, input);
+    return await updateContact(authorization, uuid.parse(id), input);
   } catch (error) {
     return actionError(error);
   }
@@ -135,9 +140,9 @@ export async function updateContactAction(id: string, input: unknown) {
 export async function deleteContactAction(id: string) {
   try {
     const authorization = await requirePermission(await headers(), {
-      permission: 'contacts.edit',
+      permission: 'contacts.delete',
     });
-    await deleteContact(authorization, id);
+    await deleteContact(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
     return actionError(error);
@@ -162,7 +167,7 @@ export async function getDealAction(id: string) {
     const authorization = await requirePermission(await headers(), {
       permission: 'deals.view',
     });
-    return await getDeal(authorization, id);
+    return await getDeal(authorization, uuid.parse(id));
   } catch (error) {
     return actionError(error);
   }
@@ -184,7 +189,7 @@ export async function updateDealAction(id: string, input: unknown) {
     const authorization = await requirePermission(await headers(), {
       permission: 'deals.edit',
     });
-    return await updateDeal(authorization, id, input);
+    return await updateDeal(authorization, uuid.parse(id), input);
   } catch (error) {
     return actionError(error);
   }
@@ -193,9 +198,9 @@ export async function updateDealAction(id: string, input: unknown) {
 export async function deleteDealAction(id: string) {
   try {
     const authorization = await requirePermission(await headers(), {
-      permission: 'deals.edit',
+      permission: 'deals.delete',
     });
-    await deleteDeal(authorization, id);
+    await deleteDeal(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
     return actionError(error);

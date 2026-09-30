@@ -7,6 +7,7 @@ import {
   CreateDealSchema,
   DEAL_STAGES,
   DealStageSchema,
+  ListContactsQuerySchema,
   ListDealsQuerySchema,
   ListQuerySchema,
   UpdateCompanySchema,
@@ -105,6 +106,27 @@ describe('CRM services reach Postgres only through withAuthorizedDb()', () => {
       expect(code).toMatch(/auth\.ctx\.personId/);
       expect(code).toMatch(/auth\.ctx\.orgId/);
     });
+
+    it(`${file}: cross-org FK references are probed for visibility before write (A1)`, () => {
+      const code = stripComments(read(file));
+      if (file === 'src/lib/crm/companies.ts') {
+        // companies take no FK references — nothing to probe
+        expect(code).not.toMatch(/assertCompanyVisible|assertDealReferences/);
+        return;
+      }
+      if (file === 'src/lib/crm/contacts.ts') {
+        // create + update probe the linked company inside the same transaction
+        expect(code).toMatch(/assertCompanyVisible\(tx, auth, data\.companyId\)/g);
+        expect(
+          (code.match(/assertCompanyVisible\(tx, auth, data\.companyId\)/g) ?? []).length,
+        ).toBe(2);
+      }
+      if (file === 'src/lib/crm/deals.ts') {
+        // create probes both references; update probes the effective post-update pair
+        expect(code).toMatch(/assertDealReferences\(tx, auth, data\.companyId, data\.contactId\)/);
+        expect(code).toMatch(/assertDealReferences\(tx, auth, companyId, contactId\)/);
+      }
+    });
   }
 });
 
@@ -113,7 +135,7 @@ describe('CRM entry points authorize first', () => {
     expect(analyseServerActions(read(ACTION_FILE))).toEqual([]);
   });
 
-  it('CRM actions use the view/create/edit permission triple, nothing else', () => {
+  it('CRM actions use the view/create/edit/delete permission set, nothing else', () => {
     const code = stripComments(read(ACTION_FILE));
     const keys = [...code.matchAll(/permission:\s*'([^']+)'/g)].map((m) => m[1] as string);
     expect(keys.length).toBeGreaterThan(0);
@@ -121,24 +143,50 @@ describe('CRM entry points authorize first', () => {
       'companies.view',
       'companies.create',
       'companies.edit',
+      'companies.delete',
       'contacts.view',
       'contacts.create',
       'contacts.edit',
+      'contacts.delete',
       'deals.view',
       'deals.create',
       'deals.edit',
+      'deals.delete',
     ]);
     for (const key of keys) expect(allowed.has(key), key).toBe(true);
-    // reads gate on .view, creates on .create, updates and soft deletes on .edit
+    // reads gate on .view, creates on .create, updates on .edit, deletes on .delete
     expect(code).toMatch(/permission: 'companies\.view'/);
     expect(code).toMatch(/permission: 'deals\.create'/);
     expect(code).toMatch(/permission: 'contacts\.edit'/);
+    expect(code).toMatch(/permission: 'companies\.delete'/);
+    expect(code).toMatch(/permission: 'contacts\.delete'/);
+    expect(code).toMatch(/permission: 'deals\.delete'/);
   });
 
   it('every CRM route handler is built as withPermission(...)', () => {
     for (const file of ROUTE_FILES) {
       expect(analyseRoute(read(file)), file).toEqual([]);
     }
+  });
+
+  it('CRM routes gate DELETE on the .delete keys (A2)', () => {
+    for (const file of ROUTE_FILES.filter((f) => f.includes('[id]'))) {
+      const code = stripComments(read(file));
+      expect(code, `${file}: DELETE must require the .delete key`).toMatch(
+        /export const DELETE = withPermission<\{ id: string \}>\(\s*\{\s*permission: '\w+\.delete'/,
+      );
+      expect(code, `${file}: DELETE must not fall back to .edit`).not.toMatch(
+        /export const DELETE = withPermission<\{ id: string \}>\(\s*\{\s*permission: '\w+\.edit'/,
+      );
+    }
+  });
+
+  it('CRM actions validate id as UUID at the boundary (A3)', () => {
+    const code = stripComments(read(ACTION_FILE));
+    expect(code).toMatch(/const uuid = z\.string\(\)\.uuid\(\);/);
+    // all nine id-taking actions route their id through the UUID schema
+    const parsed = (code.match(/uuid\.parse\(id\)/g) ?? []).length;
+    expect(parsed).toBe(9);
   });
 
   it('CRM routes reject invalid input with 400, not the 500 envelope', () => {
@@ -290,5 +338,18 @@ describe('CRM validation boundary', () => {
     expect(ListDealsQuerySchema.parse({ stage: 'WON' }).stage).toBe('WON');
     expect(ListDealsQuerySchema.parse({}).stage).toBeUndefined();
     expect(ListDealsQuerySchema.safeParse({ stage: 'CLOSED' }).success).toBe(false);
+  });
+
+  it('list queries accept optional related-record filters as UUIDs (U3)', () => {
+    const companyId = '123e4567-e89b-12d3-a456-426614174000';
+    expect(ListContactsQuerySchema.parse({ companyId }).companyId).toBe(companyId);
+    expect(ListContactsQuerySchema.parse({}).companyId).toBeUndefined();
+    expect(ListContactsQuerySchema.safeParse({ companyId: 'nope' }).success).toBe(false);
+    expect(ListDealsQuerySchema.parse({ companyId, contactId: companyId }).contactId).toBe(
+      companyId,
+    );
+    expect(ListDealsQuerySchema.safeParse({ contactId: 'nope' }).success).toBe(false);
+    // the base list query stays filter-free and strict
+    expect(ListQuerySchema.safeParse({ companyId }).success).toBe(false);
   });
 });

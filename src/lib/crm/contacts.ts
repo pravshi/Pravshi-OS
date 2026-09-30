@@ -2,12 +2,13 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
+import { assertCompanyVisible } from './refs';
 import {
   CreateContactSchema,
-  ListQuerySchema,
+  ListContactsQuerySchema,
   UpdateContactSchema,
   type Contact,
-  type ListQuery,
+  type ListContactsQuery,
   type Page,
   type UpdateContactInput,
 } from './schema';
@@ -56,20 +57,23 @@ function searchWhere(search: string | undefined) {
 }
 
 export async function listContacts(auth: Authorization, input: unknown): Promise<Page<Contact>> {
-  const query: ListQuery = ListQuerySchema.parse(input);
+  const query: ListContactsQuery = ListContactsQuerySchema.parse(input);
+  // U3: server-side related-record filter (replaces client-side filtering of a
+  // capped list on detail pages).
+  const companyWhere = query.companyId ? sql` and c.company_id = ${query.companyId}::uuid` : sql``;
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
       tx.execute<Contact>(sql`
         select ${SELECT_COLUMNS}
         ${FROM}
-        where ${BASE_WHERE(auth)} ${searchWhere(query.search)}
+        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${companyWhere}
         order by c.last_name asc, c.first_name asc, c.id asc
         limit ${query.limit} offset ${query.offset}
       `),
       tx.execute<{ total: number }>(sql`
         select count(*)::int as total
         from public.contacts c
-        where ${BASE_WHERE(auth)} ${searchWhere(query.search)}
+        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${companyWhere}
       `),
     ]);
     return {
@@ -98,6 +102,9 @@ export async function getContact(auth: Authorization, id: string): Promise<Conta
 export async function createContact(auth: Authorization, input: unknown): Promise<Contact> {
   const data = CreateContactSchema.parse(input);
   const id = await withAuthorizedDb(auth.ctx, async (tx) => {
+    // A1: the referenced company must be visible in the caller's org — a
+    // cross-tenant UUID fails closed here, not as a 500 FK violation.
+    if (data.companyId) await assertCompanyVisible(tx, auth, data.companyId);
     const res = await tx.execute<{ id: string }>(sql`
       insert into public.contacts (
         org_id, owner_person_id,
@@ -152,6 +159,8 @@ export async function updateContact(
     return sql`${sql.raw(column)} = ${value ?? null}`;
   });
   const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+    // A1: probe a newly linked company before the update.
+    if (data.companyId) await assertCompanyVisible(tx, auth, data.companyId);
     const res = await tx.execute(sql`
       update public.contacts c
       set ${sql.join(sets, sql`, `)}, updated_at = now()

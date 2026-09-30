@@ -4,7 +4,7 @@ import { invalidRequestResponse, noStoreHeaders } from '@/lib/crm/http';
 
 /**
  * /api/crm/contacts — collection.
- * GET  ?search=&limit=&offset=   contacts.view   → { rows, total, limit, offset }
+ * GET  ?search=&limit=&offset=&companyId=   contacts.view   → { rows, total, limit, offset }
  *      (search matches name prefix or email prefix)
  * POST {…contact fields}          contacts.create → 201 + the created contact
  */
@@ -20,6 +20,7 @@ export const GET = withPermission(
         search: url.searchParams.get('search') ?? undefined,
         limit: url.searchParams.get('limit') ?? undefined,
         offset: url.searchParams.get('offset') ?? undefined,
+        companyId: url.searchParams.get('companyId') ?? undefined,
       });
       return Response.json(page, { headers: noStoreHeaders });
     } catch (error) {

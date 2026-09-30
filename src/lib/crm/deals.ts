@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
+import { assertDealReferences } from './refs';
 import {
   CreateDealSchema,
   ListDealsQuerySchema,
@@ -71,19 +72,24 @@ export async function listDeals(auth: Authorization, input: unknown): Promise<Pa
   const query: ListDealsQuery = ListDealsQuerySchema.parse(input);
   const stage = query.stage;
   const stageWhere = stage ? sql` and d.stage = ${stage}` : sql``;
+  // U3: server-side related-record filters (replaces client-side filtering of a
+  // capped list on detail pages).
+  const companyWhere = query.companyId ? sql` and d.company_id = ${query.companyId}::uuid` : sql``;
+  const contactWhere = query.contactId ? sql` and d.contact_id = ${query.contactId}::uuid` : sql``;
+  const relatedWhere = sql`${companyWhere} ${contactWhere}`;
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
       tx.execute<Deal>(sql`
         select ${SELECT_COLUMNS}
         ${FROM}
-        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${stageWhere}
+        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${stageWhere} ${relatedWhere}
         order by d.updated_at desc, d.id asc
         limit ${query.limit} offset ${query.offset}
       `),
       tx.execute<{ total: number }>(sql`
         select count(*)::int as total
         from public.deals d
-        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${stageWhere}
+        where ${BASE_WHERE(auth)} ${searchWhere(query.search)} ${stageWhere} ${relatedWhere}
       `),
     ]);
     return {
@@ -113,6 +119,9 @@ export async function createDeal(auth: Authorization, input: unknown): Promise<D
   const data = CreateDealSchema.parse(input);
   const closed = CLOSED_STAGES.has(data.stage);
   const id = await withAuthorizedDb(auth.ctx, async (tx) => {
+    // A1: referenced company/contact must be visible in the caller's org, and a
+    // contact must belong to the deal's company (composite FK in 0033).
+    await assertDealReferences(tx, auth, data.companyId, data.contactId);
     const res = await tx.execute<{ id: string }>(sql`
       insert into public.deals (
         org_id, owner_person_id,
@@ -181,6 +190,25 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
     return sql`${sql.raw(column)} = ${value ?? null}`;
   });
   const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+    // A1: probe the effective post-update references. Untouched references keep
+    // their current values so the contact↔company pairing stays verifiable.
+    let companyId: string | null | undefined = 'companyId' in data ? data.companyId : undefined;
+    let contactId: string | null | undefined = 'contactId' in data ? data.contactId : undefined;
+    if (companyId !== undefined || contactId !== undefined) {
+      const cur = await tx.execute<{ company_id: string | null; contact_id: string | null }>(
+        sql`
+          select d.company_id, d.contact_id
+          from public.deals d
+          where d.id = ${id}::uuid
+            and d.org_id = ${auth.ctx.orgId}::uuid
+            and d.deleted_at is null
+        `,
+      );
+      const row = cur.rows[0];
+      if (companyId === undefined) companyId = row?.company_id ?? null;
+      if (contactId === undefined) contactId = row?.contact_id ?? null;
+      await assertDealReferences(tx, auth, companyId, contactId);
+    }
     const res = await tx.execute(sql`
       update public.deals d
       set ${sql.join(sets, sql`, `)}, updated_at = now()

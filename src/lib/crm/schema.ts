@@ -5,16 +5,14 @@ import { z } from 'zod';
  * and REST bodies/query strings alike — is validated here, at the boundary, before a
  * service function touches the database.
  *
- * ── COLUMN CONTRACT WITH MIGRATION 0031 ─────────────────────────────────────────
+ * ── COLUMN CONTRACT WITH MIGRATION 0033 ─────────────────────────────────────────
  *
- * The tables do not exist in this branch yet (the Database Architect is implementing
- * migration 0031 in parallel). The services in this module address the tables with raw
- * SQL, so a column-name drift between this file and 0031 is a runtime error, not a
- * type error. The assumed columns per table:
+ * The services in this module address the tables with raw SQL, so a column-name drift
+ * between this file and 0033 is a runtime error, not a type error. The columns per table:
  *
  *   companies: id, org_id, name, domain, industry, size, website, phone,
- *              address_line1, address_line2, address_city, address_state,
- *              address_postal_code, country_code, owner_person_id,
+ *              address_line1, address_line2, city, state,
+ *              postal_code, country_code, owner_person_id,
  *              created_at, updated_at, deleted_at
  *              (+ created_by/updated_by, stamped by trigger — never written here)
  *   contacts:  id, org_id, company_id, first_name, last_name, email, phone,
@@ -24,11 +22,12 @@ import { z } from 'zod';
  *              probability, owner_person_id, expected_close_date, closed_at,
  *              created_at, updated_at, deleted_at (+ created_by/updated_by)
  *
- * If 0031 names an address column differently, update the SQL in companies.ts only.
+ * Wire contract: the API speaks camelCase; SQL aliases translate (city AS "addressCity").
+ * If 0033 names a column differently, update the SQL in companies.ts only.
  *
- * The permissions catalogue must carry companies.view/create/edit,
- * contacts.view/create/edit and deals.view/create/edit before these endpoints can
- * answer anything other than 403 — requirePermission() fails closed on an unknown key.
+ * The permissions catalogue must carry companies/contacts/deals view/create/edit/delete
+ * (module 'crm', seeded by migration 0033) before these endpoints can answer anything
+ * other than 403 — requirePermission() fails closed on an unknown key.
  */
 
 const uuid = z.string().uuid();
@@ -61,6 +60,14 @@ export type Page<T> = {
   limit: number;
   offset: number;
 };
+
+/** List query for contacts: pagination plus an optional owning-company filter
+ * (U3 — detail pages fetch related records server-side instead of filtering a
+ * capped list in the browser). */
+export const ListContactsQuerySchema = ListQuerySchema.extend({
+  companyId: uuid.optional(),
+});
+export type ListContactsQuery = z.infer<typeof ListContactsQuerySchema>;
 
 // ── Companies ────────────────────────────────────────────────────────────────────
 
@@ -154,9 +161,12 @@ export type DealStage = (typeof DEAL_STAGES)[number];
 
 export const DealStageSchema = z.enum(DEAL_STAGES);
 
-/** List query for deals: pagination plus an optional pipeline-stage filter. */
+/** List query for deals: pagination plus optional pipeline-stage and
+ * related-record filters (U3). */
 export const ListDealsQuerySchema = ListQuerySchema.extend({
   stage: DealStageSchema.optional(),
+  companyId: uuid.optional(),
+  contactId: uuid.optional(),
 });
 export type ListDealsQuery = z.infer<typeof ListDealsQuerySchema>;
 

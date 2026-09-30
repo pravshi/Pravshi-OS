@@ -7,7 +7,7 @@ import { invalidRequestResponse, noStoreHeaders } from '@/lib/crm/http';
  * /api/crm/companies/[id] — single company.
  * GET    companies.view → the company, or 404 when invisible/deleted
  * PATCH  companies.edit → 200 + the updated company
- * DELETE companies.edit → 200 { ok: true } (soft delete: deleted_at = now())
+ * DELETE companies.delete → 200 { ok: true } (soft delete: deleted_at = now())
  */
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +46,7 @@ export const PATCH = withPermission<{ id: string }>(
 );
 
 export const DELETE = withPermission<{ id: string }>(
-  { permission: 'companies.edit' },
+  { permission: 'companies.delete' },
   async (_request, authorization, params) => {
     try {
       const id = uuid.parse(params.id);

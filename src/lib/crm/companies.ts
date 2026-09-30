@@ -35,9 +35,9 @@ const SELECT_COLUMNS = sql`
   c.phone,
   c.address_line1 as "addressLine1",
   c.address_line2 as "addressLine2",
-  c.address_city as "addressCity",
-  c.address_state as "addressState",
-  c.address_postal_code as "addressPostalCode",
+  c.city as "addressCity",
+  c.state as "addressState",
+  c.postal_code as "addressPostalCode",
   c.country_code as "countryCode",
   c.owner_person_id as "ownerPersonId",
   c.created_at as "createdAt",
@@ -102,8 +102,8 @@ export async function createCompany(auth: Authorization, input: unknown): Promis
       insert into public.companies (
         org_id, owner_person_id,
         name, domain, industry, size, website, phone,
-        address_line1, address_line2, address_city, address_state,
-        address_postal_code, country_code
+        address_line1, address_line2, city, state,
+        postal_code, country_code
       ) values (
         ${auth.ctx.orgId}::uuid, ${auth.ctx.personId}::uuid,
         ${data.name}, ${data.domain ?? null}, ${data.industry ?? null},
@@ -142,9 +142,9 @@ const UPDATE_COLUMNS: Record<keyof UpdateCompanyInput, string> = {
   phone: 'phone',
   addressLine1: 'address_line1',
   addressLine2: 'address_line2',
-  addressCity: 'address_city',
-  addressState: 'address_state',
-  addressPostalCode: 'address_postal_code',
+  addressCity: 'city',
+  addressState: 'state',
+  addressPostalCode: 'postal_code',
   countryCode: 'country_code',
 };
 

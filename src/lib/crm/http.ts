@@ -4,6 +4,14 @@ import { ZodError } from 'zod';
  * REST plumbing for the CRM routes. Input validation failures are a 400
  * INVALID_REQUEST with the first problem described; everything else propagates
  * to withPermission(), which answers with the section 24 envelope.
+ *
+ * Why a REST surface alongside the server actions (A4): the actions in
+ * src/app/(app)/crm/actions.ts are React-bound — they cannot serve external
+ * integrations, mobile clients, or machine-to-machine callers. These routes are
+ * the stable HTTP API for those consumers. The two surfaces stay in lockstep by
+ * sharing the service layer (src/lib/crm/*): identical zod validation,
+ * identical permission keys, identical audit writes. Any behavior change must
+ * land in the service, never in one surface alone.
  */
 
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
