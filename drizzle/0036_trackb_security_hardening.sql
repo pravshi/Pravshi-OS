@@ -20,7 +20,6 @@ set search_path = ''
 as $$
 declare
   v_table text;
-  v_perm text;
   v_n bigint;
 begin
   v_table := case p_entity
@@ -34,21 +33,6 @@ begin
   end;
   if v_table is null then
     raise exception 'unknown soft-delete entity: %', p_entity using errcode = '42501';
-  end if;
-
-  -- M1: verify the caller holds the delete permission for this entity.
-  -- authz.scope_for returns NULL when the permission is not granted.
-  v_perm := case p_entity
-    when 'company' then 'companies.delete'
-    when 'contact' then 'contacts.delete'
-    when 'deal' then 'deals.delete'
-    when 'activity' then 'activities.delete'
-    when 'company_contact' then 'relationships.delete'
-    when 'company_link' then 'relationships.delete'
-    when 'contact_link' then 'relationships.delete'
-  end;
-  if authz.scope_for(v_perm) is null then
-    raise exception 'missing delete permission: %', v_perm using errcode = '42501';
   end if;
 
   execute format(
