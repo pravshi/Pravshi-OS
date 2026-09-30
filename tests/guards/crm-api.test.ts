@@ -34,6 +34,7 @@ const SERVICE_FILES = [
   'src/lib/crm/companies.ts',
   'src/lib/crm/contacts.ts',
   'src/lib/crm/deals.ts',
+  'src/lib/crm/activities.ts',
 ] as const;
 
 const ACTION_FILE = 'src/app/(app)/crm/actions.ts';
@@ -45,6 +46,8 @@ const ROUTE_FILES = [
   'src/app/api/crm/contacts/[id]/route.ts',
   'src/app/api/crm/deals/route.ts',
   'src/app/api/crm/deals/[id]/route.ts',
+  'src/app/api/crm/activities/route.ts',
+  'src/app/api/crm/activities/[id]/route.ts',
 ] as const;
 
 const stripComments = (source: string) =>
@@ -91,8 +94,15 @@ describe('CRM services reach Postgres only through withAuthorizedDb()', () => {
       const code = stripComments(read(file));
       expect(code).not.toMatch(/\bdelete\s+from\b/i);
       expect(code).not.toMatch(/deleted_at\s*=\s*null/i);
-      // soft deletes stamp the clock, they do not take it from input
-      expect(code).toMatch(/deleted_at\s*=\s*now\(\)/i);
+      // Soft deletes go through softDeleteRow() (src/lib/crm/soft-delete.ts),
+      // which enforces the UPDATE policy as app_user and then calls the
+      // SECURITY DEFINER public.crm_soft_delete(). A plain
+      // UPDATE ... SET deleted_at = now() fails 42501 because PostgreSQL
+      // checks the SELECT policy's `deleted_at is null` against the
+      // post-update row — so the service files must not set deleted_at
+      // directly; the clock is stamped inside crm_soft_delete().
+      expect(code).toMatch(/\bsoftDeleteRow\s*\(/);
+      expect(code).not.toMatch(/deleted_at\s*=\s*now\(\)/i);
     });
 
     it(`${file}: never writes created_by/updated_by or client-supplied identity`, () => {
@@ -126,6 +136,13 @@ describe('CRM services reach Postgres only through withAuthorizedDb()', () => {
         expect(code).toMatch(/assertDealReferences\(tx, auth, data\.companyId, data\.contactId\)/);
         expect(code).toMatch(/assertDealReferences\(tx, auth, companyId, contactId\)/);
       }
+      if (file === 'src/lib/crm/activities.ts') {
+        // Track B: the polymorphic link has no FK, so the visibility probe is the
+        // only enforcement point — create must probe before insert.
+        expect(code).toMatch(
+          /assertActivityReferences\(tx, auth, data\.entityType, data\.entityId\)/,
+        );
+      }
     });
   }
 });
@@ -152,6 +169,14 @@ describe('CRM entry points authorize first', () => {
       'deals.create',
       'deals.edit',
       'deals.delete',
+      'activities.view',
+      'activities.create',
+      'activities.edit',
+      'activities.delete',
+      'relationships.view',
+      'relationships.create',
+      'relationships.edit',
+      'relationships.delete',
     ]);
     for (const key of keys) expect(allowed.has(key), key).toBe(true);
     // reads gate on .view, creates on .create, updates on .edit, deletes on .delete
@@ -161,6 +186,14 @@ describe('CRM entry points authorize first', () => {
     expect(code).toMatch(/permission: 'companies\.delete'/);
     expect(code).toMatch(/permission: 'contacts\.delete'/);
     expect(code).toMatch(/permission: 'deals\.delete'/);
+    expect(code).toMatch(/permission: 'activities\.view'/);
+    expect(code).toMatch(/permission: 'activities\.create'/);
+    expect(code).toMatch(/permission: 'activities\.edit'/);
+    expect(code).toMatch(/permission: 'activities\.delete'/);
+    expect(code).toMatch(/permission: 'relationships\.view'/);
+    expect(code).toMatch(/permission: 'relationships\.create'/);
+    expect(code).toMatch(/permission: 'relationships\.edit'/);
+    expect(code).toMatch(/permission: 'relationships\.delete'/);
   });
 
   it('every CRM route handler is built as withPermission(...)', () => {
@@ -184,9 +217,9 @@ describe('CRM entry points authorize first', () => {
   it('CRM actions validate id as UUID at the boundary (A3)', () => {
     const code = stripComments(read(ACTION_FILE));
     expect(code).toMatch(/const uuid = z\.string\(\)\.uuid\(\);/);
-    // all nine id-taking actions route their id through the UUID schema
+    // all twelve id-taking actions route their id through the UUID schema
     const parsed = (code.match(/uuid\.parse\(id\)/g) ?? []).length;
-    expect(parsed).toBe(9);
+    expect(parsed).toBe(12);
   });
 
   it('CRM routes reject invalid input with 400, not the 500 envelope', () => {

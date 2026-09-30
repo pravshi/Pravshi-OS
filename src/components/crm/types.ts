@@ -9,10 +9,22 @@ import type { ErrorEnvelope } from '@/lib/authz/errors';
  */
 export {
   DEAL_STAGES,
+  ACTIVITY_TYPES,
+  ACTIVITY_ENTITY_TYPES,
+  COMPANY_LINK_TYPES,
+  CONTACT_LINK_TYPES,
   type DealStage,
+  type ActivityType,
+  type ActivityEntityType,
+  type CompanyLinkType,
+  type ContactLinkType,
   type Company,
   type Contact,
   type Deal,
+  type Activity,
+  type CompanyContact,
+  type CompanyLink,
+  type ContactLink,
   type Page,
 } from '@/lib/crm/schema';
 import type { Contact } from '@/lib/crm/schema';
@@ -22,6 +34,9 @@ export const COMPANY_SIZES = ['STARTUP', 'SMB', 'MID_MARKET', 'ENTERPRISE'] as c
 export type CompanySize = (typeof COMPANY_SIZES)[number];
 
 export type CrmResult<T> = T | ErrorEnvelope;
+
+/** Re-exported so client components never import @/lib/authz directly. */
+export type { ErrorEnvelope };
 
 /** Server actions return failures as data: { error: { code, message, ... } }. */
 export function isErrorEnvelope(value: unknown): value is ErrorEnvelope {

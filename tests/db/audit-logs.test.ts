@@ -803,13 +803,17 @@ describe('function properties', () => {
     }
   });
 
-  it('confines dynamic SQL to the DDL routine, where it is unavoidable', async () => {
+  it('confines dynamic SQL to the DDL routine and the soft-delete helper, where it is unavoidable', async () => {
     const { rows } = await owner.query<{ proname: string }>(
       `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        where n.nspname in ('public','authz') and p.prosecdef
-         and pg_get_functiondef(p.oid) ~* '(^|[^a-z_])execute[[:space:]]+format'`,
+         and pg_get_functiondef(p.oid) ~* '(^|[^a-z_])execute[[:space:]]+format'
+       order by p.proname`,
     );
-    expect(rows.map((r) => r.proname)).toEqual(['ensure_audit_log_partitions']);
+    // ensure_audit_log_partitions builds partition DDL; crm_soft_delete (0034) builds one
+    // UPDATE per call, but the table name comes from a hardcoded CASE allow-list and is
+    // interpolated with %I — no caller-controlled identifier ever reaches the SQL.
+    expect(rows.map((r) => r.proname)).toEqual(['crm_soft_delete', 'ensure_audit_log_partitions']);
   });
 });
 
@@ -914,8 +918,12 @@ describe('the rest of the model is untouched', () => {
     // The CRM migration (0033) adds nine: select/insert/update on each of companies,
     // contacts, and deals — six of them scope-driven (the select and update policies
     // branch on scope_for for view/edit), so with_scope rises from eight to fourteen.
-    expect(Number(rows[0]!.n)).toBe(31);
-    expect(Number(rows[0]!.with_scope)).toBe(14);
+    // The Track B migrations add twelve more: select/insert/update on activities
+    // (0034) and on company_contacts, company_links and contact_links (0035) — eight
+    // of them scope-driven (select/update branch on scope_for for view/edit), so
+    // with_scope rises from fourteen to twenty-two.
+    expect(Number(rows[0]!.n)).toBe(43);
+    expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {
@@ -966,7 +974,9 @@ describe('the rest of the model is untouched', () => {
     // Task 1.10 asserted this set was EMPTY, because blueprint 19.3's trigger source was a
     // separate task and starting it early would have gone unnoticed. Task 1.11 filled it,
     // and the assertion inverts rather than disappears: the set is now closed at seven.
-    // The CRM migration (0033) adds its three tables, closing the set at ten.
+    // The CRM migration (0033) adds its three tables, closing the set at ten. The Track B
+    // migrations add four more — activities (0034) and company_contacts, company_links,
+    // contact_links (0035) — closing the set at fourteen.
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
     // mechanism entirely.
@@ -979,7 +989,11 @@ describe('the rest of the model is untouched', () => {
        order by 1`,
     );
     expect(rows.map((r) => r.relname)).toEqual([
+      'activities',
       'companies',
+      'company_contacts',
+      'company_links',
+      'contact_links',
       'contacts',
       'deals',
       'engagements',

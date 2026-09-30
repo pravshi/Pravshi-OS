@@ -34,7 +34,14 @@ const AUDITED = [
 // cannot share AUDITED — the definer-chain test below asserts every AUDITED table is
 // SELECT-only for app_user, which is false for these by design.
 const AUDITED_CRM = ['companies', 'contacts', 'deals'] as const;
-const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM] as const;
+// Phase 2 Track B (migrations 0034/0035): the activity log and the relationship tables.
+const AUDITED_TRACKB = [
+  'activities',
+  'company_contacts',
+  'company_links',
+  'contact_links',
+] as const;
+const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM, ...AUDITED_TRACKB] as const;
 
 let orgA = '';
 let orgB = '';
@@ -198,7 +205,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the ten approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the fourteen approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -258,7 +265,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(14);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -725,10 +732,12 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 31: the audit-triggers migration itself added none; the 22 pre-existing
+    // 43: the audit-triggers migration itself added none; the 22 pre-existing
     // policies plus the 9 CRM policies (select/insert/update × companies,
-    // contacts, deals) from the CRM core migration (0033).
-    expect(Number(policies.rows[0]!.n)).toBe(31);
+    // contacts, deals) from the CRM core migration (0033), plus the 12 Track B
+    // policies (select/insert/update × activities, company_contacts,
+    // company_links, contact_links) from migrations 0034/0035.
+    expect(Number(policies.rows[0]!.n)).toBe(43);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

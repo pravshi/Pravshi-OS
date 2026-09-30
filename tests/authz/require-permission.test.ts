@@ -654,11 +654,13 @@ describe('the rest of the authorization model is unchanged', () => {
       `select count(*)::int n from pg_policies
        where schemaname = 'public' and 'app_user' = any(roles) and tablename not like '\\_%'`,
     );
-    // 31: login_events carries two app_user policies by design — the invitation flow's
+    // 43: login_events carries two app_user policies by design — the invitation flow's
     // scope-driven one plus login_events_select_self from the self-service migration —
-    // and the CRM migration (0033) adds nine more (select/insert/update on each of
-    // companies, contacts, deals).
-    expect(policies.rows[0]!.n).toBe(31);
+    // the CRM migration (0033) adds nine more (select/insert/update on each of
+    // companies, contacts, deals), and the Track B migrations (0034/0035) add twelve
+    // more (select/insert/update on activities, company_contacts, company_links and
+    // contact_links).
+    expect(policies.rows[0]!.n).toBe(43);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

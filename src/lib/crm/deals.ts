@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
+import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { assertDealReferences } from './refs';
 import {
@@ -236,17 +237,12 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
 
 /** Soft delete only: sets deleted_at. There is no hard DELETE path. */
 export async function deleteDeal(auth: Authorization, id: string): Promise<void> {
-  const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
-    const res = await tx.execute(sql`
-      update public.deals d
-      set deleted_at = now(), updated_at = now()
-      where d.id = ${id}::uuid
-        and ${BASE_WHERE(auth)}
-      returning d.id
-    `);
-    return res.rowCount ?? 0;
-  });
-  await assertTargetAffected(auth, affected);
+  await softDeleteRow(
+    auth,
+    'deal',
+    sql`public.deals d`,
+    sql`d.id = ${id}::uuid and ${BASE_WHERE(auth)}`,
+  );
   await writeAuditEntry(
     auth.ctx,
     {

@@ -6,6 +6,7 @@ import { DetailField, DetailLink } from '@/components/crm/detail-fields';
 import { EditableSection } from '@/components/crm/editable-section';
 import { DeleteDialog } from '@/components/crm/delete-dialog';
 import { CompanyForm } from '@/components/crm/company-form';
+import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import {
   isErrorEnvelope,
   contactDisplayName,
@@ -48,6 +49,9 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   const company = companyRes;
   const perms = uiPermissionsFor(held, 'companies');
+  // The timeline's create form gates on activities.create independently of the
+  // company permissions.
+  const activityPerms = uiPermissionsFor(held, 'activities');
   // Related records are filtered server-side (companyId); the API enforces the
   // caller's permissions on each list call independently.
   const contacts = isErrorEnvelope(contactsRes) ? [] : contactsRes.rows;
@@ -122,6 +126,13 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
       <RelatedContacts contacts={contacts} />
       <RelatedDeals deals={deals} />
+
+      <ActivityTimeline
+        entityType="company"
+        entityId={id}
+        entityName={company.name}
+        canCreate={activityPerms.canCreate}
+      />
     </div>
   );
 }

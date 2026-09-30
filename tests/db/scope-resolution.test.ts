@@ -169,7 +169,7 @@ const departmentsOf = async (ctx: Ctx) =>
 /**
  * has() and scope_for() for EVERY permission in the catalogue, in one round trip. Run on
  * the owner connection so the permissions table itself is not RLS-filtered — the point is
- * to ask about all 82 keys, including the ones this identity does not hold.
+ * to ask about all 104 keys, including the ones this identity does not hold.
  */
 const sweep = (ctx: Ctx) =>
   asActor<{ key: string; h: boolean; s: string | null }>(
@@ -179,7 +179,7 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  expect(rows.length, `${label}: catalogue size`).toBe(96);
+  expect(rows.length, `${label}: catalogue size`).toBe(104);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -882,7 +882,7 @@ describe('RLS', () => {
     expect(rows).toEqual([]);
   });
 
-  it('keeps one app_user policy per table (two on login_events), fourteen of them scope-driven', async () => {
+  it('keeps one app_user policy per table (two on login_events), twenty-two of them scope-driven', async () => {
     // Scope resolution arrived in Task 1.8; Task 1.16 gave people, engagements and
     // engagement_events the database.md 4.2 template, replacing their SELF policies in place.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
@@ -897,13 +897,17 @@ describe('RLS', () => {
     // SELF read for /me/security alongside the invitation flow's scope-driven policy.
     // The CRM migration (0033) adds nine more: select/insert/update on each of companies,
     // contacts, and deals.
-    expect(Number(rows[0]!.n)).toBe(31);
+    // The Track B migrations (0034/0035) add twelve more: select/insert/update on
+    // activities, company_contacts, company_links and contact_links.
+    expect(Number(rows[0]!.n)).toBe(43);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
     // migration (0033) — the select and update policies on companies, contacts and
-    // deals branch on scope_for for view/edit. The rest stay relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(14);
+    // deals branch on scope_for for view/edit. The Track B migrations add eight more —
+    // the select and update policies on activities, company_contacts, company_links and
+    // contact_links branch on scope_for for view/edit. The rest stay relationship-scoped.
+    expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 });
 
