@@ -265,6 +265,22 @@
       "tag": "0036_trackb_security_hardening",
       "breakpoints": true,
       "hash": "35bd9de4815e7f5cb1ee01d53746626a81236be51db00ec368a3925f4d6aadee"
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790799163035,
+      "tag": "0037_sales_pipeline",
+      "breakpoints": true,
+      "hash": "23431a62f44efb5fa590effd932ea1eb3fd5cd46defdaeb547bbb6c69ec212ac"
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790799984367,
+      "tag": "0038_pipeline_stage_resolver",
+      "breakpoints": true,
+      "hash": "7f05a56f92d1218da15721d080ce01d495e1c5d468bd039f34534465e1a74d8f"
     }
   ]
 }
