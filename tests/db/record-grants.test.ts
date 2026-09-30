@@ -994,9 +994,12 @@ describe('the rest of the authorization model is untouched', () => {
     // login_events — the only table with two app_user policies, by design.
     // The CRM migration (0033) adds nine: select/insert/update on each of companies,
     // contacts, and deals — six of them scope-driven (select/update branch on
-    // scope_for), so with_scope rises from eight to fourteen.
-    expect(Number(policies.rows[0]!.n)).toBe(31);
-    expect(Number(policies.rows[0]!.with_scope)).toBe(14);
+    // scope_for), so with_scope rises from eight to fourteen. The Track B migrations
+    // (0034/0035) add twelve more: select/insert/update on activities, company_contacts,
+    // company_links and contact_links — eight of them scope-driven (select/update
+    // branch on scope_for), so with_scope rises from fourteen to twenty-two.
+    expect(Number(policies.rows[0]!.n)).toBe(43);
+    expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
@@ -1119,7 +1122,9 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    expect(Number(rows[0]!.total)).toBe(96);
+    // 104: the 96 counted before, plus the eight Track B permissions
+    // (activities/relationships × view/create/edit/delete) from migration 0034.
+    expect(Number(rows[0]!.total)).toBe(104);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,
