@@ -179,7 +179,7 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  expect(rows.length, `${label}: catalogue size`).toBe(82);
+  expect(rows.length, `${label}: catalogue size`).toBe(96);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -390,20 +390,22 @@ describe('multiple roles', () => {
     await mkEngagement(orgA, p, deptPrimary);
     const ctx = { personId: p, orgId: orgA };
 
+    // companies.view carries the same SELF/DEPARTMENT/GLOBAL ladder the blueprint's
+    // leads.view example used before the CRM migration (0033) replaced the vocabulary.
     await grantRole(p, await roleId(orgA, 'SALES'), orgA);
-    expect(await scopeOf(ctx, 'leads.view')).toBe('SELF');
+    expect(await scopeOf(ctx, 'companies.view')).toBe('SELF');
 
     await grantRole(p, await roleId(orgA, 'SALES_MANAGER'), orgA);
-    expect(await scopeOf(ctx, 'leads.view')).toBe('DEPARTMENT');
+    expect(await scopeOf(ctx, 'companies.view')).toBe('DEPARTMENT');
 
     await grantRole(p, await roleId(orgA, 'ADMIN'), orgA);
-    expect(await scopeOf(ctx, 'leads.view')).toBe('GLOBAL');
+    expect(await scopeOf(ctx, 'companies.view')).toBe('GLOBAL');
 
     await revokeRole(p, await roleId(orgA, 'ADMIN'));
-    expect(await scopeOf(ctx, 'leads.view')).toBe('DEPARTMENT');
+    expect(await scopeOf(ctx, 'companies.view')).toBe('DEPARTMENT');
 
     await revokeRole(p, await roleId(orgA, 'SALES_MANAGER'));
-    expect(await scopeOf(ctx, 'leads.view')).toBe('SELF');
+    expect(await scopeOf(ctx, 'companies.view')).toBe('SELF');
   });
 
   it('cannot hold the same role twice, so a duplicate cannot skew resolution', async () => {
@@ -880,7 +882,7 @@ describe('RLS', () => {
     expect(rows).toEqual([]);
   });
 
-  it('keeps one app_user policy per table (two on login_events), eight of them scope-driven', async () => {
+  it('keeps one app_user policy per table (two on login_events), fourteen of them scope-driven', async () => {
     // Scope resolution arrived in Task 1.8; Task 1.16 gave people, engagements and
     // engagement_events the database.md 4.2 template, replacing their SELF policies in place.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
@@ -893,12 +895,15 @@ describe('RLS', () => {
     // Task 1.9, and audit_logs from Task 1.10. login_events carries a deliberate second
     // one — login_events_select_self from the self-service migration (0029), the narrow
     // SELF read for /me/security alongside the invitation flow's scope-driven policy.
-    expect(Number(rows[0]!.n)).toBe(22);
-    // Eight branch on scope_for: audit_logs from Task 1.10; people, engagements and
+    // The CRM migration (0033) adds nine more: select/insert/update on each of companies,
+    // contacts, and deals.
+    expect(Number(rows[0]!.n)).toBe(31);
+    // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
-    // and departments (inviter view) from the invitation flow. The rest stay
-    // relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(8);
+    // and departments (inviter view) from the invitation flow; and six from the CRM
+    // migration (0033) — the select and update policies on companies, contacts and
+    // deals branch on scope_for for view/edit. The rest stay relationship-scoped.
+    expect(Number(rows[0]!.with_scope)).toBe(14);
   });
 });
 

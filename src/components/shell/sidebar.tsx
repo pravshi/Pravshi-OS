@@ -16,6 +16,9 @@ const SECTIONS = [
   { label: 'Teams', href: '/admin/teams', permission: 'teams.view' },
   { label: 'Departments', href: '/admin/departments', permission: 'departments.view' },
   { label: 'Audit logs', href: '/admin/audit-logs', permission: 'audit_logs.view' },
+  { label: 'Companies', href: '/crm/companies', permission: 'companies.view' },
+  { label: 'Contacts', href: '/crm/contacts', permission: 'contacts.view' },
+  { label: 'Deals', href: '/crm/deals', permission: 'deals.view' },
 ] as const;
 
 export async function Sidebar() {

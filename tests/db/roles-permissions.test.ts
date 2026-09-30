@@ -289,8 +289,9 @@ describe('permission catalogue', () => {
       `select count(*) count from public.permissions`,
     );
     // 81 from the security.md section 1 V1 catalogue, plus record_grants.manage, added by
-    // the Task 1.9 amendment as the capability requirePermission() will name.
-    expect(Number(rows[0]!.count)).toBe(82);
+    // the Task 1.9 amendment as the capability requirePermission() will name, plus the
+    // 14 CRM permissions (companies/contacts/deals) from the Phase 2 CRM migration (0033).
+    expect(Number(rows[0]!.count)).toBe(96);
   });
 
   it('holds every named key from each module', async () => {
@@ -349,6 +350,22 @@ describe('permission catalogue', () => {
       'clients.edit',
       'clients.delete',
       'pipeline.manage',
+      // Phase 2 CRM module (migration 0033). The CRM replaces the legacy sales
+      // vocabulary for grants; the legacy keys above remain in the catalogue.
+      'companies.view',
+      'companies.create',
+      'companies.edit',
+      'companies.delete',
+      'contacts.view',
+      'contacts.create',
+      'contacts.edit',
+      'contacts.delete',
+      'contacts.export',
+      'deals.view',
+      'deals.create',
+      'deals.edit',
+      'deals.delete',
+      'deals.export',
       'projects.view',
       'projects.create',
       'projects.edit',
@@ -409,6 +426,8 @@ describe('permission catalogue', () => {
       'audit_logs.view',
       'compensation.edit',
       'compensation.view',
+      'contacts.export',
+      'deals.export',
       'hr.sensitive.edit',
       'hr.sensitive.view',
       'leads.export',
@@ -515,8 +534,10 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    expect(Number(rows[0]!.total)).toBe(81);
-    expect(Number(rows[0]!.global)).toBe(81);
+    // 96 in the catalogue (82 pre-CRM + 14 CRM), minus users.impersonate which is
+    // listed but granted to no role.
+    expect(Number(rows[0]!.total)).toBe(95);
+    expect(Number(rows[0]!.global)).toBe(95);
   });
 
   it('seeds MANAGER and MARKETING with no grants rather than guessing at them', async () => {
@@ -1264,7 +1285,7 @@ describe('authz.has()', () => {
        values ($1,$2,$3, now() + interval '1 second')`,
       [temp, role, orgA],
     );
-    expect(await has(temp, orgA, 'leads.view')).toBe(true);
+    expect(await has(temp, orgA, 'companies.view')).toBe(true);
     await owner.query(
       `update public.person_roles
           set granted_at = now() - interval '2 days',
@@ -1272,7 +1293,7 @@ describe('authz.has()', () => {
         where person_id=$1 and role_id=$2`,
       [temp, role],
     );
-    expect(await has(temp, orgA, 'leads.view')).toBe(false);
+    expect(await has(temp, orgA, 'companies.view')).toBe(false);
   });
 
   it('is false when the role is archived or soft-deleted', async () => {

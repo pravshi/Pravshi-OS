@@ -420,9 +420,11 @@ describe('the authorization boundary is unmoved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 22: this feature added no policy itself; the 22nd is login_events_select_self
-    // from the self-service migration (0029).
-    expect(Number(policies.rows[0]!.n)).toBe(22);
+    // 31: the CRM migration (0033) adds nine app_user policies — select, insert,
+    // and update on each of companies, contacts, and deals. The *_owner_all
+    // policies target app_owner and are not counted here. The 22nd is
+    // login_events_select_self from the self-service migration (0029).
+    expect(Number(policies.rows[0]!.n)).toBe(31);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

@@ -21,7 +21,8 @@ Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-m
 | Hiring | `openings.*` `candidates.view` `candidates.create` `candidates.edit` `interviews.view` `interviews.schedule` `scorecards.create` `scorecards.view_all` `offers.create` `offers.approve` |
 | Onboarding | `onboarding.view` `onboarding.manage` `onboarding.complete_task` |
 | Offboarding | `offboarding.view` `offboarding.initiate` `offboarding.manage` |
-| Sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` `clients.view` `clients.create` `clients.edit` `clients.delete` `pipeline.manage` |
+| CRM | `companies.view` `companies.create` `companies.edit` `companies.delete` `contacts.view` `contacts.create` `contacts.edit` `contacts.delete` `contacts.export` `deals.view` `deals.create` `deals.edit` `deals.delete` `deals.export` |
+| Legacy sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` — retained in the catalogue but granted to no role since the CRM migration (0033); `clients.view` `clients.edit` remain granted only to non-CRM roles (project-management domain). `pipeline.manage` is catalogue-only. |
 | Projects | `projects.view` `projects.create` `projects.edit` `projects.delete` `projects.manage_members` |
 | Tasks | `tasks.view` `tasks.create` `tasks.edit` `tasks.assign` `tasks.delete` `tasks.comment` |
 | Documents | `documents.view` `documents.upload` `documents.download` `documents.verify` `documents.delete` |
@@ -59,14 +60,22 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `offers.approve` | G | G | G | — | — | — | — | — | — | — | — | — |
 | `onboarding.manage` | G | G | G | D | D | — | D | — | — | — | — | — |
 | `offboarding.initiate` | G | G | G | D | D | — | D | — | — | — | — | — |
-| `leads.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `leads.assign` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `leads.export` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `clients.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |
-| `clients.edit` | G | G | — | — | D | S | D | — | — | — | — | — |
+| `companies.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `contacts.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `contacts.export` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `deals.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `deals.export` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `clients.view` | G | — | — | — | — | — | D | P | P | P | G⁴ | — |
+| `clients.edit` | G | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |
 | `projects.create` | G | G | — | — | D | — | D | — | — | — | — | — |
 | `projects.edit` | G | G | — | — | D | — | D | P⁵ | — | — | — | — |

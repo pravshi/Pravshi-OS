@@ -942,6 +942,7 @@ describe('the rest of the authorization model is untouched', () => {
       'check_rate_limit',
       'clear_login_lockout',
       'consume_password_reset',
+      'crm_owner_reachable',
       'has',
       'has_record_grant',
       'in_my_departments',
@@ -962,7 +963,8 @@ describe('the rest of the authorization model is untouched', () => {
       'update_credential_password',
     ]);
     // The pin above must agree with the migration SQL (0027 added the five
-    // lockout/MFA helpers); if this fails the literal list is stale.
+    // lockout/MFA helpers; 0033 added crm_owner_reachable); if this fails the literal
+    // list is stale.
     expect(authzHelperNamesFromSql()).toEqual(names);
     for (const deferred of ['is_project_member']) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
@@ -990,8 +992,11 @@ describe('the rest of the authorization model is untouched', () => {
     // (0018/0022). record_grants itself stays SELF-scoped. The self-service migration
     // (0029) adds one more: login_events_select_self, the narrow SELF read on
     // login_events — the only table with two app_user policies, by design.
-    expect(Number(policies.rows[0]!.n)).toBe(22);
-    expect(Number(policies.rows[0]!.with_scope)).toBe(8);
+    // The CRM migration (0033) adds nine: select/insert/update on each of companies,
+    // contacts, and deals — six of them scope-driven (select/update branch on
+    // scope_for), so with_scope rises from eight to fourteen.
+    expect(Number(policies.rows[0]!.n)).toBe(31);
+    expect(Number(policies.rows[0]!.with_scope)).toBe(14);
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
@@ -1114,7 +1119,7 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    expect(Number(rows[0]!.total)).toBe(82);
+    expect(Number(rows[0]!.total)).toBe(96);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,
