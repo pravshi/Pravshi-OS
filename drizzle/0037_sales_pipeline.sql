@@ -85,6 +85,12 @@ create unique index pipelines_one_default_per_org
   on public.pipelines (org_id)
   where is_default and deleted_at is null;
 
+-- Pipeline names are unique per org among live pipelines. Soft-deleted rows
+-- are excluded so a deleted name can be reused.
+create unique index pipelines_name_unique_per_org
+  on public.pipelines (org_id, name)
+  where deleted_at is null;
+
 create index pipelines_org_idx on public.pipelines (org_id) where deleted_at is null;
 
 create trigger pipelines_set_updated_at
