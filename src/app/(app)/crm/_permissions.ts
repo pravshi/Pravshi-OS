@@ -32,6 +32,12 @@ export const CRM_PERMISSIONS = {
     edit: 'deals.edit',
     delete: 'deals.delete',
   },
+  relationships: {
+    view: 'relationships.view',
+    create: 'relationships.create',
+    edit: 'relationships.edit',
+    delete: 'relationships.delete',
+  },
 } as const;
 
 type CrmResource = keyof typeof CRM_PERMISSIONS;

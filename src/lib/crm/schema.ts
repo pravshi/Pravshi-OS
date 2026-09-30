@@ -217,3 +217,109 @@ export type Deal = {
   createdAt: string;
   updatedAt: string;
 };
+
+// ── Relationships ────────────────────────────────────────────────────────────────
+// Migration 0035: explicit join tables between the CRM core records (NOT
+// polymorphic). company_contacts associates contacts with companies (with a
+// role and the primary flag); company_links and contact_links model
+// company↔company and contact↔contact edges with typed directions.
+
+/** company_links.link_type values — mirrors the CHECK constraint in 0035.
+ * PARENT means fromCompany is the parent of toCompany. */
+export const COMPANY_LINK_TYPES = ['PARENT', 'SUBSIDIARY', 'PARTNER'] as const;
+export type CompanyLinkType = (typeof COMPANY_LINK_TYPES)[number];
+
+/** contact_links.link_type values — mirrors the CHECK constraint in 0035. */
+export const CONTACT_LINK_TYPES = ['COLLEAGUE', 'REFERRAL', 'OTHER'] as const;
+export type ContactLinkType = (typeof CONTACT_LINK_TYPES)[number];
+
+export const CompanyLinkTypeSchema = z.enum(COMPANY_LINK_TYPES);
+export const ContactLinkTypeSchema = z.enum(CONTACT_LINK_TYPES);
+
+/** List query for relationship lists: pagination plus an optional link-type filter. */
+export const ListLinksQuerySchema = ListQuerySchema.extend({
+  linkType: z.string().trim().max(32).optional(),
+});
+export type ListLinksQuery = z.infer<typeof ListLinksQuerySchema>;
+
+/** Association of a contact with a company. contactName/contactEmail are
+ * joined for display; role is free text, isPrimary marks the flagship. */
+export const CreateCompanyContactSchema = z.strictObject({
+  companyId: uuid,
+  contactId: uuid,
+  role: nullableText(128),
+  isPrimary: z.boolean().default(false),
+});
+export type CreateCompanyContactInput = z.infer<typeof CreateCompanyContactSchema>;
+
+/** Partial update: role and/or isPrimary, at least one required. Defined
+ * explicitly (not via .pick().partial()) so isPrimary's create-time
+ * .default(false) does not leak into updates and defeat the non-empty refine. */
+export const UpdateCompanyContactSchema = z
+  .strictObject({
+    role: nullableText(128).optional(),
+    isPrimary: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required');
+export type UpdateCompanyContactInput = z.infer<typeof UpdateCompanyContactSchema>;
+
+export type CompanyContact = {
+  id: string;
+  companyId: string;
+  contactId: string;
+  // Populated depending on which side is listed: the company-side list joins
+  // the contact, the contact-side list joins the company.
+  contactName: string | null;
+  contactEmail: string | null;
+  companyName: string | null;
+  role: string | null;
+  isPrimary: boolean;
+  ownerPersonId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const CreateCompanyLinkSchema = z
+  .strictObject({
+    fromCompanyId: uuid,
+    toCompanyId: uuid,
+    linkType: CompanyLinkTypeSchema,
+  })
+  .refine((v) => v.fromCompanyId !== v.toCompanyId, 'a company cannot link to itself');
+export type CreateCompanyLinkInput = z.infer<typeof CreateCompanyLinkSchema>;
+
+/** Company↔company edge. otherName is the display name of the company on the
+ * far end of the edge relative to the listing company; direction tells which. */
+export type CompanyLink = {
+  id: string;
+  fromCompanyId: string;
+  toCompanyId: string;
+  linkType: CompanyLinkType;
+  direction: 'outgoing' | 'incoming';
+  otherName: string;
+  ownerPersonId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const CreateContactLinkSchema = z
+  .strictObject({
+    fromContactId: uuid,
+    toContactId: uuid,
+    linkType: ContactLinkTypeSchema,
+  })
+  .refine((v) => v.fromContactId !== v.toContactId, 'a contact cannot link to itself');
+export type CreateContactLinkInput = z.infer<typeof CreateContactLinkSchema>;
+
+/** Contact↔contact edge. otherName/direction work like CompanyLink. */
+export type ContactLink = {
+  id: string;
+  fromContactId: string;
+  toContactId: string;
+  linkType: ContactLinkType;
+  direction: 'outgoing' | 'incoming';
+  otherName: string;
+  ownerPersonId: string;
+  createdAt: string;
+  updatedAt: string;
+};

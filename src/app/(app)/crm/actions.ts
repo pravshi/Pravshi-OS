@@ -19,6 +19,19 @@ import {
   deleteContact,
 } from '@/lib/crm/contacts';
 import { listDeals, getDeal, createDeal, updateDeal, deleteDeal } from '@/lib/crm/deals';
+import {
+  listCompanyContacts,
+  listContactAssociations,
+  createCompanyContact,
+  updateCompanyContact,
+  removeCompanyContact,
+  listCompanyLinks,
+  createCompanyLink,
+  removeCompanyLink,
+  listContactLinks,
+  createContactLink,
+  removeContactLink,
+} from '@/lib/crm/relationships';
 
 /** Boundary UUID check (A3): malformed ids fail before PostgreSQL ever sees them. */
 const uuid = z.string().uuid();
@@ -201,6 +214,142 @@ export async function deleteDealAction(id: string) {
       permission: 'deals.delete',
     });
     await deleteDeal(authorization, uuid.parse(id));
+    return { ok: true };
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+// ── Relationships ──────────────────────────────────────────────────────────────
+// (Track B — migration 0035: company_contacts, company_links, contact_links.)
+
+export async function listCompanyContactsAction(companyId: string, input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.view',
+    });
+    return await listCompanyContacts(authorization, uuid.parse(companyId), input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function createCompanyContactAction(input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.create',
+    });
+    return await createCompanyContact(authorization, input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function updateCompanyContactAction(
+  companyId: string,
+  contactId: string,
+  input: unknown,
+) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.edit',
+    });
+    return await updateCompanyContact(
+      authorization,
+      uuid.parse(companyId),
+      uuid.parse(contactId),
+      input,
+    );
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function removeCompanyContactAction(companyId: string, contactId: string) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.delete',
+    });
+    await removeCompanyContact(authorization, uuid.parse(companyId), uuid.parse(contactId));
+    return { ok: true };
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function listContactAssociationsAction(contactId: string, input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.view',
+    });
+    return await listContactAssociations(authorization, uuid.parse(contactId), input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function listCompanyLinksAction(companyId: string, input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.view',
+    });
+    return await listCompanyLinks(authorization, uuid.parse(companyId), input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function createCompanyLinkAction(input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.create',
+    });
+    return await createCompanyLink(authorization, input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function removeCompanyLinkAction(linkId: string) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.delete',
+    });
+    await removeCompanyLink(authorization, uuid.parse(linkId));
+    return { ok: true };
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function listContactLinksAction(contactId: string, input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.view',
+    });
+    return await listContactLinks(authorization, uuid.parse(contactId), input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function createContactLinkAction(input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.create',
+    });
+    return await createContactLink(authorization, input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function removeContactLinkAction(linkId: string) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'relationships.delete',
+    });
+    await removeContactLink(authorization, uuid.parse(linkId));
     return { ok: true };
   } catch (error) {
     return actionError(error);

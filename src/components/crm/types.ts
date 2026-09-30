@@ -14,6 +14,13 @@ export {
   type Contact,
   type Deal,
   type Page,
+  COMPANY_LINK_TYPES,
+  type CompanyLinkType,
+  CONTACT_LINK_TYPES,
+  type ContactLinkType,
+  type CompanyContact,
+  type CompanyLink,
+  type ContactLink,
 } from '@/lib/crm/schema';
 import type { Contact } from '@/lib/crm/schema';
 

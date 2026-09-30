@@ -152,6 +152,10 @@ describe('CRM entry points authorize first', () => {
       'deals.create',
       'deals.edit',
       'deals.delete',
+      'relationships.view',
+      'relationships.create',
+      'relationships.edit',
+      'relationships.delete',
     ]);
     for (const key of keys) expect(allowed.has(key), key).toBe(true);
     // reads gate on .view, creates on .create, updates on .edit, deletes on .delete
