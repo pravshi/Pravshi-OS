@@ -942,6 +942,7 @@ describe('the rest of the model is untouched', () => {
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'login_person_active',
       'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',

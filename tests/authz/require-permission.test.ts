@@ -600,7 +600,7 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has twenty-three authz helpers, and one app_user policy per table (two on login_events)', async () => {
+  it('has twenty-four authz helpers, and one app_user policy per table (two on login_events)', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
@@ -617,6 +617,7 @@ describe('the rest of the authorization model is unchanged', () => {
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'login_person_active',
       'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',

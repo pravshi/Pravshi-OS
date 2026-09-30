@@ -4,6 +4,7 @@ import { createAuthMiddleware, APIError } from 'better-auth/api';
 import { twoFactor } from 'better-auth/plugins';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
+import { loginPersonActive } from './login-person-check';
 import { env } from '@/env';
 
 /** Blueprint section 25: "minimum 12 characters". */
@@ -142,10 +143,26 @@ export const auth = betterAuth({
          * Stamps the assurance onto the session at the moment it is created. This is the
          * whole mechanism: `aal2` is a fact about how THIS session came to exist, not a
          * property inherited from the person's enrolment status.
+         *
+         * BUG-002: the same hook is the liveness gate for session minting. A suspended
+         * (or deleted, or person-less) login must not receive a session from ANY path —
+         * the mediated /api/auth/login and /api/auth/mfa/verify routes, or the raw
+         * [...all] endpoints. Returning false aborts the creation before any row or
+         * cookie exists; the library answers 401 UNAUTHORIZED (FAILED_TO_CREATE_SESSION)
+         * and the mediated routes record their normal failure events with the
+         * deliberately generic 401, so suspension is indistinguishable from bad
+         * credentials. Fail closed: when the check itself cannot be answered, no
+         * session is minted.
          */
-        before: async (session, ctx) => ({
-          data: { ...session, aal: sessionAssuranceFor(ctx?.path) },
-        }),
+        before: async (session, ctx) => {
+          const userId = (session as { userId?: unknown }).userId;
+          if (typeof userId !== 'string' || !(await loginPersonActive(userId))) {
+            return false;
+          }
+          return {
+            data: { ...session, aal: sessionAssuranceFor(ctx?.path) },
+          };
+        },
       },
     },
   },
