@@ -1039,9 +1039,19 @@ describe('permission catalogue', () => {
     'deals.edit',
     'deals.delete',
     'deals.export',
+    // Phase 2 Track B (migration 0034): both Track B migrations seed all eight
+    // keys so the matrix stays complete regardless of apply order.
+    'activities.view',
+    'activities.create',
+    'activities.edit',
+    'activities.delete',
+    'relationships.view',
+    'relationships.create',
+    'relationships.edit',
+    'relationships.delete',
   ];
 
-  it('seeds exactly the 14 crm keys with the right sensitivity flags', async () => {
+  it('seeds exactly the 22 crm keys with the right sensitivity flags', async () => {
     const rows = await owner.query<{ key: string; module: string; is_sensitive: boolean }>(
       `select key, module, is_sensitive from public.permissions where module='crm' order by key`,
     );
@@ -1055,7 +1065,7 @@ describe('permission catalogue', () => {
     }
   });
 
-  it('SUPER_ADMIN holds GLOBAL on all 14 keys in an existing org', async () => {
+  it('SUPER_ADMIN holds GLOBAL on all 22 keys in an existing org', async () => {
     const rows = await owner.query<{ n: string }>(
       `select count(*) n
        from public.role_permissions rp
@@ -1065,7 +1075,7 @@ describe('permission catalogue', () => {
          and rp.scope = 'GLOBAL'::public.access_scope`,
       [orgA],
     );
-    expect(Number(rows.rows[0]!.n)).toBe(14);
+    expect(Number(rows.rows[0]!.n)).toBe(22);
   });
 
   it('standard roles hold the crm grants from the seed matrix', async () => {
@@ -1096,6 +1106,13 @@ describe('permission catalogue', () => {
       'deals.view',
       'deals.create',
       'deals.edit',
+      // Track B: SELF on view/create/edit only, mirroring the leads.* SELF column
+      'activities.view',
+      'activities.create',
+      'activities.edit',
+      'relationships.view',
+      'relationships.create',
+      'relationships.edit',
     ];
     for (const k of SALES_KEYS) expect(have.has(`SALES|${k}|SELF`)).toBe(true);
     // SALES mirrors the leads.* SELF column: no delete, no export.
@@ -1105,6 +1122,8 @@ describe('permission catalogue', () => {
       'contacts.export',
       'deals.delete',
       'deals.export',
+      'activities.delete',
+      'relationships.delete',
     ]) {
       expect(have.has(`SALES|${k}|SELF`)).toBe(false);
     }

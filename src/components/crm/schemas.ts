@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEAL_STAGES, COMPANY_SIZES } from './types';
+import { DEAL_STAGES, COMPANY_SIZES, ACTIVITY_TYPES, ACTIVITY_ENTITY_TYPES } from './types';
 
 /**
  * Client-side form validation — camelCase wire contract matching the server
@@ -116,3 +116,41 @@ export const DealFormSchema = z
 export type CompanyFormInput = z.infer<typeof CompanyFormSchema>;
 export type ContactFormInput = z.infer<typeof ContactFormSchema>;
 export type DealFormInput = z.infer<typeof DealFormSchema>;
+
+// ── Activities (Phase 2 Track B) ───────────────────────────────────────────────
+
+/**
+ * datetime-local input normalization: '' → undefined, else the instant as a
+ * full ISO string (the server boundary validates ISO-8601 datetimes strictly).
+ */
+const optionalDateTimeIso = z
+  .string()
+  .max(64)
+  .optional()
+  .transform((v) => {
+    const t = v?.trim();
+    if (!t) return undefined;
+    const ms = Date.parse(t);
+    return Number.isNaN(ms) ? t : new Date(ms).toISOString();
+  })
+  .refine((v) => v === undefined || !Number.isNaN(Date.parse(v)), {
+    message: 'Enter a valid date and time',
+  });
+
+export const ActivityFormSchema = z.object({
+  type: z.enum(ACTIVITY_TYPES),
+  subject: z.string().trim().min(1, 'Subject is required').max(200),
+  notes: optionalText(4000),
+  occurredAt: optionalDateTimeIso,
+  dueAt: optionalDateTimeIso,
+});
+
+export type ActivityFormInput = z.infer<typeof ActivityFormSchema>;
+
+/** The entity pickers on the standalone new-activity page. */
+export const ActivityEntityPickerSchema = z.object({
+  entityType: z.enum(ACTIVITY_ENTITY_TYPES),
+  entityId: uuid,
+});
+
+export type ActivityEntityPickerInput = z.infer<typeof ActivityEntityPickerSchema>;

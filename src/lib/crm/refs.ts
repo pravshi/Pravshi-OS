@@ -18,6 +18,11 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
  * i.e. the exact NOT_FOUND concealment the target-record checks use: the caller cannot
  * distinguish "nonexistent" from "another org's".
  *
+ * Track B adds activities: their (entity_type, entity_id) link is polymorphic with
+ * no cross-table foreign key by design (plan §3), so the probe is the ONLY
+ * enforcement point — a random UUID entity_id succeeds at the database level and
+ * must fail closed here instead.
+ *
  * The denial audit is written by refuse() on its own connection, so it survives the
  * rollback of the enclosing transaction.
  */
@@ -52,6 +57,49 @@ export async function assertContactVisible(
       and c.deleted_at is null
   `);
   await assertTargetAffected(auth, res.rowCount ?? 0);
+}
+
+/** The referenced deal must be live and visible in the caller's org.
+ * Track B (activities): the polymorphic activity link names a deal by UUID with
+ * no foreign key, so this probe is the only enforcement point. */
+export async function assertDealVisible(
+  tx: Tx,
+  auth: Authorization,
+  dealId: string,
+): Promise<void> {
+  const res = await tx.execute(sql`
+    select 1
+    from public.deals d
+    where d.id = ${dealId}::uuid
+      and d.org_id = ${auth.ctx.orgId}::uuid
+      and d.deleted_at is null
+  `);
+  await assertTargetAffected(auth, res.rowCount ?? 0);
+}
+
+/**
+ * Activity reference check (Track B): the polymorphic (entity_type, entity_id)
+ * link names exactly one CRM record, which must be live and visible in the
+ * caller's org. An invisible reference fails through assertTargetAffected —
+ * NOT_FOUND concealment, no existence oracle.
+ */
+export async function assertActivityReferences(
+  tx: Tx,
+  auth: Authorization,
+  entityType: 'company' | 'contact' | 'deal',
+  entityId: string,
+): Promise<void> {
+  switch (entityType) {
+    case 'company':
+      await assertCompanyVisible(tx, auth, entityId);
+      return;
+    case 'contact':
+      await assertContactVisible(tx, auth, entityId);
+      return;
+    case 'deal':
+      await assertDealVisible(tx, auth, entityId);
+      return;
+  }
 }
 
 /**

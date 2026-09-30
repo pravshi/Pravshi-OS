@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
+import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import {
   CreateCompanySchema,
@@ -186,17 +187,12 @@ export async function updateCompany(
 
 /** Soft delete only: sets deleted_at. There is no hard DELETE path. */
 export async function deleteCompany(auth: Authorization, id: string): Promise<void> {
-  const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
-    const res = await tx.execute(sql`
-      update public.companies c
-      set deleted_at = now(), updated_at = now()
-      where c.id = ${id}::uuid
-        and ${BASE_WHERE(auth)}
-      returning c.id
-    `);
-    return res.rowCount ?? 0;
-  });
-  await assertTargetAffected(auth, affected);
+  await softDeleteRow(
+    auth,
+    'company',
+    sql`public.companies c`,
+    sql`c.id = ${id}::uuid and ${BASE_WHERE(auth)}`,
+  );
   await writeAuditEntry(
     auth.ctx,
     {

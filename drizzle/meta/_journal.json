@@ -241,6 +241,22 @@
       "tag": "0033_crm_core",
       "breakpoints": true,
       "hash": "ced8a3efcdd009b90f1f0fc59d9e30b65459533f9a1f4d4a2df48c6d5f8539f3"
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790747742807,
+      "tag": "0034_activities",
+      "breakpoints": true,
+      "hash": "fab7f4c244f43ceceed80dec64f76b3a4723ded8f664ca7435483afde00a47a6"
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790747742807,
+      "tag": "0035_relationships",
+      "breakpoints": true,
+      "hash": "50688b8df7ffef56542b9955217bd5e08008877a3ca73b8323d24e811f61e2fd"
     }
   ]
 }
