@@ -973,8 +973,20 @@ $$;
 -- 10 grants per org: SUPER_ADMIN 5 + ADMIN 5, all at GLOBAL. Only the five new
 -- keys' grants are inserted — no legacy cleanup, no re-seeding of existing
 -- grants (on conflict do nothing).
+-- The protection trigger is disabled for the backfill; the DO block makes this
+-- idempotent so the migration does not fail if the trigger is absent.
 
-alter table public.role_permissions disable trigger role_permissions_enforce_protection;
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'role_permissions_enforce_protection'
+      and tgrelid = 'public.role_permissions'::regclass
+  ) then
+    alter table public.role_permissions disable trigger role_permissions_enforce_protection;
+  end if;
+end
+$$;
 
 insert into public.role_permissions (role_id, permission_id, scope)
 select r.id, p.id, m.scope::public.access_scope
@@ -991,7 +1003,17 @@ join (values
   on r.key = m.role_key and p.key = m.permission_key
 on conflict do nothing;
 
-alter table public.role_permissions enable trigger role_permissions_enforce_protection;
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'role_permissions_enforce_protection'
+      and tgrelid = 'public.role_permissions'::regclass
+  ) then
+    alter table public.role_permissions enable trigger role_permissions_enforce_protection;
+  end if;
+end
+$$;
 
 -- ── Verification ──────────────────────────────────────────────────────────────
 --
