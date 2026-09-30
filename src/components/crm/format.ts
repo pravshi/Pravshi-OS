@@ -1,4 +1,4 @@
-import type { DealStage } from './types';
+import type { DealStage, ActivityType } from './types';
 
 /** Deal value formatting: numeric(19,4) strings with an Indian-style readout. */
 export function formatMoney(value: string | null | undefined, currency: string): string {
@@ -48,6 +48,14 @@ export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   NEGOTIATION: 'Negotiation',
   WON: 'Won',
   LOST: 'Lost',
+};
+
+/** Activity type labels for the Track B interaction log. */
+export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> = {
+  CALL: 'Call',
+  EMAIL: 'Email',
+  MEETING: 'Meeting',
+  NOTE: 'Note',
 };
 
 /** The stage's lifecycle neighbors: forward moves plus loss, never backward. */

@@ -34,17 +34,23 @@ const SERVICE_FILES = [
   'src/lib/crm/companies.ts',
   'src/lib/crm/contacts.ts',
   'src/lib/crm/deals.ts',
+  'src/lib/crm/activities.ts',
 ] as const;
 
 const ACTION_FILE = 'src/app/(app)/crm/actions.ts';
 
 const ROUTE_FILES = [
-  'src/app/api/crm/companies/route.ts',
+  // NOTE: there is no src/app/api/crm/companies/route.ts at this base — only
+  // companies/[id]/route.ts. Listing a file that does not exist makes
+  // exportRouteFiles() throw ENOENT, so the collection route stays out until
+  // the API surface adds it.
   'src/app/api/crm/companies/[id]/route.ts',
   'src/app/api/crm/contacts/route.ts',
   'src/app/api/crm/contacts/[id]/route.ts',
   'src/app/api/crm/deals/route.ts',
   'src/app/api/crm/deals/[id]/route.ts',
+  'src/app/api/crm/activities/route.ts',
+  'src/app/api/crm/activities/[id]/route.ts',
 ] as const;
 
 const stripComments = (source: string) =>
@@ -126,6 +132,13 @@ describe('CRM services reach Postgres only through withAuthorizedDb()', () => {
         expect(code).toMatch(/assertDealReferences\(tx, auth, data\.companyId, data\.contactId\)/);
         expect(code).toMatch(/assertDealReferences\(tx, auth, companyId, contactId\)/);
       }
+      if (file === 'src/lib/crm/activities.ts') {
+        // Track B: the polymorphic link has no FK, so the visibility probe is the
+        // only enforcement point — create must probe before insert.
+        expect(code).toMatch(
+          /assertActivityReferences\(tx, auth, data\.entityType, data\.entityId\)/,
+        );
+      }
     });
   }
 });
@@ -152,6 +165,10 @@ describe('CRM entry points authorize first', () => {
       'deals.create',
       'deals.edit',
       'deals.delete',
+      'activities.view',
+      'activities.create',
+      'activities.edit',
+      'activities.delete',
     ]);
     for (const key of keys) expect(allowed.has(key), key).toBe(true);
     // reads gate on .view, creates on .create, updates on .edit, deletes on .delete
@@ -161,6 +178,10 @@ describe('CRM entry points authorize first', () => {
     expect(code).toMatch(/permission: 'companies\.delete'/);
     expect(code).toMatch(/permission: 'contacts\.delete'/);
     expect(code).toMatch(/permission: 'deals\.delete'/);
+    expect(code).toMatch(/permission: 'activities\.view'/);
+    expect(code).toMatch(/permission: 'activities\.create'/);
+    expect(code).toMatch(/permission: 'activities\.edit'/);
+    expect(code).toMatch(/permission: 'activities\.delete'/);
   });
 
   it('every CRM route handler is built as withPermission(...)', () => {
@@ -184,9 +205,9 @@ describe('CRM entry points authorize first', () => {
   it('CRM actions validate id as UUID at the boundary (A3)', () => {
     const code = stripComments(read(ACTION_FILE));
     expect(code).toMatch(/const uuid = z\.string\(\)\.uuid\(\);/);
-    // all nine id-taking actions route their id through the UUID schema
+    // all twelve id-taking actions route their id through the UUID schema
     const parsed = (code.match(/uuid\.parse\(id\)/g) ?? []).length;
-    expect(parsed).toBe(9);
+    expect(parsed).toBe(12);
   });
 
   it('CRM routes reject invalid input with 400, not the 500 envelope', () => {

@@ -6,6 +6,7 @@ import { DetailField, DetailLink } from '@/components/crm/detail-fields';
 import { EditableSection } from '@/components/crm/editable-section';
 import { DeleteDialog } from '@/components/crm/delete-dialog';
 import { DealForm } from '@/components/crm/deal-form';
+import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageTransition } from '@/components/crm/stage-transition';
 import { isErrorEnvelope, contactDisplayName, type DealStage } from '@/components/crm/types';
 import {
@@ -49,6 +50,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   const deal = dealRes;
   const perms = uiPermissionsFor(held, 'deals');
+  // The timeline's create form gates on activities.create independently of the
+  // deal permissions.
+  const activityPerms = uiPermissionsFor(held, 'activities');
 
   const companyNames = new Map<string, string>();
   if (!isErrorEnvelope(companiesRes)) {
@@ -163,6 +167,13 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           />
         </EditableSection>
       )}
+
+      <ActivityTimeline
+        entityType="deal"
+        entityId={id}
+        entityName={deal.title}
+        canCreate={activityPerms.canCreate}
+      />
     </div>
   );
 }

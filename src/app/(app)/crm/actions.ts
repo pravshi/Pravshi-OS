@@ -19,6 +19,13 @@ import {
   deleteContact,
 } from '@/lib/crm/contacts';
 import { listDeals, getDeal, createDeal, updateDeal, deleteDeal } from '@/lib/crm/deals';
+import {
+  listActivities,
+  getActivity,
+  createActivity,
+  updateActivity,
+  deleteActivity,
+} from '@/lib/crm/activities';
 
 /** Boundary UUID check (A3): malformed ids fail before PostgreSQL ever sees them. */
 const uuid = z.string().uuid();
@@ -201,6 +208,67 @@ export async function deleteDealAction(id: string) {
       permission: 'deals.delete',
     });
     await deleteDeal(authorization, uuid.parse(id));
+    return { ok: true };
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+// ── Activities ───────────────────────────────────────────────────────────────────
+// (Phase 2 Track B). Reads gate on activities.view, creates on .create, updates
+// on .edit, deletes on .delete — the same authorize-first shape as every other
+// CRM action above.
+
+export async function listActivitiesAction(input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'activities.view',
+    });
+    return await listActivities(authorization, input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function getActivityAction(id: string) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'activities.view',
+    });
+    return await getActivity(authorization, uuid.parse(id));
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function createActivityAction(input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'activities.create',
+    });
+    return await createActivity(authorization, input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function updateActivityAction(id: string, input: unknown) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'activities.edit',
+    });
+    return await updateActivity(authorization, uuid.parse(id), input);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function deleteActivityAction(id: string) {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'activities.delete',
+    });
+    await deleteActivity(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
     return actionError(error);

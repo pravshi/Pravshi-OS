@@ -217,3 +217,82 @@ export type Deal = {
   createdAt: string;
   updatedAt: string;
 };
+
+// ── Activities ───────────────────────────────────────────────────────────────────
+// (Phase 2 Track B). Column contract with migration 0034:
+//
+//   activities: id, org_id, entity_type, entity_id, type, subject, notes,
+//               occurred_at, due_at, owner_person_id,
+//               created_at, updated_at, deleted_at (+ created_by/updated_by,
+//               stamped by trigger — never written here)
+//
+// The (entity_type, entity_id) link is polymorphic with NO cross-table foreign
+// keys (plan §3); the app layer probes the referenced record for visibility
+// before every write (see src/lib/crm/refs.ts).
+
+/** The four activity types. Mirrors the activities.type CHECK in migration 0034. */
+export const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'MEETING', 'NOTE'] as const;
+export type ActivityType = (typeof ACTIVITY_TYPES)[number];
+
+export const ActivityTypeSchema = z.enum(ACTIVITY_TYPES);
+
+/** Which CRM record an activity is logged against. Mirrors the
+ * activities.entity_type CHECK in migration 0034. */
+export const ACTIVITY_ENTITY_TYPES = ['company', 'contact', 'deal'] as const;
+export type ActivityEntityType = (typeof ACTIVITY_ENTITY_TYPES)[number];
+
+export const ActivityEntityTypeSchema = z.enum(ACTIVITY_ENTITY_TYPES);
+
+/** List query for activities: pagination plus optional entity and type filters. */
+export const ListActivitiesQuerySchema = ListQuerySchema.extend({
+  entityType: ActivityEntityTypeSchema.optional(),
+  entityId: uuid.optional(),
+  type: ActivityTypeSchema.optional(),
+});
+export type ListActivitiesQuery = z.infer<typeof ListActivitiesQuerySchema>;
+
+/** ISO-8601 datetimes for occurredAt/dueAt. The client form converts
+ * datetime-local inputs to full ISO strings before they reach this boundary. */
+const activityDateTime = z
+  .string()
+  .refine((s) => !Number.isNaN(Date.parse(s)), 'must be a valid datetime')
+  .refine((s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s), 'must be an ISO-8601 datetime');
+
+export const CreateActivitySchema = z.strictObject({
+  entityType: ActivityEntityTypeSchema,
+  entityId: uuid,
+  type: ActivityTypeSchema,
+  subject: z.string().trim().min(1).max(255),
+  notes: nullableText(4000),
+  occurredAt: activityDateTime.nullable().optional(),
+  dueAt: activityDateTime.nullable().optional(),
+});
+export type CreateActivityInput = z.infer<typeof CreateActivitySchema>;
+
+/**
+ * Partial update: every field optional, at least one required. The
+ * (entityType, entityId) link is deliberately absent — an activity's target is
+ * immutable after creation.
+ */
+export const UpdateActivitySchema = CreateActivitySchema.omit({
+  entityType: true,
+  entityId: true,
+})
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required');
+export type UpdateActivityInput = z.infer<typeof UpdateActivitySchema>;
+
+export type Activity = {
+  id: string;
+  entityType: ActivityEntityType;
+  entityId: string;
+  type: ActivityType;
+  subject: string;
+  notes: string | null;
+  occurredAt: string | null;
+  dueAt: string | null;
+  entityName: string | null;
+  ownerPersonId: string;
+  createdAt: string;
+  updatedAt: string;
+};

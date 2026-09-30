@@ -23,6 +23,7 @@ const NAV_PERMISSIONS = [
   'companies.view',
   'contacts.view',
   'deals.view',
+  'activities.view',
 ] as const;
 
 export type NavPermission = (typeof NAV_PERMISSIONS)[number];
