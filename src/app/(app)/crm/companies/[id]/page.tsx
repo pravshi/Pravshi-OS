@@ -19,7 +19,7 @@ import {
   listDealsAction,
   updateCompanyAction,
   deleteCompanyAction,
-} from '../../_api';
+} from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
 
 /**
@@ -32,8 +32,8 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   const [companyRes, contactsRes, dealsRes, held] = await Promise.all([
     getCompanyAction(id),
-    listContactsAction({ limit: 100 }),
-    listDealsAction({ limit: 100 }),
+    listContactsAction({ companyId: id, limit: 100 }),
+    listDealsAction({ companyId: id, limit: 100 }),
     getCrmPermissions(),
   ]);
 
@@ -48,12 +48,17 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
   const company = companyRes;
   const perms = uiPermissionsFor(held, 'companies');
-  const contacts = isErrorEnvelope(contactsRes)
-    ? []
-    : contactsRes.rows.filter((c) => c.company_id === id);
-  const deals = isErrorEnvelope(dealsRes) ? [] : dealsRes.rows.filter((d) => d.company_id === id);
+  // Related records are filtered server-side (companyId); the API enforces the
+  // caller's permissions on each list call independently.
+  const contacts = isErrorEnvelope(contactsRes) ? [] : contactsRes.rows;
+  const deals = isErrorEnvelope(dealsRes) ? [] : dealsRes.rows;
 
-  const address = [company.address_line1, company.address_line2, company.city, company.state]
+  const address = [
+    company.addressLine1,
+    company.addressLine2,
+    company.addressCity,
+    company.addressState,
+  ]
     .filter(Boolean)
     .join(', ');
 
@@ -97,11 +102,11 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
             <DetailField label="Phone">{company.phone ?? '—'}</DetailField>
             <DetailField label="Address">
               {address === '' ? '—' : address}
-              {company.postal_code ? ` — ${company.postal_code}` : ''}
+              {company.addressPostalCode ? ` — ${company.addressPostalCode}` : ''}
             </DetailField>
-            <DetailField label="Country">{company.country_code}</DetailField>
-            <DetailField label="Created">{formatDateTime(company.created_at)}</DetailField>
-            <DetailField label="Updated">{formatDateTime(company.updated_at)}</DetailField>
+            <DetailField label="Country">{company.countryCode}</DetailField>
+            <DetailField label="Created">{formatDateTime(company.createdAt)}</DetailField>
+            <DetailField label="Updated">{formatDateTime(company.updatedAt)}</DetailField>
           </dl>
         </CardContent>
       </Card>

@@ -2,7 +2,7 @@ import { LinkButton } from '@/components/crm/link-button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { isErrorEnvelope } from '@/components/crm/types';
 import type { ErrorEnvelope } from '@/lib/authz/errors';
-import { listCompaniesAction, listContactsAction, listDealsAction } from './_api';
+import { listCompaniesAction, listContactsAction, listDealsAction } from './actions';
 import { getCrmPermissions, CRM_PERMISSIONS } from './_permissions';
 
 /**

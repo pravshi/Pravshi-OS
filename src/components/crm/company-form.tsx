@@ -34,12 +34,12 @@ export function CompanyForm({
     size: initial?.size ?? '',
     website: initial?.website ?? '',
     phone: initial?.phone ?? '',
-    address_line1: initial?.address_line1 ?? '',
-    address_line2: initial?.address_line2 ?? '',
-    city: initial?.city ?? '',
-    state: initial?.state ?? '',
-    postal_code: initial?.postal_code ?? '',
-    country_code: initial?.country_code ?? 'IN',
+    addressLine1: initial?.addressLine1 ?? '',
+    addressLine2: initial?.addressLine2 ?? '',
+    addressCity: initial?.addressCity ?? '',
+    addressState: initial?.addressState ?? '',
+    addressPostalCode: initial?.addressPostalCode ?? '',
+    countryCode: initial?.countryCode ?? 'IN',
   });
 
   function set<K extends keyof typeof values>(key: K, value: string) {
@@ -130,12 +130,12 @@ export function CompanyForm({
             </div>
             {text('website', 'Website', { placeholder: 'https://acme.com', maxLength: 500 })}
             {text('phone', 'Phone', { placeholder: '+91 80 1234 5678', maxLength: 50 })}
-            {text('address_line1', 'Address line 1', { maxLength: 200 })}
-            {text('address_line2', 'Address line 2', { maxLength: 200 })}
-            {text('city', 'City', { maxLength: 100 })}
-            {text('state', 'State', { maxLength: 100 })}
-            {text('postal_code', 'Postal code', { maxLength: 20 })}
-            {text('country_code', 'Country code *', { placeholder: 'IN', maxLength: 2 })}
+            {text('addressLine1', 'Address line 1', { maxLength: 200 })}
+            {text('addressLine2', 'Address line 2', { maxLength: 200 })}
+            {text('addressCity', 'City', { maxLength: 100 })}
+            {text('addressState', 'State', { maxLength: 100 })}
+            {text('addressPostalCode', 'Postal code', { maxLength: 20 })}
+            {text('countryCode', 'Country code *', { placeholder: 'IN', maxLength: 2 })}
           </div>
           {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
           <div className="flex gap-3">

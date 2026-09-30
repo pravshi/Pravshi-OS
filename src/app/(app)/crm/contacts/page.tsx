@@ -1,7 +1,7 @@
 import { ErrorMessage } from '@/components/crm/error-message';
 import { ContactsList } from '@/components/crm/contacts-client';
 import { isErrorEnvelope } from '@/components/crm/types';
-import { listContactsAction, listCompaniesAction } from '../_api';
+import { listContactsAction, listCompaniesAction } from '../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../_permissions';
 
 const PAGE_SIZE = 25;

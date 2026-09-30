@@ -1,5 +1,5 @@
 import { CompanyForm } from '@/components/crm/company-form';
-import { createCompanyAction } from '../../_api';
+import { createCompanyAction } from '../../actions';
 import { requireCrmPagePermission } from '../../_permissions';
 
 /** /crm/companies/new — create a company. companies.create to use. */

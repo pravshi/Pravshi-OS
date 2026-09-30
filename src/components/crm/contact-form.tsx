@@ -24,10 +24,10 @@ export function ContactForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const [companyId, setCompanyId] = useState(initial?.company_id ?? '');
+  const [companyId, setCompanyId] = useState(initial?.companyId ?? '');
   const [values, setValues] = useState({
-    first_name: initial?.first_name ?? '',
-    last_name: initial?.last_name ?? '',
+    firstName: initial?.firstName ?? '',
+    lastName: initial?.lastName ?? '',
     email: initial?.email ?? '',
     phone: initial?.phone ?? '',
     title: initial?.title ?? '',
@@ -46,7 +46,7 @@ export function ContactForm({
     try {
       const parsed = ContactFormSchema.safeParse({
         ...values,
-        company_id: companyId === '' ? undefined : companyId,
+        companyId: companyId === '' ? undefined : companyId,
       });
       if (!parsed.success) {
         const errors: Record<string, string> = {};
@@ -100,8 +100,8 @@ export function ContactForm({
       <CardContent>
         <form onSubmit={submit} className="space-y-5">
           <div className="grid gap-5 sm:grid-cols-2">
-            {text('first_name', 'First name *', { placeholder: 'Priya', maxLength: 100 })}
-            {text('last_name', 'Last name', { placeholder: 'Sharma', maxLength: 100 })}
+            {text('firstName', 'First name *', { placeholder: 'Priya', maxLength: 100 })}
+            {text('lastName', 'Last name *', { placeholder: 'Sharma', maxLength: 100 })}
             {text('email', 'Email', {
               placeholder: 'priya@acme.com',
               maxLength: 254,
@@ -119,7 +119,7 @@ export function ContactForm({
                 onChange={setCompanyId}
                 disabled={pending}
               />
-              <FieldError message={fieldErrors.company_id} />
+              <FieldError message={fieldErrors.companyId} />
             </div>
           </div>
           {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}

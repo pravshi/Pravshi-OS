@@ -15,7 +15,7 @@ import {
   listDealsAction,
   updateContactAction,
   deleteContactAction,
-} from '../../_api';
+} from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
 
 /** /crm/contacts/[id] — contact detail with edit, company link, related deals. */
@@ -26,7 +26,7 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
   const [contactRes, companiesRes, dealsRes, held] = await Promise.all([
     getContactAction(id),
     listCompaniesAction({ limit: 100 }),
-    listDealsAction({ limit: 100 }),
+    listDealsAction({ contactId: id, limit: 100 }),
     getCrmPermissions(),
   ]);
 
@@ -47,17 +47,17 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
     for (const c of companiesRes.rows) companyNames.set(c.id, c.name);
   }
 
-  let companyName: string | null = null;
-  if (contact.company_id) {
-    companyName = companyNames.get(contact.company_id) ?? null;
+  let companyName: string | null = contact.companyName;
+  if (contact.companyId) {
+    companyName = companyNames.get(contact.companyId) ?? contact.companyName;
     if (companyName === null) {
       // Fall back to a direct fetch in case the company sits outside the first 100.
-      const companyRes = await getCompanyAction(contact.company_id);
+      const companyRes = await getCompanyAction(contact.companyId);
       if (!isErrorEnvelope(companyRes)) companyName = companyRes.name;
     }
   }
 
-  const deals = isErrorEnvelope(dealsRes) ? [] : dealsRes.rows.filter((d) => d.contact_id === id);
+  const deals = isErrorEnvelope(dealsRes) ? [] : dealsRes.rows;
 
   return (
     <div className="space-y-8">
@@ -87,8 +87,8 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
         </CardHeader>
         <CardContent>
           <dl className="divide-y divide-line">
-            <DetailField label="First name">{contact.first_name}</DetailField>
-            <DetailField label="Last name">{contact.last_name ?? '—'}</DetailField>
+            <DetailField label="First name">{contact.firstName}</DetailField>
+            <DetailField label="Last name">{contact.lastName ?? '—'}</DetailField>
             <DetailField label="Email">
               {contact.email ? (
                 <DetailLink href={`mailto:${contact.email}`}>{contact.email}</DetailLink>
@@ -100,16 +100,16 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
             <DetailField label="Title">{contact.title ?? '—'}</DetailField>
             <DetailField label="Department">{contact.department ?? '—'}</DetailField>
             <DetailField label="Company">
-              {contact.company_id ? (
-                <DetailLink href={`/crm/companies/${contact.company_id}`}>
+              {contact.companyId ? (
+                <DetailLink href={`/crm/companies/${contact.companyId}`}>
                   {companyName ?? 'View company'}
                 </DetailLink>
               ) : (
                 '—'
               )}
             </DetailField>
-            <DetailField label="Created">{formatDateTime(contact.created_at)}</DetailField>
-            <DetailField label="Updated">{formatDateTime(contact.updated_at)}</DetailField>
+            <DetailField label="Created">{formatDateTime(contact.createdAt)}</DetailField>
+            <DetailField label="Updated">{formatDateTime(contact.updatedAt)}</DetailField>
           </dl>
         </CardContent>
       </Card>

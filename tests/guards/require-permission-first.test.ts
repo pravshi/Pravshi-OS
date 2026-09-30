@@ -106,8 +106,15 @@ export const hasInlineServerAction = (source: string) =>
 const AUTHORIZES_FIRST =
   /^(?:(?:const|let)\s+(?:\w+|\{[^}]*\})\s*=\s*)?await\s+requirePermission\s*\(/;
 
-/** Problems with a 'use server' file, or none. */
-export function analyseServerActions(source: string): string[] {
+/** Problems with a 'use server' file, or none.
+ *
+ * A named re-export (`export { a, b } from './actions'`) is verifiable when its
+ * target module is itself a clean server-action module: the analyser recurses
+ * into the target (resolved relative to `file`) and the re-export is accepted
+ * only when the target has zero problems. Anything else — wildcard re-exports,
+ * unresolvable targets, or a target that fails this same analysis — is a
+ * failure, never a pass. */
+export function analyseServerActions(source: string, file?: string): string[] {
   const code = stripComments(source);
   const problems: string[] = [];
   const declarations = [
@@ -122,12 +129,37 @@ export function analyseServerActions(source: string): string[] {
       problems.push(`${m[1]} does not await requirePermission() as its first statement`);
     }
   }
+  // Named re-exports are verified by recursing into their target module.
+  let reExportStatements = 0;
+  for (const m of code.matchAll(/export\s*\{[^}]*\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    reExportStatements += 1;
+    const target = m[1] as string | undefined;
+    if (!target) continue;
+    if (!file) {
+      problems.push(`re-export from '${target}' cannot be verified without its importing file`);
+      continue;
+    }
+    if (!target.startsWith('.')) {
+      problems.push(`re-export from '${target}' is not a relative module`);
+      continue;
+    }
+    const resolved = join(file, '..', target);
+    const candidate = [resolved, `${resolved}.ts`, `${resolved}.tsx`].find((p) => existsSync(p));
+    if (!candidate) {
+      problems.push(`re-export target '${target}' does not resolve to a file`);
+      continue;
+    }
+    const targetProblems = analyseServerActions(readFileSync(candidate, 'utf8'), candidate);
+    if (targetProblems.length > 0) {
+      problems.push(`re-export from '${target}' is not verifiable: ${targetProblems.join('; ')}`);
+    }
+  }
   // Every runtime export of a 'use server' module is callable from the client, so every one must
   // be a shape the loop above has read. Type-only exports are erased and cannot be called.
   const runtimeExports = [...code.matchAll(/\bexport\s+(?!type\b|interface\b)/g)].length;
-  if (runtimeExports !== declarations.length) {
+  if (runtimeExports !== declarations.length + reExportStatements) {
     problems.push(
-      `${runtimeExports - declarations.length} export(s) are not an async function this guard can verify`,
+      `${runtimeExports - declarations.length - reExportStatements} export(s) are not an async function this guard can verify`,
     );
   }
   return problems;
@@ -154,6 +186,25 @@ describe('the analysers themselves', () => {
     expect(analyseRoute(`export * from './handlers';`)).toHaveLength(1);
     // a comment cannot satisfy it
     expect(analyseRoute(`// withPermission\nexport async function DELETE() {}`)).toHaveLength(1);
+  });
+
+  it('refuses a named re-export it cannot resolve, and verifies a resolvable one', () => {
+    // Without the importing file there is no way to resolve the target: fail closed.
+    expect(analyseServerActions(`'use server';\nexport { save } from './actions';`)).toHaveLength(
+      1,
+    );
+    // A non-relative target is not verifiable.
+    expect(
+      analyseServerActions(`'use server';\nexport { save } from '@/lib/actions';`, 'src/x/_api.ts'),
+    ).toHaveLength(1);
+    // A missing target file is not verifiable.
+    expect(
+      analyseServerActions(`'use server';\nexport { save } from './nope';`, 'src/x/_api.ts'),
+    ).toHaveLength(1);
+    // A wildcard re-export stays unverifiable.
+    expect(
+      analyseServerActions(`'use server';\nexport * from './actions';`, 'src/x/_api.ts'),
+    ).toHaveLength(1);
   });
 
   it('accept an action that authorizes first and refuse one that does anything before', () => {
@@ -242,7 +293,7 @@ describe('every protected entry point authorizes first', () => {
 
   it('opens every Server Action with requirePermission()', () => {
     for (const { file, source } of sources.filter(({ source }) => isServerActionFile(source))) {
-      expect(analyseServerActions(source), file).toEqual([]);
+      expect(analyseServerActions(source, file), file).toEqual([]);
     }
   });
 

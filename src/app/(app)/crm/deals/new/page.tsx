@@ -1,7 +1,7 @@
 import { ErrorMessage } from '@/components/crm/error-message';
 import { DealForm } from '@/components/crm/deal-form';
 import { isErrorEnvelope } from '@/components/crm/types';
-import { createDealAction, listCompaniesAction, listContactsAction } from '../../_api';
+import { createDealAction, listCompaniesAction, listContactsAction } from '../../actions';
 import { requireCrmPagePermission } from '../../_permissions';
 
 /** /crm/deals/new — create a deal with company and contact pickers. */
@@ -44,9 +44,9 @@ export default async function NewDealPage() {
         companies={companiesRes.rows.map((c) => ({ id: c.id, name: c.name }))}
         contacts={contactsRes.rows.map((c) => ({
           id: c.id,
-          company_id: c.company_id,
-          first_name: c.first_name,
-          last_name: c.last_name,
+          companyId: c.companyId,
+          firstName: c.firstName,
+          lastName: c.lastName,
           email: c.email,
         }))}
         onSave={createDealAction}

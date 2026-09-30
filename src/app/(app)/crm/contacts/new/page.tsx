@@ -1,7 +1,7 @@
 import { ErrorMessage } from '@/components/crm/error-message';
 import { ContactForm } from '@/components/crm/contact-form';
 import { isErrorEnvelope } from '@/components/crm/types';
-import { createContactAction, listCompaniesAction } from '../../_api';
+import { createContactAction, listCompaniesAction } from '../../actions';
 import { requireCrmPagePermission } from '../../_permissions';
 
 /** /crm/contacts/new — create a contact, optionally linked to a company. */

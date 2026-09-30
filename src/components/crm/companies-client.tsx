@@ -118,8 +118,8 @@ export function CompaniesList({
                     <TableCell className="text-ink-muted">
                       {c.size ? c.size.replace('_', ' ') : '—'}
                     </TableCell>
-                    <TableCell className="text-ink-muted" title={c.owner_person_id}>
-                      {shortOwnerId(c.owner_person_id)}
+                    <TableCell className="text-ink-muted" title={c.ownerPersonId}>
+                      {shortOwnerId(c.ownerPersonId)}
                     </TableCell>
                   </TableRow>
                 ))}

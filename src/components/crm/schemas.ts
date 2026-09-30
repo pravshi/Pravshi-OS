@@ -2,12 +2,9 @@ import { z } from 'zod';
 import { DEAL_STAGES, COMPANY_SIZES } from './types';
 
 /**
- * Client-side form validation — TEMPORARY DUPLICATION.
- *
- * These mirror the server schemas that PR #31 will provide in
- * src/lib/crm/schema.ts. After #31 merges, import the canonical schemas from
- * there and delete these (keeping any UI-only helpers). The server actions
- * remain the source of truth regardless.
+ * Client-side form validation — camelCase wire contract matching the server
+ * schemas in src/lib/crm/schema.ts (PR #31). The server actions remain the
+ * source of truth; these add UI-friendly messages and input normalization.
  */
 
 const uuid = z.string().uuid();
@@ -40,18 +37,18 @@ export const CompanyFormSchema = z.object({
   size: z.enum(COMPANY_SIZES).optional(),
   website: optionalText(500),
   phone: optionalText(50),
-  address_line1: optionalText(200),
-  address_line2: optionalText(200),
-  city: optionalText(100),
-  state: optionalText(100),
-  postal_code: optionalText(20),
-  country_code: z.string().trim().toUpperCase().length(2, 'Country code must be 2 letters'),
+  addressLine1: optionalText(200),
+  addressLine2: optionalText(200),
+  addressCity: optionalText(100),
+  addressState: optionalText(100),
+  addressPostalCode: optionalText(20),
+  countryCode: z.string().trim().toUpperCase().length(2, 'Country code must be 2 letters'),
 });
 
 export const ContactFormSchema = z.object({
-  company_id: uuid.optional(),
-  first_name: z.string().trim().min(1, 'First name is required').max(100),
-  last_name: optionalText(100),
+  companyId: uuid.optional(),
+  firstName: z.string().trim().min(1, 'First name is required').max(100),
+  lastName: z.string().trim().min(1, 'Last name is required').max(100),
   email: optionalEmail,
   phone: optionalText(50),
   title: optionalText(150),
@@ -61,8 +58,8 @@ export const ContactFormSchema = z.object({
 export const DealFormSchema = z
   .object({
     title: z.string().trim().min(1, 'Title is required').max(200),
-    company_id: uuid.optional(),
-    contact_id: uuid.optional(),
+    companyId: uuid.optional(),
+    contactId: uuid.optional(),
     value: z
       .string()
       .max(24)
@@ -90,7 +87,7 @@ export const DealFormSchema = z
       .refine((v) => v === undefined || /^\d{1,3}$/.test(v), 'Probability must be a whole number')
       .transform((v) => (v === undefined ? undefined : Number(v)))
       .refine((v) => v === undefined || (v >= 0 && v <= 100), 'Must be between 0 and 100'),
-    expected_close_date: z
+    expectedCloseDate: z
       .string()
       .optional()
       .transform((v) => {
@@ -105,12 +102,12 @@ export const DealFormSchema = z
       ),
   })
   .superRefine((deal, ctx) => {
-    // A contact must belong to the deal's company (migration 0031 enforces the
+    // A contact must belong to the deal's company (the migration enforces the
     // pairing at the database level); the UI refuses a mismatched pair early.
-    if (deal.contact_id && !deal.company_id) {
+    if (deal.contactId && !deal.companyId) {
       ctx.addIssue({
         code: 'custom',
-        path: ['company_id'],
+        path: ['companyId'],
         message: 'Pick a company when a contact is set — the contact must belong to it.',
       });
     }

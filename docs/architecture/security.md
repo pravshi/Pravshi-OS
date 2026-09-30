@@ -21,7 +21,8 @@ Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-m
 | Hiring | `openings.*` `candidates.view` `candidates.create` `candidates.edit` `interviews.view` `interviews.schedule` `scorecards.create` `scorecards.view_all` `offers.create` `offers.approve` |
 | Onboarding | `onboarding.view` `onboarding.manage` `onboarding.complete_task` |
 | Offboarding | `offboarding.view` `offboarding.initiate` `offboarding.manage` |
-| Sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` `clients.view` `clients.create` `clients.edit` `clients.delete` `pipeline.manage` |
+| CRM | `companies.view` `companies.create` `companies.edit` `companies.delete` `contacts.view` `contacts.create` `contacts.edit` `contacts.delete` `contacts.export` `deals.view` `deals.create` `deals.edit` `deals.delete` `deals.export` |
+| Legacy sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` — retained in the catalogue but granted to no role since the CRM migration (0033); `clients.view` `clients.edit` remain granted only to non-CRM roles (project-management domain). `pipeline.manage` is catalogue-only. |
 | Projects | `projects.view` `projects.create` `projects.edit` `projects.delete` `projects.manage_members` |
 | Tasks | `tasks.view` `tasks.create` `tasks.edit` `tasks.assign` `tasks.delete` `tasks.comment` |
 | Documents | `documents.view` `documents.upload` `documents.download` `documents.verify` `documents.delete` |
@@ -59,14 +60,22 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `offers.approve` | G | G | G | — | — | — | — | — | — | — | — | — |
 | `onboarding.manage` | G | G | G | D | D | — | D | — | — | — | — | — |
 | `offboarding.initiate` | G | G | G | D | D | — | D | — | — | — | — | — |
-| `leads.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `leads.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `leads.assign` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `leads.export` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `clients.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |
-| `clients.edit` | G | G | — | — | D | S | D | — | — | — | — | — |
+| `companies.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `companies.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `contacts.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `contacts.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `contacts.export` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `deals.view` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.create` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
+| `deals.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `deals.export` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `clients.view` | G | — | — | — | — | — | D | P | P | P | G⁴ | — |
+| `clients.edit` | G | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |
 | `projects.create` | G | G | — | — | D | — | D | — | — | — | — | — |
 | `projects.edit` | G | G | — | — | D | — | D | P⁵ | — | — | — | — |
@@ -154,7 +163,7 @@ What each role can *see at all*, independent of the action:
 | **T-02** | Broken access control on a new endpoint (developer forgets a check) | **Critical** | `requirePermission` as the first statement, enforced by lint rule; RLS backstop; CI permission matrix over every action | Integration: call every Server Action as every seeded role; assert the matrix |
 | **T-03** | Privilege escalation — HR grants itself or a friend SUPER_ADMIN | **Critical** | Protected-role rule in SQL: granting a role with `roles.manage` requires holding it at GLOBAL; audited; alerts | SQL test: HR attempts to insert `person_roles(SUPER_ADMIN)` → policy violation |
 | **T-04** | IDOR — an intern opens `/people/{ceo-id}` or fetches it via the API | **High** | RLS on every table; **404 not 403**; no client-side-only guards | E2E per role: direct-URL every forbidden entity, expect 404; API fetch, expect empty |
-| **T-05** | Access retained after termination | **High** | Access derived from engagement status, re-read from the database on every query; sessions are rows, so deleting them ends access immediately | Integration: offboard, then replay the still-valid session cookie → denied on the very next request |
+| **T-05** | Access retained after termination | **High** | Access derived from engagement status, re-read from the database on every query; sessions are rows, so deleting them ends access immediately. Since 2026-09-30 (ADR-004, migration 0032), a suspended person also cannot mint a FRESH session: `databaseHooks.session.create.before` refuses the mint via `authz.login_person_active()` for every session-creation path | Integration: offboard, then replay the still-valid session cookie → denied on the very next request; attempt a fresh login while suspended → 401, no session row minted |
 | **T-06** | Stolen session token replayed | **High** | 1-hour access tokens + refresh rotation; MFA on privileged roles; `sessions.revoke`; login-event review | Manual + integration: revoke, then replay → denied |
 | **T-07** | Existence disclosure via search or error messages | **Medium** | Search runs through the same RLS-protected queries; 404 for out-of-scope; generic error envelope; no row counts in errors | E2E: search a term matching only forbidden records → zero results |
 | **T-08** | Malicious file upload | **Medium** | Private buckets; files never executed or rendered inline; content-type allowlist + size cap; random storage paths; `Content-Disposition: attachment`; strict CSP. **No AV scanning in V1 — accepted, documented gap** | Test: upload `.html`/`.svg` → rejected; download → attachment headers |

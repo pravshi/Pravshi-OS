@@ -115,20 +115,20 @@ export function ContactsList({
                     </TableCell>
                     <TableCell className="text-ink-muted">{c.email ?? '—'}</TableCell>
                     <TableCell className="text-ink-muted">
-                      {c.company_id ? (
+                      {c.companyId ? (
                         <Link
-                          href={`/crm/companies/${c.company_id}`}
+                          href={`/crm/companies/${c.companyId}`}
                           className="underline-offset-4 hover:underline"
                         >
-                          {companyNames.get(c.company_id) ?? '—'}
+                          {companyNames.get(c.companyId) ?? '—'}
                         </Link>
                       ) : (
                         '—'
                       )}
                     </TableCell>
                     <TableCell className="text-ink-muted">{c.title ?? '—'}</TableCell>
-                    <TableCell className="text-ink-muted" title={c.owner_person_id}>
-                      {shortOwnerId(c.owner_person_id)}
+                    <TableCell className="text-ink-muted" title={c.ownerPersonId}>
+                      {shortOwnerId(c.ownerPersonId)}
                     </TableCell>
                   </TableRow>
                 ))}

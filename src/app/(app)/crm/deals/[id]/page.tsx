@@ -23,7 +23,7 @@ import {
   listContactsAction,
   updateDealAction,
   deleteDealAction,
-} from '../../_api';
+} from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
 
 /** /crm/deals/[id] — deal detail with stage transitions, edit, and links. */
@@ -54,17 +54,15 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
   if (!isErrorEnvelope(companiesRes)) {
     for (const c of companiesRes.rows) companyNames.set(c.id, c.name);
   }
-  let companyName: string | null = deal.company_id
-    ? (companyNames.get(deal.company_id) ?? null)
-    : null;
-  let contactName: string | null = null;
+  let companyName: string | null = deal.companyName;
+  let contactName: string | null = deal.contactName;
 
-  if (deal.company_id && companyName === null) {
-    const companyRes = await getCompanyAction(deal.company_id);
+  if (deal.companyId && companyName === null) {
+    const companyRes = await getCompanyAction(deal.companyId);
     if (!isErrorEnvelope(companyRes)) companyName = companyRes.name;
   }
-  if (deal.contact_id) {
-    const contactRes = await getContactAction(deal.contact_id);
+  if (deal.contactId && contactName === null) {
+    const contactRes = await getContactAction(deal.contactId);
     if (!isErrorEnvelope(contactRes)) contactName = contactDisplayName(contactRes);
   }
 
@@ -110,8 +108,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <dl className="divide-y divide-line">
             <DetailField label="Title">{deal.title}</DetailField>
             <DetailField label="Company">
-              {deal.company_id ? (
-                <DetailLink href={`/crm/companies/${deal.company_id}`}>
+              {deal.companyId ? (
+                <DetailLink href={`/crm/companies/${deal.companyId}`}>
                   {companyName ?? 'View company'}
                 </DetailLink>
               ) : (
@@ -119,8 +117,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
               )}
             </DetailField>
             <DetailField label="Contact">
-              {deal.contact_id ? (
-                <DetailLink href={`/crm/contacts/${deal.contact_id}`}>
+              {deal.contactId ? (
+                <DetailLink href={`/crm/contacts/${deal.contactId}`}>
                   {contactName ?? 'View contact'}
                 </DetailLink>
               ) : (
@@ -133,10 +131,10 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
             <DetailField label="Probability">
               {deal.probability === null ? '—' : `${deal.probability}%`}
             </DetailField>
-            <DetailField label="Expected close">{formatDate(deal.expected_close_date)}</DetailField>
-            <DetailField label="Closed at">{formatDateTime(deal.closed_at)}</DetailField>
-            <DetailField label="Created">{formatDateTime(deal.created_at)}</DetailField>
-            <DetailField label="Updated">{formatDateTime(deal.updated_at)}</DetailField>
+            <DetailField label="Expected close">{formatDate(deal.expectedCloseDate)}</DetailField>
+            <DetailField label="Closed at">{formatDateTime(deal.closedAt)}</DetailField>
+            <DetailField label="Created">{formatDateTime(deal.createdAt)}</DetailField>
+            <DetailField label="Updated">{formatDateTime(deal.updatedAt)}</DetailField>
           </dl>
         </CardContent>
       </Card>
@@ -155,9 +153,9 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 ? []
                 : contactsRes.rows.map((c) => ({
                     id: c.id,
-                    company_id: c.company_id,
-                    first_name: c.first_name,
-                    last_name: c.last_name,
+                    companyId: c.companyId,
+                    firstName: c.firstName,
+                    lastName: c.lastName,
                     email: c.email,
                   }))
             }

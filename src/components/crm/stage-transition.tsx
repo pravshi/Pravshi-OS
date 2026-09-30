@@ -9,7 +9,7 @@ import { DEAL_STAGE_LABELS, formatDate, nextStages, stageBadgeClasses } from './
 
 /**
  * Deal stage lifecycle UI: shows the current stage and offers only forward
- * transitions (plus Mark Lost). Closing is server-stamped (closed_at) by the
+ * transitions (plus Mark Lost). Closing is server-stamped (closedAt) by the
  * migration trigger; reopening clears it, so no manual date input here.
  */
 export function StageTransition({
@@ -49,8 +49,8 @@ export function StageTransition({
       <div className="flex items-center gap-3">
         <span className="text-sm text-ink-muted">Stage</span>
         <Badge className={stageBadgeClasses(deal.stage)}>{DEAL_STAGE_LABELS[deal.stage]}</Badge>
-        {deal.closed_at && (
-          <span className="text-sm text-ink-muted">Closed {formatDate(deal.closed_at)}</span>
+        {deal.closedAt && (
+          <span className="text-sm text-ink-muted">Closed {formatDate(deal.closedAt)}</span>
         )}
       </div>
       {options.length > 0 && !disabled && (

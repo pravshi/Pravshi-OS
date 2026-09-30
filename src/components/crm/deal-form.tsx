@@ -29,7 +29,7 @@ export function DealForm({
 }: {
   initial?: Deal;
   companies: Pick<Company, 'id' | 'name'>[];
-  contacts: Pick<Contact, 'id' | 'company_id' | 'first_name' | 'last_name' | 'email'>[];
+  contacts: Pick<Contact, 'id' | 'companyId' | 'firstName' | 'lastName' | 'email'>[];
   onSave: (input: DealFormInput) => Promise<CrmResult<Deal>>;
 }) {
   const router = useRouter();
@@ -37,8 +37,8 @@ export function DealForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const [companyId, setCompanyId] = useState(initial?.company_id ?? '');
-  const [contactId, setContactId] = useState(initial?.contact_id ?? '');
+  const [companyId, setCompanyId] = useState(initial?.companyId ?? '');
+  const [contactId, setContactId] = useState(initial?.contactId ?? '');
   const [values, setValues] = useState({
     title: initial?.title ?? '',
     value: initial?.value ?? '',
@@ -48,7 +48,7 @@ export function DealForm({
       initial?.probability !== null && initial?.probability !== undefined
         ? String(initial.probability)
         : '',
-    expected_close_date: initial?.expected_close_date?.slice(0, 10) ?? '',
+    expectedCloseDate: initial?.expectedCloseDate?.slice(0, 10) ?? '',
   });
 
   function set<K extends keyof typeof values>(key: K, value: string) {
@@ -61,7 +61,7 @@ export function DealForm({
     // pairing rule stays satisfied.
     if (id !== '') {
       const kept = contacts.find((c) => c.id === contactId);
-      if (contactId && kept?.company_id !== id) setContactId('');
+      if (contactId && kept?.companyId !== id) setContactId('');
     }
   }
 
@@ -73,8 +73,8 @@ export function DealForm({
     try {
       const parsed = DealFormSchema.safeParse({
         ...values,
-        company_id: companyId === '' ? undefined : companyId,
-        contact_id: contactId === '' ? undefined : contactId,
+        companyId: companyId === '' ? undefined : companyId,
+        contactId: contactId === '' ? undefined : contactId,
       });
       if (!parsed.success) {
         const errors: Record<string, string> = {};
@@ -129,7 +129,7 @@ export function DealForm({
                 onChange={onCompanyChange}
                 disabled={pending}
               />
-              <FieldError message={fieldErrors.company_id} />
+              <FieldError message={fieldErrors.companyId} />
             </div>
             <div className="space-y-1.5">
               <FieldLabel htmlFor="deal-contact">Contact</FieldLabel>
@@ -141,7 +141,7 @@ export function DealForm({
                 onChange={setContactId}
                 disabled={pending}
               />
-              <FieldError message={fieldErrors.contact_id} />
+              <FieldError message={fieldErrors.contactId} />
             </div>
             <div className="space-y-1.5">
               <FieldLabel htmlFor="deal-value">Value</FieldLabel>
@@ -201,11 +201,11 @@ export function DealForm({
               <Input
                 id="deal-expected-close"
                 type="date"
-                value={values.expected_close_date}
-                onChange={(e) => set('expected_close_date', e.target.value)}
+                value={values.expectedCloseDate}
+                onChange={(e) => set('expectedCloseDate', e.target.value)}
                 disabled={pending}
               />
-              <FieldError message={fieldErrors.expected_close_date} />
+              <FieldError message={fieldErrors.expectedCloseDate} />
             </div>
           </div>
           {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}

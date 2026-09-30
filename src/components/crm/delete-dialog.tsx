@@ -25,7 +25,7 @@ export function DeleteDialog({
 }: {
   resourceName: string;
   recordName: string;
-  onDelete: () => Promise<CrmResult<void>>;
+  onDelete: () => Promise<CrmResult<{ ok: boolean }>>;
   redirectTo: string;
   disabled?: boolean;
 }) {

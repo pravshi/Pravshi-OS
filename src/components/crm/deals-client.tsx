@@ -123,12 +123,12 @@ export function DealsList({
                       </Link>
                     </TableCell>
                     <TableCell className="text-ink-muted">
-                      {d.company_id ? (
+                      {d.companyId ? (
                         <Link
-                          href={`/crm/companies/${d.company_id}`}
+                          href={`/crm/companies/${d.companyId}`}
                           className="underline-offset-4 hover:underline"
                         >
-                          {companyNames.get(d.company_id) ?? '—'}
+                          {companyNames.get(d.companyId) ?? '—'}
                         </Link>
                       ) : (
                         '—'
@@ -141,10 +141,10 @@ export function DealsList({
                       </Badge>
                     </TableCell>
                     <TableCell className="text-ink-muted">
-                      {formatDate(d.expected_close_date)}
+                      {formatDate(d.expectedCloseDate)}
                     </TableCell>
-                    <TableCell className="text-ink-muted" title={d.owner_person_id}>
-                      {shortOwnerId(d.owner_person_id)}
+                    <TableCell className="text-ink-muted" title={d.ownerPersonId}>
+                      {shortOwnerId(d.ownerPersonId)}
                     </TableCell>
                   </TableRow>
                 ))}

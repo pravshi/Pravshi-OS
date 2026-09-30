@@ -54,14 +54,14 @@ export function ContactPicker({
   disabled,
 }: {
   id: string;
-  contacts: Pick<Contact, 'id' | 'company_id' | 'first_name' | 'last_name' | 'email'>[];
+  contacts: Pick<Contact, 'id' | 'companyId' | 'firstName' | 'lastName' | 'email'>[];
   /** When set, only contacts of this company are offered. */
   companyId?: string;
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
 }) {
-  const options = companyId ? contacts.filter((c) => c.company_id === companyId) : contacts;
+  const options = companyId ? contacts.filter((c) => c.companyId === companyId) : contacts;
   return (
     <select
       id={id}

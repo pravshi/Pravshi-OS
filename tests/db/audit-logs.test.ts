@@ -911,8 +911,11 @@ describe('the rest of the model is untouched', () => {
     // Migrations 0018/0022 added four more scope-driven policies for the invitation
     // flow (invitations, invitation_roles, login_events, departments inviter view).
     // The self-service migration (0029) adds one more: login_events_select_self.
-    expect(Number(rows[0]!.n)).toBe(22);
-    expect(Number(rows[0]!.with_scope)).toBe(8);
+    // The CRM migration (0033) adds nine: select/insert/update on each of companies,
+    // contacts, and deals — six of them scope-driven (the select and update policies
+    // branch on scope_for for view/edit), so with_scope rises from eight to fourteen.
+    expect(Number(rows[0]!.n)).toBe(31);
+    expect(Number(rows[0]!.with_scope)).toBe(14);
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {
@@ -937,11 +940,13 @@ describe('the rest of the model is untouched', () => {
       'check_rate_limit',
       'clear_login_lockout',
       'consume_password_reset',
+      'crm_owner_reachable',
       'has',
       'has_record_grant',
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'login_person_active',
       'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',
@@ -957,10 +962,11 @@ describe('the rest of the model is untouched', () => {
     ]);
   });
 
-  it('is written to by exactly the Task 1.11 trigger allow-list, and by nothing else', async () => {
+  it('is written to by exactly the Task 1.11 trigger allow-list plus the CRM tables, and by nothing else', async () => {
     // Task 1.10 asserted this set was EMPTY, because blueprint 19.3's trigger source was a
     // separate task and starting it early would have gone unnoticed. Task 1.11 filled it,
     // and the assertion inverts rather than disappears: the set is now closed at seven.
+    // The CRM migration (0033) adds its three tables, closing the set at ten.
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
     // mechanism entirely.
@@ -973,6 +979,9 @@ describe('the rest of the model is untouched', () => {
        order by 1`,
     );
     expect(rows.map((r) => r.relname)).toEqual([
+      'companies',
+      'contacts',
+      'deals',
       'engagements',
       'people',
       'permissions',
