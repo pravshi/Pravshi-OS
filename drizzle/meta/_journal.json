@@ -233,6 +233,14 @@
       "tag": "0032_login_person_active",
       "breakpoints": true,
       "hash": "fe2642a4ad315bd426baa601c2de5520d5b03741f9ac80fdad389e9c7d02d3cb"
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790727809475,
+      "tag": "0033_crm_core",
+      "breakpoints": true,
+      "hash": "ced8a3efcdd009b90f1f0fc59d9e30b65459533f9a1f4d4a2df48c6d5f8539f3"
     }
   ]
 }
