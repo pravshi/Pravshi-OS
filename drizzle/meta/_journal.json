@@ -218,6 +218,21 @@
       "when": 1790542363566,
       "tag": "0029_login_events_self_read",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790722769141,
+      "tag": "0031_invitation_accept_account_id_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790722769142,
+      "tag": "0032_login_person_active",
+      "breakpoints": true,
+      "hash": "fe2642a4ad315bd426baa601c2de5520d5b03741f9ac80fdad389e9c7d02d3cb"
     }
   ]
 }
