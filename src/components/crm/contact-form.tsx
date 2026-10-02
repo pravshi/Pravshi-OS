@@ -122,7 +122,7 @@ export function ContactForm({
               <FieldError message={fieldErrors.companyId} />
             </div>
           </div>
-          {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
+          {formError && <p className="text-sm text-destructive">{formError}</p>}
           <div className="flex gap-3">
             <Button type="submit" disabled={pending}>
               {pending ? 'Saving…' : initial ? 'Save changes' : 'Create contact'}

@@ -38,7 +38,7 @@ export default function GlobalError({
           <button
             type="button"
             onClick={reset}
-            className="rounded border border-rule px-4 py-2 text-sm hover:bg-brand-soft"
+            className="rounded border border-rule px-4 py-2 text-sm hover:bg-accent"
           >
             Try again
           </button>

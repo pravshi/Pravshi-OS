@@ -36,11 +36,11 @@ export async function Sidebar() {
 
   return (
     <nav className="hidden border-r border-rule bg-surface p-4 md:block" aria-label="Main">
-      <div className="mb-6 text-xs font-semibold uppercase tracking-widest text-brand">PRAVSHI</div>
+      <div className="mb-6 text-xs font-semibold uppercase tracking-widest text-ink">PRAVSHI</div>
       <ul className="flex flex-col gap-1">
         {visible.map((s) => (
           <li key={s.href}>
-            <Link href={s.href} className="block rounded px-3 py-2 text-sm hover:bg-brand-soft">
+            <Link href={s.href} className="block rounded px-3 py-2 text-sm hover:bg-accent">
               {s.label}
             </Link>
           </li>

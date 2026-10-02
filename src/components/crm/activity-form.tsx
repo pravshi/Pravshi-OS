@@ -18,7 +18,7 @@ import {
 import { ACTIVITY_TYPE_LABELS } from './format';
 
 const selectClasses =
-  'w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30';
+  'w-full rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30';
 
 /** ISO instant → the "YYYY-MM-DDTHH:MM" a datetime-local input expects. */
 function toDateTimeLocal(iso: string | null | undefined): string {
@@ -151,7 +151,7 @@ export function ActivityForm({
                 maxLength={4000}
                 rows={4}
                 disabled={pending}
-                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
+                className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
               />
               <FieldError message={fieldErrors.notes} />
             </div>
@@ -178,7 +178,7 @@ export function ActivityForm({
               <FieldError message={fieldErrors.dueAt} />
             </div>
           </div>
-          {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
+          {formError && <p className="text-sm text-destructive">{formError}</p>}
           <div className="flex gap-3">
             <Button type="submit" disabled={pending}>
               {pending ? 'Saving…' : initial ? 'Save changes' : 'Log activity'}

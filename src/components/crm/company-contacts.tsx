@@ -181,7 +181,7 @@ function AssociationRow({
             )}
           </div>
         )}
-        {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </TableCell>
     </TableRow>
   );
@@ -307,7 +307,7 @@ function AddAssociationForm({
       <Button type="submit" disabled={pending || !contactId}>
         {pending ? 'Linking…' : 'Link contact'}
       </Button>
-      {error && <p className="w-full text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="w-full text-xs text-destructive">{error}</p>}
     </form>
   );
 }

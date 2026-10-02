@@ -114,7 +114,7 @@ export function ActivityTimeline({
               {activities.map((a) => (
                 <li key={a.id} className="flex gap-4 px-4 py-3">
                   <div className="flex w-24 shrink-0 flex-col">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-brand">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-foreground">
                       {ACTIVITY_TYPE_LABELS[a.type]}
                     </span>
                     <span className="text-xs text-ink-muted">{formatDateTime(a.occurredAt)}</span>

@@ -37,7 +37,7 @@ function Modal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-popover p-6">
         <h3 className="text-lg font-medium">{title}</h3>
         <div className="mt-4">{children}</div>
         <div className="mt-4 flex justify-end">
@@ -218,7 +218,7 @@ export function TeamsClient({
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">{editing ? 'Edit team' : 'New team'}</h3>
             <form onSubmit={onSubmit} className="mt-4 space-y-4">
               <div className="space-y-2">
@@ -237,7 +237,7 @@ export function TeamsClient({
                   <Label htmlFor="team-department">Department</Label>
                   <select
                     id="team-department"
-                    className="w-full rounded border border-line bg-white px-2 py-2 text-sm"
+                    className="w-full rounded border border-line bg-background px-2 py-2 text-sm"
                     value={departmentId}
                     onChange={(e) => setDepartmentId(e.target.value)}
                     disabled={busy === 'form'}
@@ -255,7 +255,7 @@ export function TeamsClient({
                 <Label htmlFor="team-lead">Lead (optional)</Label>
                 <select
                   id="team-lead"
-                  className="w-full rounded border border-line bg-white px-2 py-2 text-sm"
+                  className="w-full rounded border border-line bg-background px-2 py-2 text-sm"
                   value={leadPersonId}
                   onChange={(e) => setLeadPersonId(e.target.value)}
                   disabled={busy === 'form'}
