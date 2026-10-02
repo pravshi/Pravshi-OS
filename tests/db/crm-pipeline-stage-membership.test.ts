@@ -51,7 +51,9 @@ beforeAll(async () => {
 
   // Person to own the test deals (owner_person_id is NOT NULL).
   const pcode = (
-    await owner.query<{ c: string }>(`select authz.next_identity_code($1::uuid,'EMP','2026') c`, [orgId])
+    await owner.query<{ c: string }>(`select authz.next_identity_code($1::uuid,'EMP','2026') c`, [
+      orgId,
+    ])
   ).rows[0]!.c;
   personId = (
     await owner.query<{ id: string }>(
@@ -115,7 +117,10 @@ describe('0040 stage↔pipeline membership guard', () => {
       )
     ).rows[0]!.id;
     const code = await sqlstateOf(
-      owner.query(`update public.deals set pipeline_stage_id = $1 where id = $2`, [stageB1, dealId]),
+      owner.query(`update public.deals set pipeline_stage_id = $1 where id = $2`, [
+        stageB1,
+        dealId,
+      ]),
     );
     expect(code).toBe('42501');
   });
