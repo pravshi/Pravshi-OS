@@ -289,6 +289,14 @@
       "tag": "0039_pipeline_assignment_recovery",
       "breakpoints": true,
       "hash": "95c13e309ba749d97f39db5063abbfb81c5751d22ee55d5bb1430441d728abe8"
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790978580831,
+      "tag": "0040_pipeline_stage_membership_guard",
+      "breakpoints": true,
+      "hash": "8c132bcee9b126eb7e14f8543bef41ca59df3a0609f6baa1b2ad60df6c836391"
     }
   ]
 }
