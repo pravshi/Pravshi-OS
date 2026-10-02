@@ -13,6 +13,7 @@ import {
   UpdatePipelineStageSchema,
   type DealStage,
   type Forecast,
+  type ForecastCurrencyRow,
   type ForecastStageRow,
   type ListPipelinesQuery,
   type MoveDealResult,
@@ -34,10 +35,10 @@ import {
  *  - pipeline deletion is soft only, via softDeleteRow() → the SECURITY
  *    DEFINER public.crm_soft_delete('pipeline', …) (migration 0037)
  *  - stages have NO runtime delete path at all: migration 0037 revokes DELETE
- *    on pipeline_stages from the runtime roles and installs no DELETE policy.
- *    deleteStage() therefore refuses with INVALID_REQUEST (documented below);
- *    only app_owner may hard-delete a stage, and the deals FK blocks
- *    referenced stages there too.
+ *    on pipeline_stages from the runtime roles and installs no DELETE policy,
+ *    and the service exposes no stage-delete function. Only app_owner may
+ *    hard-delete a stage, and then only when the deals FK lets it (no deal
+ *    references the stage).
  *  - an UPDATE or soft-delete that touches zero rows is a NOT_FOUND through
  *    assertTargetAffected — the same concealment as an invisible target
  *  - deals.pipeline_id is immutable: the service never writes it (the DB
@@ -95,9 +96,53 @@ const PIPELINE_WHERE = (auth: Authorization) => sql`
   and p.deleted_at is null
 `;
 
+/**
+ * The pg fields of a database error. drizzle-orm wraps the node-postgres
+ * driver error in a DrizzleQueryError, so the SQLSTATE and the constraint
+ * name may live on `error` or on `error.cause` — check both, like the
+ * sqlstateOf helper in src/lib/auth/invitations.ts.
+ */
+function pgFieldsOf(error: unknown): { code: string; constraint?: unknown } | null {
+  for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
+    const code = (candidate as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
+      return { code, constraint: (candidate as { constraint?: unknown }).constraint };
+    }
+  }
+  return null;
+}
+
 /** True when the error is a Postgres error with the given SQLSTATE. */
 function isPgCode(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && (error as { code?: unknown }).code === code;
+  return pgFieldsOf(error)?.code === code;
+}
+
+/**
+ * Which pipelines unique constraint a 23505 violated, if it was one of ours.
+ * node-postgres exposes the index name on `error.constraint` (or on
+ * `error.cause.constraint` once drizzle wraps it); the two candidates are
+ * the partial unique index pipelines_one_default_per_org and the per-org
+ * name index pipelines_name_unique_per_org (both from 0037).
+ */
+function pipelinesUniqueViolation(error: unknown): 'default' | 'name' | null {
+  const fields = pgFieldsOf(error);
+  if (fields?.code !== '23505') return null;
+  const constraint = fields.constraint;
+  if (constraint === 'pipelines_one_default_per_org') return 'default';
+  if (constraint === 'pipelines_name_unique_per_org') return 'name';
+  return null;
+}
+
+/** Map a pipelines 23505 to the 400 it deserves; anything else rethrows. */
+function invalidPipelineConflict(error: unknown): never {
+  const kind = pipelinesUniqueViolation(error);
+  if (kind === 'default') {
+    throw new Error('INVALID_REQUEST: a default pipeline already exists');
+  }
+  if (kind === 'name') {
+    throw new Error('INVALID_REQUEST: a pipeline with this name already exists');
+  }
+  throw error;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -199,11 +244,9 @@ export async function createPipeline(
       return row.id;
     });
   } catch (error) {
-    // The partial unique index allows exactly one live default per org.
-    if (isPgCode(error, '23505')) {
-      throw new Error('INVALID_REQUEST: a default pipeline already exists');
-    }
-    throw error;
+    // The partial unique index allows exactly one live default per org;
+    // a duplicate name hits pipelines_name_unique_per_org instead.
+    invalidPipelineConflict(error);
   }
   await writeAuditEntry(
     auth.ctx,
@@ -281,10 +324,8 @@ export async function updatePipeline(
     });
   } catch (error) {
     // Race backstop for the pre-check above: the index is the authority.
-    if (isPgCode(error, '23505')) {
-      throw new Error('INVALID_REQUEST: a default pipeline already exists');
-    }
-    throw error;
+    // A rename onto a live name hits pipelines_name_unique_per_org.
+    invalidPipelineConflict(error);
   }
   await writeAuditEntry(
     auth.ctx,
@@ -525,40 +566,6 @@ export async function updateStage(
 }
 
 /**
- * Stages are append-only at runtime: migration 0037 revokes DELETE on
- * pipeline_stages from the runtime roles and installs no DELETE policy, so
- * there is no privileged write path for the service to call. Refuses with
- * INVALID_REQUEST (after the 404 concealment probe and the in-use guard).
- * Only app_owner may hard-delete a stage, and then only when no deal
- * references it — the FK from deals blocks anything else.
- */
-export async function deleteStage(auth: Authorization, stageId: string): Promise<void> {
-  await withAuthorizedDb(auth.ctx, async (tx) => {
-    const probe = await tx.execute(sql`
-      select 1
-      from public.pipeline_stages s
-      where s.id = ${stageId}::uuid
-        and s.org_id = ${auth.ctx.orgId}::uuid
-    `);
-    await assertTargetAffected(auth, probe.rowCount ?? 0);
-    const used = await tx.execute(sql`
-      select 1
-      from public.deals d
-      where d.pipeline_stage_id = ${stageId}::uuid
-        and d.org_id = ${auth.ctx.orgId}::uuid
-        and d.deleted_at is null
-      limit 1
-    `);
-    if ((used.rowCount ?? 0) > 0) {
-      throw new Error('INVALID_REQUEST: the stage is in use by live deals and cannot be deleted');
-    }
-    throw new Error(
-      'INVALID_REQUEST: pipeline stages cannot be deleted; rename or reorder the stage instead',
-    );
-  });
-}
-
-/**
  * Move a deal to another stage of its own pipeline.
  *
  * Permission: deals.edit (route-level). The deal visibility probe runs under
@@ -690,11 +697,16 @@ export async function moveDealToStage(
  * Per-stage forecast for a pipeline: deal count, total value, and weighted
  * value (value × stage probability / 100). Money arithmetic stays in SQL;
  * values are returned as numeric strings, like Deal.value.
+ *
+ * Currency: deal values are summed per currency (deals.currency), exposed as
+ * each stage row's `byCurrency` and the top-level `totalsByCurrency`. The
+ * legacy `totals` / per-stage totalValue/weightedValue fields are kept as the
+ * mixed-currency aggregate for backward compatibility with existing readers.
  */
 export async function getForecast(auth: Authorization, pipelineId: string): Promise<Forecast> {
   return withAuthorizedDb(auth.ctx, async (tx) => {
     await assertPipelineVisible(tx, auth, pipelineId);
-    const [stages, totals] = await Promise.all([
+    const [stages, totals, stageMoney, totalsMoney] = await Promise.all([
       tx.execute<ForecastStageRow>(sql`
         select ps.id as "stageId",
                ps.name as "stageName",
@@ -723,10 +735,67 @@ export async function getForecast(auth: Authorization, pipelineId: string): Prom
           and d.org_id = ${auth.ctx.orgId}::uuid
           and d.deleted_at is null
       `),
+      tx.execute<{
+        stageId: string;
+        currency: string;
+        dealCount: number;
+        totalValue: string;
+        weightedValue: string;
+      }>(sql`
+        select ps.id as "stageId",
+               d.currency as "currency",
+               count(d.id)::int as "dealCount",
+               coalesce(sum(d.value), 0)::text as "totalValue",
+               coalesce(sum(d.value * ps.probability / 100), 0)::text as "weightedValue"
+        from public.pipeline_stages ps
+        join public.deals d
+          on d.pipeline_stage_id = ps.id
+         and d.org_id = ps.org_id
+         and d.deleted_at is null
+        where ps.pipeline_id = ${pipelineId}::uuid
+          and ps.org_id = ${auth.ctx.orgId}::uuid
+        group by ps.id, d.currency
+        order by d.currency asc
+      `),
+      tx.execute<{
+        currency: string;
+        dealCount: number;
+        totalValue: string;
+        weightedValue: string;
+      }>(sql`
+        select d.currency as "currency",
+               count(d.id)::int as "dealCount",
+               coalesce(sum(d.value), 0)::text as "totalValue",
+               coalesce(sum(d.value * ps.probability / 100), 0)::text as "weightedValue"
+        from public.deals d
+        join public.pipeline_stages ps on ps.id = d.pipeline_stage_id
+        where d.pipeline_id = ${pipelineId}::uuid
+          and d.org_id = ${auth.ctx.orgId}::uuid
+          and d.deleted_at is null
+        group by d.currency
+        order by d.currency asc
+      `),
     ]);
+    const byStage = new Map<string, ForecastCurrencyRow[]>();
+    for (const row of stageMoney.rows) {
+      const list = byStage.get(row.stageId) ?? [];
+      list.push({
+        currency: row.currency,
+        dealCount: row.dealCount,
+        totalValue: row.totalValue,
+        weightedValue: row.weightedValue,
+      });
+      byStage.set(row.stageId, list);
+    }
     return {
-      stages: stages.rows,
+      stages: stages.rows.map((s) => ({ ...s, byCurrency: byStage.get(s.stageId) ?? [] })),
       totals: totals.rows[0] ?? { dealCount: 0, totalValue: '0', weightedValue: '0' },
+      totalsByCurrency: totalsMoney.rows.map((r) => ({
+        currency: r.currency,
+        dealCount: r.dealCount,
+        totalValue: r.totalValue,
+        weightedValue: r.weightedValue,
+      })),
     };
   });
 }
