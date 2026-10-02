@@ -292,8 +292,9 @@ describe('permission catalogue', () => {
     // the Task 1.9 amendment as the capability requirePermission() will name, plus the
     // 14 CRM permissions (companies/contacts/deals) from the Phase 2 CRM migration (0033),
     // plus the 8 Track B permissions (activities/relationships × view/create/edit/delete)
-    // from migration 0034.
-    expect(Number(rows[0]!.count)).toBe(104);
+    // from migration 0034, plus the 5 Phase 3 pipeline permissions
+    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037.
+    expect(Number(rows[0]!.count)).toBe(109);
   });
 
   it('holds every named key from each module', async () => {

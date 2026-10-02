@@ -922,7 +922,10 @@ describe('the rest of the model is untouched', () => {
     // (0034) and on company_contacts, company_links and contact_links (0035) — eight
     // of them scope-driven (select/update branch on scope_for for view/edit), so
     // with_scope rises from fourteen to twenty-two.
-    expect(Number(rows[0]!.n)).toBe(43);
+    // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
+    // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(51);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 

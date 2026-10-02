@@ -337,6 +337,15 @@ describe('tenant isolation', () => {
     // 0037: deal_stage_history SELECT is gated on authz.has('deals.view') —
     // pipelines.view alone is not enough (see the next test). pMove holds
     // deals.view GLOBAL.
+    // Seed one orgA history row first: the move suite that writes history rows
+    // runs later in this file, and beforeAll reset dealA's history, so at this
+    // point the table holds no orgA rows yet. The owner INSERT fires the
+    // recorder trigger, writing the creation row.
+    await owner.query(
+      `insert into public.deals (org_id, title, owner_person_id, pipeline_id, pipeline_stage_id)
+       values ($1,$2,$3,$4,$5)`,
+      [orgA, `History Probe ${RUN}`, pMove, pipeA, stA1],
+    );
     const orgs = (
       await inContext<{ org_id: string }>(
         ctxOf(pMove),
@@ -1099,10 +1108,11 @@ describe('history has no delete path', () => {
 });
 
 describe('history update rules', () => {
-  it('a deals.edit holder can touch a history row in their own org', async () => {
-    // 0037: the UPDATE policy exists gated on authz.has('deals.edit') with an
-    // org-immutable WITH CHECK; the application never updates history rows,
-    // but the policy is the contract.
+  it('history is append-only: even a deals.edit holder updates zero rows', async () => {
+    // 0037 deliberately ships NO UPDATE policy on deal_stage_history (F3
+    // security review) — history rows are written once by the recorder
+    // trigger and never modified. The application never updates history rows,
+    // and the database enforces it: UPDATE touches zero rows, fail closed.
     const target = (
       await owner.query<{ id: string }>(
         `select id from public.deal_stage_history where org_id=$1 limit 1`,
@@ -1115,7 +1125,7 @@ describe('history update rules', () => {
       `update public.deal_stage_history set changed_at = now() where id=$1 returning id`,
       [target],
     );
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(0);
   });
 
   it('history update without deals.edit touches zero rows', async () => {

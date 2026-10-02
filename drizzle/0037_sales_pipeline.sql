@@ -594,11 +594,11 @@ set pipeline_id = p.id,
 from public.pipelines p
 join public.pipeline_stages s
   on s.pipeline_id = p.id
- and s.name = d.stage
 where d.org_id = p.org_id
   and p.is_default
   and p.deleted_at is null
-  and d.pipeline_id is null;
+  and d.pipeline_id is null
+  and s.name = d.stage;
 
 -- ═════════════════════════════════════════════════════════════════════════════════
 -- deals_pipeline_immutable() — a deal never changes pipeline

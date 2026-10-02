@@ -179,7 +179,7 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  expect(rows.length, `${label}: catalogue size`).toBe(104);
+  expect(rows.length, `${label}: catalogue size`).toBe(109);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -899,7 +899,9 @@ describe('RLS', () => {
     // contacts, and deals.
     // The Track B migrations (0034/0035) add twelve more: select/insert/update on
     // activities, company_contacts, company_links and contact_links.
-    expect(Number(rows[0]!.n)).toBe(43);
+    // The Phase 3 migration (0037) adds eight more: select/insert/update on
+    // pipelines and pipeline_stages, select/insert on deal_stage_history.
+    expect(Number(rows[0]!.n)).toBe(51);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
