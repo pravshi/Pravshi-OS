@@ -41,7 +41,9 @@ const AUDITED_TRACKB = [
   'company_links',
   'contact_links',
 ] as const;
-const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM, ...AUDITED_TRACKB] as const;
+// Phase 3 (migration 0037): the sales-pipeline tables.
+const AUDITED_PHASE3 = ['pipelines', 'pipeline_stages', 'deal_stage_history'] as const;
+const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM, ...AUDITED_TRACKB, ...AUDITED_PHASE3] as const;
 
 let orgA = '';
 let orgB = '';
@@ -205,7 +207,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the fourteen approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the seventeen approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -265,7 +267,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(14);
+    expect(rows.length).toBe(17);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -732,12 +734,13 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 43: the audit-triggers migration itself added none; the 22 pre-existing
-    // policies plus the 9 CRM policies (select/insert/update × companies,
-    // contacts, deals) from the CRM core migration (0033), plus the 12 Track B
-    // policies (select/insert/update × activities, company_contacts,
-    // company_links, contact_links) from migrations 0034/0035.
-    expect(Number(policies.rows[0]!.n)).toBe(43);
+    // 51: the 22 pre-existing policies plus the 9 CRM policies (select/insert/update
+    // × companies, contacts, deals) from the CRM core migration (0033), plus the
+    // 12 Track B policies (select/insert/update × activities, company_contacts,
+    // company_links, contact_links) from migrations 0034/0035, plus the 8 Phase 3
+    // policies (select/insert/update × pipelines, pipeline_stages; select/insert ×
+    // deal_stage_history) from migration 0037.
+    expect(Number(policies.rows[0]!.n)).toBe(51);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

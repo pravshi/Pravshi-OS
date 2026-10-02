@@ -1049,9 +1049,15 @@ describe('permission catalogue', () => {
     'relationships.create',
     'relationships.edit',
     'relationships.delete',
+    // Phase 3 (migration 0037): the sales-pipeline keys.
+    'pipelines.view',
+    'pipelines.create',
+    'pipelines.edit',
+    'pipelines.delete',
+    'pipeline_stages.manage',
   ];
 
-  it('seeds exactly the 22 crm keys with the right sensitivity flags', async () => {
+  it('seeds exactly the 27 crm keys with the right sensitivity flags', async () => {
     const rows = await owner.query<{ key: string; module: string; is_sensitive: boolean }>(
       `select key, module, is_sensitive from public.permissions where module='crm' order by key`,
     );
@@ -1065,7 +1071,7 @@ describe('permission catalogue', () => {
     }
   });
 
-  it('SUPER_ADMIN holds GLOBAL on all 22 keys in an existing org', async () => {
+  it('SUPER_ADMIN holds GLOBAL on all 27 keys in an existing org', async () => {
     const rows = await owner.query<{ n: string }>(
       `select count(*) n
        from public.role_permissions rp
@@ -1075,7 +1081,7 @@ describe('permission catalogue', () => {
          and rp.scope = 'GLOBAL'::public.access_scope`,
       [orgA],
     );
-    expect(Number(rows.rows[0]!.n)).toBe(22);
+    expect(Number(rows.rows[0]!.n)).toBe(27);
   });
 
   it('standard roles hold the crm grants from the seed matrix', async () => {
@@ -1092,9 +1098,21 @@ describe('permission catalogue', () => {
       [orgA],
     );
     const have = new Set(rows.rows.map((r) => `${r.role}|${r.key}|${r.scope}`));
+    // Phase 3 (migration 0037): pipeline configuration is an admin surface —
+    // ADMIN holds the five pipeline keys at GLOBAL and no other role is granted
+    // pipeline keys, so the SALES_MANAGER assertion below skips them.
+    const PIPELINE_KEYS = [
+      'pipelines.view',
+      'pipelines.create',
+      'pipelines.edit',
+      'pipelines.delete',
+      'pipeline_stages.manage',
+    ];
     for (const k of EXPECTED) {
       expect(have.has(`ADMIN|${k}|GLOBAL`)).toBe(true);
-      expect(have.has(`SALES_MANAGER|${k}|DEPARTMENT`)).toBe(true);
+      expect(have.has(`SALES_MANAGER|${k}|DEPARTMENT`), `SALES_MANAGER|${k}`).toBe(
+        !PIPELINE_KEYS.includes(k),
+      );
     }
     const SALES_KEYS = [
       'companies.view',

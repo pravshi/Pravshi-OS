@@ -167,6 +167,7 @@ export const ListDealsQuerySchema = ListQuerySchema.extend({
   stage: DealStageSchema.optional(),
   companyId: uuid.optional(),
   contactId: uuid.optional(),
+  pipelineId: uuid.optional(),
 });
 export type ListDealsQuery = z.infer<typeof ListDealsQuerySchema>;
 
@@ -210,6 +211,8 @@ export type Deal = {
   value: string | null;
   currency: string;
   stage: DealStage;
+  pipelineId: string | null;
+  pipelineStageId: string | null;
   probability: number | null;
   ownerPersonId: string;
   expectedCloseDate: string | null;
@@ -401,4 +404,177 @@ export type ContactLink = {
   ownerPersonId: string;
   createdAt: string;
   updatedAt: string;
+};
+
+// ── Pipelines ────────────────────────────────────────────────────────────────────
+// (Phase 3). Column contract with migration 0037:
+//
+//   pipelines: id, org_id, name, description, is_default,
+//              created_at, updated_at, deleted_at
+//              (+ created_by/updated_by, stamped by trigger — never written here)
+//              Partial unique: exactly one live default per org.
+//              Soft-delete via public.crm_soft_delete('pipeline', id).
+//   pipeline_stages: id, org_id, pipeline_id, name, position,
+//              probability numeric(5,2), color, is_won, is_lost, created_at
+//              NO deleted_at — stages are append-only at runtime (hard-delete is
+//              app_owner-only and the FK from deals blocks referenced stages).
+//              UNIQUE (pipeline_id, position).
+//   deal_stage_history: id, org_id, deal_id, from_stage_id (NULL = creation),
+//              to_stage_id, changed_by, changed_at. Append-only.
+//   deals gains pipeline_id (IMMUTABLE after set — DB trigger raises 42501)
+//              and pipeline_stage_id. A DB trigger records every stage movement
+//              in deal_stage_history; the service never writes history rows.
+//
+// Pipelines are org-level configuration, not owned records: no owner_person_id.
+// Permission keys (module 'crm', seeded by 0037, granted to SUPER_ADMIN + ADMIN
+// at GLOBAL): pipelines.view/create/edit/delete, pipeline_stages.manage.
+
+/** List query for pipelines: pagination plus an optional name-prefix search. */
+export const ListPipelinesQuerySchema = ListQuerySchema;
+export type ListPipelinesQuery = ListQuery;
+
+export const CreatePipelineSchema = z.strictObject({
+  name: z.string().trim().min(1).max(1000),
+  description: nullableText(2000),
+  isDefault: z.boolean().default(false),
+});
+export type CreatePipelineInput = z.infer<typeof CreatePipelineSchema>;
+
+/**
+ * Partial update: every field optional, at least one required. Defined
+ * explicitly (not via .partial()) so isDefault's create-time .default(false)
+ * does not leak into updates and defeat the non-empty refine.
+ */
+export const UpdatePipelineSchema = z
+  .strictObject({
+    name: z.string().trim().min(1).max(1000).optional(),
+    description: nullableText(2000),
+    isDefault: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required');
+export type UpdatePipelineInput = z.infer<typeof UpdatePipelineSchema>;
+
+export type Pipeline = {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** A pipeline with its stages in position order. */
+export type PipelineWithStages = Pipeline & {
+  stages: PipelineStage[];
+};
+
+/** Pipeline list row: the pipeline plus its live stage count. */
+export type PipelineListRow = Pipeline & {
+  stageCount: number;
+};
+
+const stageProbability = z.number().min(0).max(100);
+const stageColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, 'color must be #RRGGBB hex')
+  .nullable()
+  .optional();
+
+/** A stage refuses to be both terminal states; the DB CHECK is the backstop. */
+const notBothTerminal = <T extends { isWon?: boolean; isLost?: boolean }>(v: T) =>
+  !(v.isWon && v.isLost);
+
+export const CreatePipelineStageSchema = z
+  .strictObject({
+    pipelineId: uuid,
+    name: z.string().trim().min(1).max(255),
+    position: z.number().int().min(0).optional(),
+    probability: stageProbability.default(0),
+    color: stageColor,
+    isWon: z.boolean().default(false),
+    isLost: z.boolean().default(false),
+  })
+  .refine(notBothTerminal, 'a stage cannot be both won and lost');
+export type CreatePipelineStageInput = z.infer<typeof CreatePipelineStageSchema>;
+
+/**
+ * Partial update: every field optional, at least one required. Defined
+ * explicitly so the create-time defaults do not leak into updates, and
+ * pipelineId is absent — a stage never changes pipeline.
+ */
+export const UpdatePipelineStageSchema = z
+  .strictObject({
+    name: z.string().trim().min(1).max(255).optional(),
+    position: z.number().int().min(0).optional(),
+    probability: stageProbability.optional(),
+    color: stageColor,
+    isWon: z.boolean().optional(),
+    isLost: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required')
+  .refine(notBothTerminal, 'a stage cannot be both won and lost');
+export type UpdatePipelineStageInput = z.infer<typeof UpdatePipelineStageSchema>;
+
+export type PipelineStage = {
+  id: string;
+  pipelineId: string;
+  name: string;
+  position: number;
+  /** numeric(5,2) arrives as a string, like Deal.value. */
+  probability: string;
+  color: string | null;
+  isWon: boolean;
+  isLost: boolean;
+  createdAt: string;
+};
+
+/** Move a deal to another stage of its own pipeline. */
+export const MoveDealToStageSchema = z.strictObject({
+  stageId: uuid,
+});
+export type MoveDealToStageInput = z.infer<typeof MoveDealToStageSchema>;
+
+export type MoveDealResult = {
+  ok: true;
+  dealId: string;
+  /** The stage the deal left; null when the deal had no stage yet. */
+  fromStageId: string | null;
+  toStageId: string;
+};
+
+/** One per-stage forecast row. Money values are numeric strings. */
+export type ForecastStageRow = {
+  stageId: string;
+  stageName: string;
+  position: number;
+  probability: string;
+  dealCount: number;
+  totalValue: string;
+  weightedValue: string;
+};
+
+export type Forecast = {
+  stages: ForecastStageRow[];
+  totals: {
+    dealCount: number;
+    totalValue: string;
+    weightedValue: string;
+  };
+};
+
+/** One per-stage velocity row. avgDays is null where no completed stay exists. */
+export type VelocityStageRow = {
+  stageId: string;
+  stageName: string;
+  position: number;
+  avgDays: number | null;
+  sampleCount: number;
+  entriesCount: number;
+  exitsCount: number;
+  /** Transitions into this stage from the immediately preceding stage. */
+  convertedFromPrevious: number;
+};
+
+export type Velocity = {
+  stages: VelocityStageRow[];
 };

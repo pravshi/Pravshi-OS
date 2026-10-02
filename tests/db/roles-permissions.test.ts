@@ -292,8 +292,9 @@ describe('permission catalogue', () => {
     // the Task 1.9 amendment as the capability requirePermission() will name, plus the
     // 14 CRM permissions (companies/contacts/deals) from the Phase 2 CRM migration (0033),
     // plus the 8 Track B permissions (activities/relationships × view/create/edit/delete)
-    // from migration 0034.
-    expect(Number(rows[0]!.count)).toBe(104);
+    // from migration 0034, plus the 5 Phase 3 pipeline permissions
+    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037.
+    expect(Number(rows[0]!.count)).toBe(109);
   });
 
   it('holds every named key from each module', async () => {
@@ -407,6 +408,12 @@ describe('permission catalogue', () => {
       // Task 1.9 amendment. Sits in the roles_permissions module with the other two
       // authorization-configuration capabilities.
       'record_grants.manage',
+      // Phase 3 (migration 0037): the sales-pipeline permissions.
+      'pipelines.view',
+      'pipelines.create',
+      'pipelines.edit',
+      'pipelines.delete',
+      'pipeline_stages.manage',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -545,10 +552,10 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 104 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B), minus users.impersonate
-    // which is listed but granted to no role.
-    expect(Number(rows[0]!.total)).toBe(103);
-    expect(Number(rows[0]!.global)).toBe(103);
+    // 109 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline),
+    // minus users.impersonate which is listed but granted to no role.
+    expect(Number(rows[0]!.total)).toBe(108);
+    expect(Number(rows[0]!.global)).toBe(108);
   });
 
   it('seeds MANAGER and MARKETING with no grants rather than guessing at them', async () => {

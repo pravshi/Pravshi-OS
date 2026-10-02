@@ -26,6 +26,15 @@ export {
   type CompanyLink,
   type ContactLink,
   type Page,
+  type Pipeline,
+  type PipelineListRow,
+  type PipelineStage,
+  type PipelineWithStages,
+  type Forecast,
+  type ForecastStageRow,
+  type Velocity,
+  type VelocityStageRow,
+  type MoveDealResult,
 } from '@/lib/crm/schema';
 import type { Contact } from '@/lib/crm/schema';
 

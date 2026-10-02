@@ -4,10 +4,18 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
 
 /**
  * The allowlisted entity names accepted by public.crm_soft_delete().
- * Mirrors the CASE in migration 0034 — the two lists must stay in lockstep.
+ * Mirrors the CASE in migration 0034 (plus the 'pipeline' mapping added by
+ * migration 0037) — the two lists must stay in lockstep.
  */
 export type SoftDeleteEntity =
-  'company' | 'contact' | 'deal' | 'activity' | 'company_contact' | 'company_link' | 'contact_link';
+  | 'company'
+  | 'contact'
+  | 'deal'
+  | 'activity'
+  | 'company_contact'
+  | 'company_link'
+  | 'contact_link'
+  | 'pipeline';
 
 /**
  * Soft-delete exactly one CRM row as app_user.

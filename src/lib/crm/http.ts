@@ -30,4 +30,24 @@ export function invalidRequestResponse(error: unknown): Response | null {
   );
 }
 
+/**
+ * A 400 response for service-level validation failures. Services signal these
+ * by throwing Error('INVALID_REQUEST: <message>') — domain rules the database
+ * reports as constraint violations (unique partial index, cross-pipeline
+ * stage) or that have no zod shape (delete guards). Anything else propagates
+ * to withPermission()'s error envelope.
+ */
+export function serviceInvalidRequestResponse(error: unknown): Response | null {
+  if (error instanceof Error) {
+    const match = /^INVALID_REQUEST:\s*(.+)$/.exec(error.message);
+    if (match) {
+      return Response.json(
+        { error: 'INVALID_REQUEST', message: match[1] },
+        { status: 400, headers: NO_STORE },
+      );
+    }
+  }
+  return null;
+}
+
 export const noStoreHeaders = NO_STORE;

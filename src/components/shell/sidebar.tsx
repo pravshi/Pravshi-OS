@@ -19,6 +19,7 @@ const SECTIONS = [
   { label: 'Companies', href: '/crm/companies', permission: 'companies.view' },
   { label: 'Contacts', href: '/crm/contacts', permission: 'contacts.view' },
   { label: 'Deals', href: '/crm/deals', permission: 'deals.view' },
+  { label: 'Pipelines', href: '/crm/pipelines', permission: 'pipelines.view' },
   { label: 'Activities', href: '/crm/activities', permission: 'activities.view' },
 ] as const;
 

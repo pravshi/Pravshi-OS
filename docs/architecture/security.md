@@ -21,7 +21,7 @@ Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-m
 | Hiring | `openings.*` `candidates.view` `candidates.create` `candidates.edit` `interviews.view` `interviews.schedule` `scorecards.create` `scorecards.view_all` `offers.create` `offers.approve` |
 | Onboarding | `onboarding.view` `onboarding.manage` `onboarding.complete_task` |
 | Offboarding | `offboarding.view` `offboarding.initiate` `offboarding.manage` |
-| CRM | `companies.view` `companies.create` `companies.edit` `companies.delete` `contacts.view` `contacts.create` `contacts.edit` `contacts.delete` `contacts.export` `deals.view` `deals.create` `deals.edit` `deals.delete` `deals.export` `activities.view` `activities.create` `activities.edit` `activities.delete` `relationships.view` `relationships.create` `relationships.edit` `relationships.delete` |
+| CRM | `companies.view` `companies.create` `companies.edit` `companies.delete` `contacts.view` `contacts.create` `contacts.edit` `contacts.delete` `contacts.export` `deals.view` `deals.create` `deals.edit` `deals.delete` `deals.export` `activities.view` `activities.create` `activities.edit` `activities.delete` `relationships.view` `relationships.create` `relationships.edit` `relationships.delete` `pipelines.view` `pipelines.create` `pipelines.edit` `pipelines.delete` `pipeline_stages.manage` |
 | Legacy sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` — retained in the catalogue but granted to no role since the CRM migration (0033); `clients.view` `clients.edit` remain granted only to non-CRM roles (project-management domain). `pipeline.manage` is catalogue-only. |
 | Projects | `projects.view` `projects.create` `projects.edit` `projects.delete` `projects.manage_members` |
 | Tasks | `tasks.view` `tasks.create` `tasks.edit` `tasks.assign` `tasks.delete` `tasks.comment` |
@@ -82,6 +82,11 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `relationships.create` | G | G | — | — | D | S | — | — | — | — | — | — |
 | `relationships.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
 | `relationships.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
+| `pipelines.view` | G | G | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.create` | G | G | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.edit` | G | G | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.delete` | G | G | — | — | — | — | — | — | — | — | — | — |
+| `pipeline_stages.manage` | G | G | — | — | — | — | — | — | — | — | — | — |
 | `clients.view` | G | — | — | — | — | — | D | P | P | P | G⁴ | — |
 | `clients.edit` | G | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |

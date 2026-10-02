@@ -37,6 +37,8 @@ const SELECT_COLUMNS = sql`
   d.value::text as value,
   d.currency,
   d.stage,
+  d.pipeline_id as "pipelineId",
+  d.pipeline_stage_id as "pipelineStageId",
   d.probability,
   d.owner_person_id as "ownerPersonId",
   d.expected_close_date::text as "expectedCloseDate",
@@ -77,7 +79,10 @@ export async function listDeals(auth: Authorization, input: unknown): Promise<Pa
   // capped list on detail pages).
   const companyWhere = query.companyId ? sql` and d.company_id = ${query.companyId}::uuid` : sql``;
   const contactWhere = query.contactId ? sql` and d.contact_id = ${query.contactId}::uuid` : sql``;
-  const relatedWhere = sql`${companyWhere} ${contactWhere}`;
+  const pipelineWhere = query.pipelineId
+    ? sql` and d.pipeline_id = ${query.pipelineId}::uuid`
+    : sql``;
+  const relatedWhere = sql`${companyWhere} ${contactWhere} ${pipelineWhere}`;
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
       tx.execute<Deal>(sql`

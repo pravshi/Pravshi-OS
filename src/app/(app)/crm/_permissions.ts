@@ -44,12 +44,24 @@ export const CRM_PERMISSIONS = {
     edit: 'relationships.edit',
     delete: 'relationships.delete',
   },
+  pipelines: {
+    view: 'pipelines.view',
+    create: 'pipelines.create',
+    edit: 'pipelines.edit',
+    delete: 'pipelines.delete',
+  },
 } as const;
+
+/** Standalone key: stage configuration is a single manage permission, not CRUD verbs. */
+export const PIPELINE_STAGES_MANAGE = 'pipeline_stages.manage';
 
 type CrmResource = keyof typeof CRM_PERMISSIONS;
 export type CrmVerb = keyof (typeof CRM_PERMISSIONS)[CrmResource];
 
-const ALL_PERMISSION_KEYS = Object.values(CRM_PERMISSIONS).flatMap((verbs) => Object.values(verbs));
+const ALL_PERMISSION_KEYS = [
+  ...Object.values(CRM_PERMISSIONS).flatMap((verbs) => Object.values(verbs)),
+  PIPELINE_STAGES_MANAGE,
+];
 
 /** The subset of CRM permission keys the current user holds. Never throws for a signed-in user. */
 export async function getCrmPermissions(): Promise<Set<string>> {
@@ -64,6 +76,11 @@ export async function getCrmPermissions(): Promise<Set<string>> {
     `);
     return new Set(res.rows.filter((r) => r.held).map((r) => r.key));
   });
+}
+
+/** Whether the viewer may configure pipeline stages (rename/reorder/recolor). */
+export function canManagePipelineStages(held: Set<string>): boolean {
+  return held.has(PIPELINE_STAGES_MANAGE);
 }
 
 /** Page-level gate: redirects to /login or /access-denied when unmet. */

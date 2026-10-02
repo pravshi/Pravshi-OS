@@ -998,7 +998,10 @@ describe('the rest of the authorization model is untouched', () => {
     // (0034/0035) add twelve more: select/insert/update on activities, company_contacts,
     // company_links and contact_links — eight of them scope-driven (select/update
     // branch on scope_for), so with_scope rises from fourteen to twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(43);
+    // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
+    // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(policies.rows[0]!.n)).toBe(51);
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 
@@ -1122,9 +1125,9 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    // 104: the 96 counted before, plus the eight Track B permissions
-    // (activities/relationships × view/create/edit/delete) from migration 0034.
-    expect(Number(rows[0]!.total)).toBe(104);
+    // 109: the 104 counted before, plus the five Phase 3 pipeline permissions
+    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037.
+    expect(Number(rows[0]!.total)).toBe(109);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,

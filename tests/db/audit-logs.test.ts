@@ -245,6 +245,11 @@ describe('structure', () => {
   });
 
   it('pre-creates the current month plus twelve, contiguous and monthly', async () => {
+    // The CI branch is one per PR ref and is reused across pushes, so migration
+    // 0011 — which pre-creates the window — may have run in an earlier month.
+    // Bring the window current before asserting the contract; the idempotency
+    // test below then verifies the second run is a no-op.
+    await owner.query(`select public.ensure_audit_log_partitions(12)`);
     const { rows } = await owner.query<{ relname: string; bounds: string }>(
       `select c.relname, pg_get_expr(c.relpartbound, c.oid) bounds
        from pg_class c join pg_namespace n on n.oid=c.relnamespace
@@ -922,7 +927,10 @@ describe('the rest of the model is untouched', () => {
     // (0034) and on company_contacts, company_links and contact_links (0035) — eight
     // of them scope-driven (select/update branch on scope_for for view/edit), so
     // with_scope rises from fourteen to twenty-two.
-    expect(Number(rows[0]!.n)).toBe(43);
+    // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
+    // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(51);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 
@@ -976,7 +984,9 @@ describe('the rest of the model is untouched', () => {
     // and the assertion inverts rather than disappears: the set is now closed at seven.
     // The CRM migration (0033) adds its three tables, closing the set at ten. The Track B
     // migrations add four more — activities (0034) and company_contacts, company_links,
-    // contact_links (0035) — closing the set at fourteen.
+    // contact_links (0035) — closing the set at fourteen. The Phase 3 sales-pipeline
+    // migration (0037) adds pipelines, pipeline_stages and deal_stage_history —
+    // closing the set at seventeen.
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
     // mechanism entirely.
@@ -995,11 +1005,14 @@ describe('the rest of the model is untouched', () => {
       'company_links',
       'contact_links',
       'contacts',
+      'deal_stage_history',
       'deals',
       'engagements',
       'people',
       'permissions',
       'person_roles',
+      'pipeline_stages',
+      'pipelines',
       'record_grants',
       'role_permissions',
       'roles',
