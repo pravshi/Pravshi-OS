@@ -12,7 +12,7 @@ import { contactDisplayName } from './types';
  */
 
 const selectClasses =
-  'w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
+  'w-full rounded-md border border-line bg-background px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
 
 export function CompanyPicker({
   id,
@@ -91,5 +91,5 @@ export function FieldLabel({ htmlFor, children }: { htmlFor: string; children: R
 
 export function FieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="text-xs text-red-600 dark:text-red-400">{message}</p>;
+  return <p className="text-xs text-destructive">{message}</p>;
 }

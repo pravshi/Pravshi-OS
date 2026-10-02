@@ -300,7 +300,7 @@ export function UsersClient({
                     {u.suspended ? (
                       <span className="text-destructive">Suspended</span>
                     ) : u.hasLogin ? (
-                      <span className="text-emerald-700">Active</span>
+                      <span className="text-ok">Active</span>
                     ) : (
                       <span className="text-ink-muted">No login</span>
                     )}
@@ -408,7 +408,7 @@ export function UsersClient({
       {/* ── invite dialog ── */}
       {showInvite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">Invite user</h3>
             {inviteResult ? (
               <div className="mt-4 space-y-3">
@@ -483,7 +483,7 @@ export function UsersClient({
                   <div className="grid grid-cols-2 gap-2">
                     <select
                       id="invite-engagement"
-                      className="rounded border border-line bg-white px-2 py-2 text-sm"
+                      className="rounded border border-line bg-background px-2 py-2 text-sm"
                       value={inviteEngagementType}
                       onChange={(e) => setInviteEngagementType(e.target.value)}
                       disabled={invitePending}
@@ -508,7 +508,7 @@ export function UsersClient({
                   <Label htmlFor="invite-department">Department</Label>
                   <select
                     id="invite-department"
-                    className="w-full rounded border border-line bg-white px-2 py-2 text-sm"
+                    className="w-full rounded border border-line bg-background px-2 py-2 text-sm"
                     value={inviteDepartmentId}
                     onChange={(e) => setInviteDepartmentId(e.target.value)}
                     disabled={invitePending}
@@ -546,7 +546,7 @@ export function UsersClient({
       {/* ── role editor dialog ── */}
       {editingRoles && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">
               Roles for {editingRoles.fullName ?? editingRoles.email}
             </h3>
@@ -587,7 +587,7 @@ export function UsersClient({
       {/* ── suspend confirmation ── */}
       {confirmSuspend && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">Suspend this login?</h3>
             <p className="mt-2 text-sm text-ink-muted">
               {confirmSuspend.fullName ?? confirmSuspend.email} will be signed out everywhere
@@ -612,7 +612,7 @@ export function UsersClient({
       {/* ── sessions dialog ── */}
       {sessionsUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">
               Sessions for {sessionsUser.fullName ?? sessionsUser.email}
             </h3>
@@ -697,7 +697,7 @@ export function UsersClient({
       {/* ── credential reset dialog ── */}
       {resetUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">Reset credential</h3>
             {resetResult ? (
               <div className="mt-4 space-y-3">

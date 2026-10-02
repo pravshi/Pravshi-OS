@@ -77,7 +77,7 @@ export function PipelinesList({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {data.rows.map((p) => (
             <Link key={p.id} href={`/crm/pipelines/${p.id}`} className="block">
-              <Card className="h-full transition-colors hover:border-brand">
+              <Card className="h-full transition-colors hover:border-foreground/40">
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center gap-2">
                     <h2 className="truncate text-base font-semibold">{p.name}</h2>

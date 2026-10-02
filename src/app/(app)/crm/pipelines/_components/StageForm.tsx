@@ -178,7 +178,7 @@ export function StageRowEditor({
               type="color"
               value={HEX_RE.test(color) ? color : '#94a3b8'}
               onChange={(e) => setColor(e.target.value)}
-              className="h-9 w-12 cursor-pointer rounded border border-line bg-white p-0.5"
+              className="h-9 w-12 cursor-pointer rounded border border-line bg-background p-0.5"
               aria-label="Pick stage color"
             />
             <Input
@@ -214,7 +214,7 @@ export function StageRowEditor({
           {pending ? 'Saving…' : 'Save stage'}
         </Button>
         {saved && !dirty && <span className="text-xs text-ink-muted">Saved.</span>}
-        {error && <span className="text-sm text-red-600 dark:text-red-400">{error}</span>}
+        {error && <span className="text-sm text-destructive">{error}</span>}
       </div>
     </div>
   );
@@ -324,7 +324,7 @@ export function AddStageForm({ pipelineId }: { pipelineId: string }) {
         <Button size="sm" disabled={pending || !name.trim()} onClick={() => void submit()}>
           {pending ? 'Adding…' : 'Add stage'}
         </Button>
-        {error && <span className="text-sm text-red-600 dark:text-red-400">{error}</span>}
+        {error && <span className="text-sm text-destructive">{error}</span>}
       </div>
     </div>
   );

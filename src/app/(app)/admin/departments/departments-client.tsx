@@ -97,7 +97,7 @@ export function DepartmentsClient({ departments }: { departments: Department[] }
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-border bg-popover p-6">
             <h3 className="text-lg font-medium">New department</h3>
             <form onSubmit={onCreate} className="mt-4 space-y-4">
               <div className="space-y-2">

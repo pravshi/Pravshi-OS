@@ -20,7 +20,7 @@ export function PipelineSwitcher({
         onChange={(e) => {
           if (e.target.value !== currentId) router.push(`/crm/pipelines/${e.target.value}`);
         }}
-        className="max-w-64 rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
+        className="max-w-64 rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
         aria-label="Switch pipeline"
       >
         {pipelines.map((p) => (

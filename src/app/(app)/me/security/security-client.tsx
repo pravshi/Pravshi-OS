@@ -172,15 +172,13 @@ export function SecurityClient() {
   return (
     <div className="space-y-10">
       {/* ── two-factor ── */}
-      <section className="rounded-lg border border-line bg-white p-5">
+      <section className="rounded-lg border border-line bg-background p-5">
         <h2 className="text-lg font-medium">Two-factor authentication</h2>
         {twoFactorEnabled === null ? (
           <p className="mt-2 text-sm text-ink-muted">Loading…</p>
         ) : twoFactorEnabled ? (
           <div className="mt-3 space-y-4">
-            <p className="text-sm text-emerald-700">
-              Two-factor authentication is on for your account.
-            </p>
+            <p className="text-sm text-ok">Two-factor authentication is on for your account.</p>
             {backupCodes ? (
               <div>
                 <p className="text-sm font-medium">Your new backup codes — save them now:</p>
@@ -299,7 +297,7 @@ export function SecurityClient() {
       </section>
 
       {/* ── change password ── */}
-      <section className="rounded-lg border border-line bg-white p-5">
+      <section className="rounded-lg border border-line bg-background p-5">
         <h2 className="text-lg font-medium">Change password</h2>
         <p className="mt-1 text-sm text-ink-muted">
           Your current password is required. Every other session is signed out; this one stays.
@@ -351,14 +349,14 @@ export function SecurityClient() {
           </p>
         )}
         {pwOk && (
-          <p role="status" className="mt-3 text-sm text-emerald-700">
+          <p role="status" className="mt-3 text-sm text-ok">
             Password changed. Your other sessions were signed out.
           </p>
         )}
       </section>
 
       {/* ── sessions ── */}
-      <section className="rounded-lg border border-line bg-white p-5">
+      <section className="rounded-lg border border-line bg-background p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">Active sessions</h2>
           {sessions.length > 1 && (
@@ -390,7 +388,7 @@ export function SecurityClient() {
       </section>
 
       {/* ── login history ── */}
-      <section className="rounded-lg border border-line bg-white p-5">
+      <section className="rounded-lg border border-line bg-background p-5">
         <h2 className="text-lg font-medium">Login history</h2>
         <p className="mt-1 text-sm text-ink-muted">
           Recent sign-in activity on your account, including failed attempts.
