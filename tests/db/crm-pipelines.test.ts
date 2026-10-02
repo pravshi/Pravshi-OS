@@ -799,49 +799,38 @@ describe('stage history trigger', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('documents the API contract: a cross-pipeline stage is legal at the DB level', async () => {
-    // deals.pipeline_stage_id is a single-column FK: the database constrains
-    // the stage's ORG (deals_pipeline_org_guard) but NOT its pipeline. A
-    // stage from a different pipeline in the same org succeeds here and even
-    // records history — so the API's moveDealToStage MUST reject it with 400.
-    // This test pins the hole the service layer is required to close.
-    const beforeIds = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where deal_id=$1`,
-        [dealA],
-      )
-    ).rows.map((r) => r.id);
-    await inContext(ctxOf(pMove), `update public.deals set pipeline_stage_id=$2 where id=$1`, [
-      dealA,
-      stA2x, // pipeA2's stage — same org, different pipeline
-    ]);
-    const cur = (
+  it('the DB backstop rejects a cross-pipeline stage (0040)', async () => {
+    // Migration 0040 strengthened deals_pipeline_org_guard(): the database now
+    // constrains the stage's PIPELINE (not just its org). A stage from a
+    // different pipeline in the same org is rejected here with 42501 — the
+    // API's moveDealToStage still answers 400 first (friendlier message), but
+    // the backstop catches anything that bypasses the service layer.
+    // (Previously this test pinned the hole the service layer had to close;
+    // 0040 closed it at the DB level.)
+    const before = (
       await owner.query<{ pipeline_stage_id: string }>(
         `select pipeline_stage_id from public.deals where id=$1`,
         [dealA],
       )
     ).rows[0]!.pipeline_stage_id;
-    expect(cur).toBe(stA2x);
-    // restore the fixture and remove every history row this probe added
-    await inContext(ctxOf(pMove), `update public.deals set pipeline_stage_id=$2 where id=$1`, [
-      dealA,
-      stA1,
-    ]);
-    const added = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where deal_id=$1 and not (id = any($2))`,
-        [dealA, beforeIds],
-      )
-    ).rows.map((r) => r.id);
-    expect(added.length).toBeGreaterThan(0);
-    await owner.query(`delete from public.deal_stage_history where id = any($1)`, [added]);
-    const restored = (
+    let code = 'NO ERROR';
+    try {
+      await inContext(ctxOf(pMove), `update public.deals set pipeline_stage_id=$2 where id=$1`, [
+        dealA,
+        stA2x, // pipeA2's stage — same org, different pipeline
+      ]);
+    } catch (error) {
+      code = (error as { code?: string }).code ?? String(error);
+    }
+    expect(code).toBe('42501');
+    // The deal is untouched.
+    const after = (
       await owner.query<{ pipeline_stage_id: string }>(
         `select pipeline_stage_id from public.deals where id=$1`,
         [dealA],
       )
     ).rows[0]!.pipeline_stage_id;
-    expect(restored).toBe(stA1);
+    expect(after).toBe(before);
   });
 });
 
