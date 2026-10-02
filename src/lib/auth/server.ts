@@ -186,6 +186,26 @@ export const auth = betterAuth({
       }
 
       /**
+       * The raw Better Auth change-password endpoint is refused.
+       *
+       * P1-2 (real-human E2E, 2026-10-03): POST /api/auth/change-password was
+       * directly reachable and rotated the credential while bypassing the
+       * application's own change-password path (lib/auth/change-password.ts) —
+       * its 5/minute rate limit on the current-password oracle, its revocation
+       * of every other session, and its auth.password_change audit entry.
+       * There is no Better Auth option that disables this endpoint (1.7.x), so
+       * the refusal lives here, in the same before-hook that refuses sign-up:
+       * the single legitimate way to change a password is the /me/security
+       * server action, which never calls this endpoint.
+       */
+      if (ctx.path === '/change-password') {
+        throw new APIError('FORBIDDEN', {
+          message:
+            'Password changes go through the application security settings. This endpoint is disabled.',
+        });
+      }
+
+      /**
        * Remembered devices are refused.
        *
        * The plugin can issue a trusted-device cookie that skips the prompt for thirty days.

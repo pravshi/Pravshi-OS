@@ -347,6 +347,20 @@ describe('CRM validation boundary', () => {
     expect(UpdateCompanySchema.safeParse({ phone: '+91 80 1234 5678' }).success).toBe(true);
   });
 
+  it('company countryCode defaults to IN and rejects explicit null (P1-1)', () => {
+    // country_code is NOT NULL DEFAULT 'IN' (migration 0033): omitting the
+    // field must produce 'IN' in the app layer, never an explicit NULL.
+    expect(CreateCompanySchema.parse({ name: 'Acme' }).countryCode).toBe('IN');
+    expect(CreateCompanySchema.parse({ name: 'Acme', countryCode: 'us' }).countryCode).toBe('US');
+    expect(CreateCompanySchema.safeParse({ name: 'Acme', countryCode: null }).success).toBe(false);
+    // Updates: omitting the field must leave the column untouched (no default
+    // leaking through partial()), and null is rejected (NOT NULL).
+    const update = UpdateCompanySchema.parse({ phone: '+91 80 1234 5678' });
+    expect('countryCode' in update).toBe(false);
+    expect(UpdateCompanySchema.parse({ countryCode: 'de' }).countryCode).toBe('DE');
+    expect(UpdateCompanySchema.safeParse({ countryCode: null }).success).toBe(false);
+  });
+
   it('contact and deal creates reject malformed input', () => {
     expect(CreateContactSchema.safeParse({ firstName: '', lastName: 'X' }).success).toBe(false);
     expect(

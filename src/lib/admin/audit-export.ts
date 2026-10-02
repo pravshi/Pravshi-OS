@@ -55,7 +55,7 @@ export async function countAuditExportRows(
       from public.audit_logs a
       where a.org_id = ${auth.ctx.orgId}::uuid
         and (${filters.action ?? null}::text is null or a.action = ${filters.action ?? null}::text)
-        and (${filters.result ?? null}::text is null or a.result = ${filters.result ?? null}::text)
+        and (${filters.result ?? null}::text is null or a.result::text = ${filters.result ?? null}::text)
     `);
     return Number(res.rows[0]?.count ?? 0);
   });
@@ -96,7 +96,7 @@ export async function streamAuditExportBatches(
         from public.audit_logs a
         where a.org_id = ${auth.ctx.orgId}::uuid
           and (${filters.action ?? null}::text is null or a.action = ${filters.action ?? null}::text)
-          and (${filters.result ?? null}::text is null or a.result = ${filters.result ?? null}::text)
+          and (${filters.result ?? null}::text is null or a.result::text = ${filters.result ?? null}::text)
           and (
             ${lastOccurredAt?.toISOString() ?? null}::timestamptz is null
             or (a.occurred_at, a.id) < (

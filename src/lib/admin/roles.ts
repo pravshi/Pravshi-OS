@@ -24,10 +24,22 @@ export async function listRoles(auth: Authorization): Promise<RoleWithPermission
     const res = await tx.execute<RoleWithPermissions>(sql`
       select
         r.id,
-        r.code,
+        r.key as code,
         r.name,
         r.description,
-        public.role_is_protected(r.id) as "isProtected",
+        -- Mirrors public.role_is_protected() (flag OR carries roles.manage /
+        -- permissions.manage). The function itself is intentionally not callable by
+        -- the application (migration 0008: it is SECURITY DEFINER, for triggers),
+        -- so the read path evaluates the same predicate over the rows this
+        -- caller's RLS already exposes — nothing the caller could not already see.
+        (r.is_protected
+         or exists (
+           select 1
+           from public.role_permissions rp
+           join public.permissions p on p.id = rp.permission_id
+           where rp.role_id = r.id
+             and p.key in ('roles.manage', 'permissions.manage')
+         )) as "isProtected",
         coalesce(
           (select array_agg(p.key order by p.key)
            from public.role_permissions rp
@@ -47,7 +59,7 @@ export async function listRoles(auth: Authorization): Promise<RoleWithPermission
       where r.org_id = ${auth.ctx.orgId}::uuid
         and r.deleted_at is null
         and r.status = 'ACTIVE'
-      order by r.code
+      order by r.key
     `);
     return res.rows;
   });
@@ -91,10 +103,20 @@ export async function listRolesWithGrants(auth: Authorization): Promise<RoleWith
     const res = await tx.execute<RoleWithGrants>(sql`
       select
         r.id,
-        r.code,
+        r.key as code,
         r.name,
         r.description,
-        public.role_is_protected(r.id) as "isProtected",
+        -- Same inline predicate as listRoles: public.role_is_protected() is not
+        -- callable by the application by design (migration 0008), so the read
+        -- path evaluates flag-OR-capability over RLS-visible rows.
+        (r.is_protected
+         or exists (
+           select 1
+           from public.role_permissions rp
+           join public.permissions p on p.id = rp.permission_id
+           where rp.role_id = r.id
+             and p.key in ('roles.manage', 'permissions.manage')
+         )) as "isProtected",
         coalesce(
           (select jsonb_agg(
              jsonb_build_object('permissionKey', p.key, 'scope', rp.scope::text)
@@ -109,7 +131,7 @@ export async function listRolesWithGrants(auth: Authorization): Promise<RoleWith
       where r.org_id = ${auth.ctx.orgId}::uuid
         and r.deleted_at is null
         and r.status = 'ACTIVE'
-      order by r.code
+      order by r.key
     `);
     return res.rows;
   });

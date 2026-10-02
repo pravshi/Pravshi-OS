@@ -24,13 +24,13 @@ export async function listUsers(auth: Authorization): Promise<AdminUser[]> {
     const res = await tx.execute<AdminUser>(sql`
       select
         p.id,
-        p.full_name as "fullName",
+        p.full_legal_name as "fullName",
         p.work_email as email,
         p.person_status as status,
         (p.auth_user_id is not null) as "hasLogin",
         (p.person_status <> 'ACTIVE') as suspended,
         coalesce(
-          (select array_agg(r.code order by r.code)
+          (select array_agg(r.key order by r.key)
            from public.person_roles pr
            join public.roles r on r.id = pr.role_id
            where pr.person_id = p.id
@@ -42,7 +42,7 @@ export async function listUsers(auth: Authorization): Promise<AdminUser[]> {
       from public.people p
       where p.org_id = ${auth.ctx.orgId}::uuid
         and p.deleted_at is null
-      order by p.full_name nulls last, p.work_email
+      order by p.full_legal_name nulls last, p.work_email
     `);
     return res.rows;
   });
@@ -65,9 +65,9 @@ export async function listPendingInvitations(auth: Authorization): Promise<Pendi
         i.email,
         i.expires_at as "expiresAt",
         i.created_at as "createdAt",
-        (select p.full_name from public.people p where p.id = i.invited_by) as "inviterName",
+        (select p.full_legal_name from public.people p where p.id = i.invited_by) as "inviterName",
         coalesce(
-          (select array_agg(r.code order by r.code)
+          (select array_agg(r.key order by r.key)
            from public.invitation_roles ir
            join public.roles r on r.id = ir.role_id
            where ir.invitation_id = i.id),

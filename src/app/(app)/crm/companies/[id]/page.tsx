@@ -78,7 +78,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
           <DeleteDialog
             resourceName="company"
             recordName={company.name}
-            onDelete={() => deleteCompanyAction(company.id)}
+            onDelete={deleteCompanyAction.bind(null, company.id)}
             redirectTo="/crm/companies"
           />
         )}
@@ -117,10 +117,7 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
 
       {perms.canEdit && (
         <EditableSection buttonLabel="Edit company">
-          <CompanyForm
-            initial={company}
-            onSave={(input) => updateCompanyAction(company.id, input)}
-          />
+          <CompanyForm initial={company} onSave={updateCompanyAction.bind(null, company.id)} />
         </EditableSection>
       )}
 
