@@ -585,6 +585,12 @@ describe('append-only', () => {
   });
 
   it('gives app_owner no UPDATE or DELETE either', async () => {
+    // Hermetic precondition: the trigger test below temporarily grants UPDATE/DELETE
+    // on audit_logs to app_owner. If a CI run is ever interrupted between that grant
+    // and its revoke on a reused database branch, the grant leaks into the next run
+    // and this test would see the trigger error instead of the grant denial.
+    // Re-establishing the revoke keeps the test asserting the schema, not the history.
+    await owner.query(`revoke update, delete on public.audit_logs from app_owner`);
     const id = await write({ personId: superA, orgId: orgA });
     await expect(
       owner.query(`update public.audit_logs set severity='LOW' where id=$1`, [id]),
