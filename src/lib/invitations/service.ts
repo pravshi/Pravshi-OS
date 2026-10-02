@@ -72,7 +72,9 @@ async function resolveRoleIds(tx: Tx, orgId: string, roleIds: string[]): Promise
       select public.invitation_grant_check(${roleIds}::uuid[])
     `);
   } catch (e) {
-    if (e instanceof Error && 'code' in e && (e as { code?: string }).code === '42501') {
+    // drizzle wraps the driver error in DrizzleQueryError, so the SQLSTATE
+    // may live on `e.cause` — sqlstateOf checks both.
+    if (sqlstateOf(e) === '42501') {
       throw new InvitationError(
         'ROLE_PROTECTED',
         'Inviting with an administrative role requires roles.manage at global scope.',

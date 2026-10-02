@@ -96,20 +96,38 @@ const PIPELINE_WHERE = (auth: Authorization) => sql`
   and p.deleted_at is null
 `;
 
+/**
+ * The pg fields of a database error. drizzle-orm wraps the node-postgres
+ * driver error in a DrizzleQueryError, so the SQLSTATE and the constraint
+ * name may live on `error` or on `error.cause` — check both, like the
+ * sqlstateOf helper in src/lib/auth/invitations.ts.
+ */
+function pgFieldsOf(error: unknown): { code: string; constraint?: unknown } | null {
+  for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
+    const code = (candidate as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
+      return { code, constraint: (candidate as { constraint?: unknown }).constraint };
+    }
+  }
+  return null;
+}
+
 /** True when the error is a Postgres error with the given SQLSTATE. */
 function isPgCode(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && (error as { code?: unknown }).code === code;
+  return pgFieldsOf(error)?.code === code;
 }
 
 /**
  * Which pipelines unique constraint a 23505 violated, if it was one of ours.
- * node-postgres exposes the index name on `error.constraint`; the two
- * candidates are the partial unique index pipelines_one_default_per_org and
- * the per-org name index pipelines_name_unique_per_org (both from 0037).
+ * node-postgres exposes the index name on `error.constraint` (or on
+ * `error.cause.constraint` once drizzle wraps it); the two candidates are
+ * the partial unique index pipelines_one_default_per_org and the per-org
+ * name index pipelines_name_unique_per_org (both from 0037).
  */
 function pipelinesUniqueViolation(error: unknown): 'default' | 'name' | null {
-  if (!isPgCode(error, '23505')) return null;
-  const constraint = (error as { constraint?: unknown }).constraint;
+  const fields = pgFieldsOf(error);
+  if (fields?.code !== '23505') return null;
+  const constraint = fields.constraint;
   if (constraint === 'pipelines_one_default_per_org') return 'default';
   if (constraint === 'pipelines_name_unique_per_org') return 'name';
   return null;
