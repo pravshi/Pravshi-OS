@@ -551,6 +551,21 @@ export type ForecastStageRow = {
   dealCount: number;
   totalValue: string;
   weightedValue: string;
+  /**
+   * Per-currency breakdown of this stage's dealCount/totalValue/weightedValue.
+   * Empty when the stage holds no deals. The top-level totals stay as the
+   * mixed-currency aggregate for backward compatibility; prefer byCurrency /
+   * totalsByCurrency for anything currency-aware.
+   */
+  byCurrency: ForecastCurrencyRow[];
+};
+
+/** Money totals for one currency. Money values are numeric strings. */
+export type ForecastCurrencyRow = {
+  currency: string;
+  dealCount: number;
+  totalValue: string;
+  weightedValue: string;
 };
 
 export type Forecast = {
@@ -560,6 +575,8 @@ export type Forecast = {
     totalValue: string;
     weightedValue: string;
   };
+  /** The same totals, grouped by deal currency. */
+  totalsByCurrency: ForecastCurrencyRow[];
 };
 
 /** One per-stage velocity row. avgDays is null where no completed stay exists. */

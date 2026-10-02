@@ -272,7 +272,7 @@
       "when": 1790799163035,
       "tag": "0037_sales_pipeline",
       "breakpoints": true,
-      "hash": "abff88be483a76c3554567590634fe7b2efe12143506a51e5903db6984714caa"
+      "hash": "6a08af027475c41a96bf1dd8dae1f3c1b359772abc5d425f2f78a4ed6e7a4d4c"
     },
     {
       "idx": 38,
@@ -281,6 +281,14 @@
       "tag": "0038_pipeline_stage_resolver",
       "breakpoints": true,
       "hash": "7f05a56f92d1218da15721d080ce01d495e1c5d468bd039f34534465e1a74d8f"
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790959180068,
+      "tag": "0039_pipeline_assignment_recovery",
+      "breakpoints": true,
+      "hash": "95c13e309ba749d97f39db5063abbfb81c5751d22ee55d5bb1430441d728abe8"
     }
   ]
 }

@@ -1,10 +1,15 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { formatMoney } from '@/components/crm/format';
-import type { Forecast, PipelineStage } from '@/components/crm/types';
+import type { Forecast, ForecastCurrencyRow, PipelineStage } from '@/components/crm/types';
 
 /**
  * Forecast strip above the board: per-stage weighted pipeline value plus
  * org-wide totals. Money arrives as numeric strings; formatMoney parses them.
+ *
+ * Currency-aware: deal values are grouped by currency (see
+ * Forecast.totalsByCurrency / ForecastStageRow.byCurrency) and never summed
+ * across currencies — each currency gets its own totals card and its own
+ * per-stage line.
  */
 export function ForecastBar({
   forecast,
@@ -21,24 +26,42 @@ export function ForecastBar({
     );
   }
   const stageName = new Map(stages.map((s) => [s.id, s.name]));
-  const currency = 'INR';
+  // totalsByCurrency is always present from the service; the legacy `totals`
+  // fallback keeps the component safe against older payloads.
+  const totals: ForecastCurrencyRow[] =
+    forecast.totalsByCurrency.length > 0
+      ? forecast.totalsByCurrency
+      : [
+          {
+            currency: 'INR',
+            dealCount: forecast.totals.dealCount,
+            totalValue: forecast.totals.totalValue,
+            weightedValue: forecast.totals.weightedValue,
+          },
+        ];
   return (
     <Card>
       <CardContent className="flex flex-wrap items-stretch gap-4 p-4">
-        <div className="min-w-40">
-          <p className="text-xs uppercase tracking-wide text-ink-muted">Total pipeline</p>
-          <p className="mt-1 text-xl font-semibold">
-            {formatMoney(forecast.totals.totalValue, currency)}
-          </p>
-          <p className="text-xs text-ink-muted">{forecast.totals.dealCount} deals</p>
-        </div>
-        <div className="min-w-40">
-          <p className="text-xs uppercase tracking-wide text-ink-muted">Weighted forecast</p>
-          <p className="mt-1 text-xl font-semibold text-brand">
-            {formatMoney(forecast.totals.weightedValue, currency)}
-          </p>
-          <p className="text-xs text-ink-muted">probability-weighted</p>
-        </div>
+        {totals.map((t) => (
+          <div key={t.currency} className="flex min-w-40 gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-muted">
+                Total pipeline · {t.currency}
+              </p>
+              <p className="mt-1 text-xl font-semibold">{formatMoney(t.totalValue, t.currency)}</p>
+              <p className="text-xs text-ink-muted">{t.dealCount} deals</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-muted">
+                Weighted · {t.currency}
+              </p>
+              <p className="mt-1 text-xl font-semibold text-brand">
+                {formatMoney(t.weightedValue, t.currency)}
+              </p>
+              <p className="text-xs text-ink-muted">probability-weighted</p>
+            </div>
+          </div>
+        ))}
         <div className="flex flex-1 flex-wrap items-stretch gap-3">
           {forecast.stages.map((row) => (
             <div
@@ -49,9 +72,21 @@ export function ForecastBar({
               <p className="truncate text-xs font-medium">
                 {stageName.get(row.stageId) ?? row.stageName}
               </p>
-              <p className="mt-0.5 text-sm font-semibold">
-                {formatMoney(row.weightedValue, currency)}
-              </p>
+              {row.byCurrency.length > 1 ? (
+                row.byCurrency.map((c) => (
+                  <p key={c.currency} className="mt-0.5 text-sm font-semibold">
+                    {formatMoney(c.weightedValue, c.currency)}{' '}
+                    <span className="text-xs font-normal text-ink-muted">{c.currency}</span>
+                  </p>
+                ))
+              ) : (
+                <p className="mt-0.5 text-sm font-semibold">
+                  {formatMoney(
+                    row.byCurrency[0]?.weightedValue ?? row.weightedValue,
+                    row.byCurrency[0]?.currency ?? 'INR',
+                  )}
+                </p>
+              )}
               <p className="text-xs text-ink-muted">
                 {row.dealCount} deals · {row.probability}%
               </p>

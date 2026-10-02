@@ -163,6 +163,19 @@ const mkRoleFor = async (
   );
 };
 
+/** The org's live default pipeline id (auto-seeded by the 0039 trigger). */
+const defaultPipelineOf = async (org: string) =>
+  (
+    await owner.query<{ id: string }>(
+      `select p.id
+       from public.pipelines p
+       where p.org_id = $1
+         and p.is_default
+         and p.deleted_at is null`,
+      [org],
+    )
+  ).rows[0]!.id;
+
 /** pipelines columns per 0037 (id/org_id/name/description/is_default/
  *  created_at/updated_at/deleted_at). */
 const mkPipeline = async (org: string, name: string, isDefault = false) =>
@@ -231,10 +244,12 @@ let pSusp = ''; // pipelines.view GLOBAL, SUSPENDED engagement
 let pForeign = ''; // orgB, pipelines.view GLOBAL
 
 // fixtures (orgA unless noted)
-let pipeA = ''; // default pipeline, orgA
+let pipeA = ''; // orgA pipeline (non-default; the seeded default is separate)
 let pipeA2 = ''; // second pipeline, orgA
 let pipeDoomed = ''; // orgA pipeline reserved for the soft-delete suite
 let pipeB = ''; // orgB pipeline
+let seedA = ''; // orgA's auto-seeded default pipeline (0039 trigger)
+let seedB = ''; // orgB's auto-seeded default pipeline (0039 trigger)
 let stA1 = ''; // pipeA, position 0, probability 10
 let stA2 = ''; // pipeA, position 1, probability 50, color #1a2b3c
 let stA2x = ''; // pipeA2, position 0
@@ -282,11 +297,15 @@ beforeAll(async () => {
   // viewer needs it too, so the orgB-history isolation probe is meaningful.
   await mkRoleFor(orgB, pForeign, `${CODE}-fdv`, 'deals.view', 'GLOBAL');
 
+  // 0039: every org is born with a default pipeline (seeded by the
+  // organizations_seed_system_roles trigger), so the fixtures below create
+  // non-default pipelines; seedA/seedB capture the auto-seeded defaults.
+  [seedA, seedB] = await Promise.all([defaultPipelineOf(orgA), defaultPipelineOf(orgB)]);
   [pipeA, pipeA2, pipeDoomed, pipeB] = await Promise.all([
-    mkPipeline(orgA, `Pipe A ${RUN}`, true),
+    mkPipeline(orgA, `Pipe A ${RUN}`),
     mkPipeline(orgA, `Pipe A2 ${RUN}`),
     mkPipeline(orgA, `Pipe Doomed ${RUN}`),
-    mkPipeline(orgB, `Pipe B ${RUN}`, true),
+    mkPipeline(orgB, `Pipe B ${RUN}`),
   ]);
 
   [stA1, stA2, stA2x, stB1] = await Promise.all([
@@ -366,11 +385,15 @@ describe('tenant isolation', () => {
     const pipes = (await inContext<{ id: string }>(ctx, `select id from public.pipelines`)).map(
       (r) => r.id,
     );
-    expect(pipes).toEqual([pipeB]);
+    // pipeB plus orgB's auto-seeded default (0039 trigger) — and nothing else.
+    expect(pipes).toHaveLength(2);
+    expect(pipes).toEqual(expect.arrayContaining([pipeB, seedB]));
     const stages = (
       await inContext<{ id: string }>(ctx, `select id from public.pipeline_stages`)
     ).map((r) => r.id);
-    expect(stages).toEqual([stB1]);
+    // stB1 plus the six seeded stages on the default pipeline.
+    expect(stages).toHaveLength(7);
+    expect(stages).toEqual(expect.arrayContaining([stB1]));
     const orgs = (
       await inContext<{ org_id: string }>(
         ctx,
@@ -997,7 +1020,7 @@ describe('CHECK constraints', () => {
 
 describe('one live default pipeline per org', () => {
   it('a second live default in the same org is rejected', async () => {
-    // pipeA is already the live default for orgA.
+    // The 0039 trigger already seeded orgA's live default.
     expect(await sqlstateOf(mkPipeline(orgA, `Second default ${RUN}`, true))).toBe('23505');
   });
 
@@ -1022,12 +1045,17 @@ describe('one live default pipeline per org', () => {
 
   it('a soft-deleted default frees the slot: a replacement default can be promoted', async () => {
     // 0037: the partial index is WHERE is_default AND deleted_at IS NULL.
-    // A third org keeps this test isolated from the shared fixtures.
+    // A third org keeps this test isolated from the shared fixtures; its
+    // default comes from the 0039 auto-seed.
     const orgC = await mkOrg(`pipe-${RUN}-c`);
-    const first = await mkPipeline(orgC, `C default ${RUN}`, true);
+    const first = await defaultPipelineOf(orgC);
     await owner.query(`update public.pipelines set deleted_at = now() where id=$1`, [first]);
     const second = await mkPipeline(orgC, `C default 2 ${RUN}`, true);
     expect(second).toBeTruthy();
+    // The 0039 auto-seed gives `first` six stages; stages must go before pipelines.
+    await owner.query(`delete from public.pipeline_stages where pipeline_id = any($1)`, [
+      [first, second],
+    ]);
     await owner.query(`delete from public.pipelines where id = any($1)`, [[first, second]]);
   });
 

@@ -53,3 +53,6 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# local migration runner (test-only, never commit)
+.tmp-run-migrations.mjs

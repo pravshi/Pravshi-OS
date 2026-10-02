@@ -10,8 +10,12 @@ import {
 /**
  * /api/crm/pipelines/[id]/forecast — per-stage forecast for a pipeline (Phase 3).
  * GET  pipelines.view → { stages: [{ stageId, stageName, position,
- *      probability, dealCount, totalValue, weightedValue }], totals: {...} }
+ *      probability, dealCount, totalValue, weightedValue, byCurrency }],
+ *      totals: {...}, totalsByCurrency: [...] }
  *      Money values are numeric strings; weighted = value × probability / 100.
+ *      byCurrency / totalsByCurrency group the sums by deal currency (values
+ *      in different currencies are never added together); the top-level
+ *      totals stay as the mixed-currency aggregate for backward compatibility.
  *      404 when the pipeline is invisible/deleted.
  */
 

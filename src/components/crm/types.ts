@@ -31,6 +31,7 @@ export {
   type PipelineStage,
   type PipelineWithStages,
   type Forecast,
+  type ForecastCurrencyRow,
   type ForecastStageRow,
   type Velocity,
   type VelocityStageRow,
