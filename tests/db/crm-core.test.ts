@@ -1098,9 +1098,21 @@ describe('permission catalogue', () => {
       [orgA],
     );
     const have = new Set(rows.rows.map((r) => `${r.role}|${r.key}|${r.scope}`));
+    // Phase 3 (migration 0037): pipeline configuration is an admin surface —
+    // ADMIN holds the five pipeline keys at GLOBAL and no other role is granted
+    // pipeline keys, so the SALES_MANAGER assertion below skips them.
+    const PIPELINE_KEYS = [
+      'pipelines.view',
+      'pipelines.create',
+      'pipelines.edit',
+      'pipelines.delete',
+      'pipeline_stages.manage',
+    ];
     for (const k of EXPECTED) {
       expect(have.has(`ADMIN|${k}|GLOBAL`)).toBe(true);
-      expect(have.has(`SALES_MANAGER|${k}|DEPARTMENT`)).toBe(true);
+      expect(have.has(`SALES_MANAGER|${k}|DEPARTMENT`), `SALES_MANAGER|${k}`).toBe(
+        !PIPELINE_KEYS.includes(k),
+      );
     }
     const SALES_KEYS = [
       'companies.view',
