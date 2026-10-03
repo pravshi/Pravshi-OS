@@ -169,7 +169,7 @@ export function RolesGridClient({
                     key={p.key}
                     className="border-b border-line last:border-0 hover:bg-cream-dark/20"
                   >
-                    <td className="sticky left-0 bg-background px-4 py-1.5">
+                    <td className="sticky left-0 bg-white px-4 py-1.5">
                       <span className="font-mono text-xs" title={p.description ?? undefined}>
                         {p.key}
                       </span>
@@ -185,7 +185,7 @@ export function RolesGridClient({
                         <td key={r.id} className="px-3 py-1.5">
                           <select
                             aria-label={`${p.key} scope for ${r.code}`}
-                            className="w-full rounded border border-line bg-background px-1.5 py-1 text-xs"
+                            className="w-full rounded border border-line bg-white px-1.5 py-1 text-xs"
                             value={value}
                             disabled={saving !== null}
                             onChange={(e) => setCell(r.id, p.key, e.target.value)}

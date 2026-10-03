@@ -55,7 +55,7 @@ export function ForecastBar({
               <p className="text-xs uppercase tracking-wide text-ink-muted">
                 Weighted · {t.currency}
               </p>
-              <p className="mt-1 text-xl font-semibold text-foreground">
+              <p className="mt-1 text-xl font-semibold text-brand">
                 {formatMoney(t.weightedValue, t.currency)}
               </p>
               <p className="text-xs text-ink-muted">probability-weighted</p>

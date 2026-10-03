@@ -117,7 +117,7 @@ export function CompanyForm({
                 value={values.size}
                 onChange={(e) => set('size', e.target.value)}
                 disabled={pending}
-                className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
               >
                 <option value="">Not set</option>
                 {COMPANY_SIZES.map((s) => (
@@ -137,7 +137,7 @@ export function CompanyForm({
             {text('addressPostalCode', 'Postal code', { maxLength: 20 })}
             {text('countryCode', 'Country code *', { placeholder: 'IN', maxLength: 2 })}
           </div>
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
+          {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
           <div className="flex gap-3">
             <Button type="submit" disabled={pending}>
               {pending ? 'Saving…' : initial ? 'Save changes' : 'Create company'}

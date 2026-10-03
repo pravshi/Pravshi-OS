@@ -1,0 +1,616 @@
+import { sql, type SQL } from 'drizzle-orm';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
+import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
+import { writeAuditEntry } from '@/lib/audit/log';
+import { isPgCode } from './errors';
+import {
+  CreateTaskSchema,
+  ListTasksQuerySchema,
+  MoveTaskSchema,
+  UpdateTaskSchema,
+  type ListTasksQuery,
+  type MoveTaskResult,
+  type Page,
+  type Task,
+  type TaskSortField,
+  type TaskStatus,
+  type TaskWithSubtasks,
+  type UpdateTaskInput,
+} from './schema';
+
+/**
+ * Task service (Phase 4). Trust boundaries:
+ *
+ *  - org_id always comes from auth.ctx.orgId, never from the caller; every
+ *    query re-states the org predicate explicitly (defense in depth over RLS)
+ *  - created_by is stamped from auth.ctx.personId on insert, never from the body
+ *  - the task's project_id must reference a live project in the caller's org:
+ *    a visibility probe fails closed with NOT_FOUND concealment (the composite
+ *    org FK may not exist yet — the probe is the enforcement point, mirroring
+ *    src/lib/crm/refs.ts). A same-org race is backstopped by the 0042 trigger,
+ *    whose 42501 maps to 400 INVALID_REQUEST here
+ *  - the assignee must be a live, visible person in the caller's org (people
+ *    RLS: org isolation + liveness + people.view scope); invisible → NOT_FOUND
+ *  - moveTask() changes ONLY status — project_id is not accepted, so
+ *    cross-project moves are impossible through it. Changing projects is PATCH
+ *    with projectId (same-org validation above)
+ *  - deleteTask() is soft only, via the probe + public.crm_soft_delete()
+ *    two-step (same shape as src/lib/crm/soft-delete.ts). DEPENDENCY: the 0042
+ *    migration must extend crm_soft_delete's allowlist with
+ *    'task' → 'work_tasks' (migration 0037 pattern for 'pipeline'); otherwise
+ *    the call raises 42501 'unknown soft-delete entity'
+ *  - permission keys are the exact 0008 seed keys (tasks.view / create / edit /
+ *    delete; tasks.assign covers assignment); the routes own the key choice
+ */
+
+const TASK_COLUMNS = sql`
+  t.id,
+  t.project_id as "projectId",
+  pr.name as "projectName",
+  t.title,
+  t.description,
+  t.status,
+  t.priority,
+  t.due_date::text as "dueDate",
+  t.assignee_person_id as "assigneePersonId",
+  coalesce(per.preferred_name, per.full_legal_name) as "assigneeName",
+  t.parent_task_id as "parentTaskId",
+  t.created_by as "createdBy",
+  t.created_at as "createdAt",
+  t.updated_at as "updatedAt"
+`;
+
+const TASK_FROM = sql`
+  from public.work_tasks t
+  left join public.work_projects pr
+    on pr.id = t.project_id
+   and pr.org_id = t.org_id
+   and pr.deleted_at is null
+  left join public.people per
+    on per.id = t.assignee_person_id
+`;
+
+const TASK_WHERE = (auth: Authorization) => sql`
+  t.org_id = ${auth.ctx.orgId}::uuid
+  and t.deleted_at is null
+`;
+
+function searchWhere(search: string | undefined) {
+  if (!search) return sql``;
+  // Prefix ILIKE — the leading constant keeps the btree index on title usable.
+  return sql` and t.title ilike ${search} || '%'`;
+}
+
+function taskSortSql(sort: TaskSortField, order: 'asc' | 'desc'): SQL {
+  // sort/order come from the zod allowlist — never raw caller text.
+  const dir = order === 'asc' ? sql`asc` : sql`desc`;
+  switch (sort) {
+    case 'title':
+      return sql`t.title ${dir}, t.id asc`;
+    case 'status':
+      return sql`case t.status
+          when 'todo' then 0
+          when 'in_progress' then 1
+          else 2
+        end ${dir}, t.updated_at desc, t.id asc`;
+    case 'priority':
+      return sql`case t.priority
+          when 'urgent' then 0
+          when 'high' then 1
+          when 'medium' then 2
+          else 3
+        end ${dir}, t.id asc`;
+    case 'dueDate':
+      return sql`t.due_date ${dir} nulls last, t.id asc`;
+    case 'createdAt':
+      return sql`t.created_at ${dir}, t.id asc`;
+    case 'updatedAt':
+      return sql`t.updated_at ${dir}, t.id asc`;
+  }
+}
+
+/** The referenced project must be live and visible in the caller's org. */
+async function assertProjectVisible(tx: Tx, auth: Authorization, projectId: string): Promise<void> {
+  const res = await tx.execute(sql`
+    select 1
+    from public.work_projects p
+    where p.id = ${projectId}::uuid
+      and p.org_id = ${auth.ctx.orgId}::uuid
+      and p.deleted_at is null
+  `);
+  await assertTargetAffected(auth, res.rowCount ?? 0);
+}
+
+/** The assignee must be live and visible in the caller's org (people RLS:
+ *  org isolation + liveness + people.view scope apply inside the probe). */
+async function assertAssigneeVisible(tx: Tx, auth: Authorization, personId: string): Promise<void> {
+  const res = await tx.execute(sql`
+    select 1
+    from public.people per
+    where per.id = ${personId}::uuid
+  `);
+  await assertTargetAffected(auth, res.rowCount ?? 0);
+}
+
+/**
+ * The parent task must be a live top-level task in the caller's org.
+ * One level only: a subtask may never be a parent (enforced here, not just UI).
+ */
+async function assertParentTaskVisible(
+  tx: Tx,
+  auth: Authorization,
+  parentTaskId: string,
+  projectId: string | null | undefined,
+): Promise<void> {
+  const res = await tx.execute<{ project_id: string | null }>(sql`
+    select t.project_id
+    from public.work_tasks t
+    where t.id = ${parentTaskId}::uuid
+      and t.org_id = ${auth.ctx.orgId}::uuid
+      and t.deleted_at is null
+      and t.parent_task_id is null
+  `);
+  await assertTargetAffected(auth, res.rowCount ?? 0);
+  // Subtask must live in the same project as its parent (or both unprojected).
+  const parentProjectId = res.rows[0]?.project_id ?? null;
+  const childProjectId = projectId ?? null;
+  if (parentProjectId !== childProjectId) {
+    throw new Error('INVALID_REQUEST: subtask must be in the same project as its parent task');
+  }
+}
+
+/** Map a tasks write failure to the 400 it deserves; anything else rethrows. */
+function invalidTaskWrite(error: unknown, projectChanged: boolean): never {
+  if (isPgCode(error, '23503')) {
+    throw new Error('INVALID_REQUEST: the referenced project or assignee does not exist');
+  }
+  if (isPgCode(error, '23514')) {
+    throw new Error('INVALID_REQUEST: a value violates a database constraint');
+  }
+  if (isPgCode(error, '22008')) {
+    throw new Error('INVALID_REQUEST: dueDate is not a valid calendar date');
+  }
+  if (isPgCode(error, '23505')) {
+    throw new Error('INVALID_REQUEST: this task conflicts with an existing one');
+  }
+  if (projectChanged && isPgCode(error, '42501')) {
+    // The 0042 same-org trigger backstop: the pre-write probe passed, so a
+    // 42501 here means the target project left the caller's org mid-flight
+    // (or the trigger rejected it) — a 400, never a 500.
+    throw new Error('INVALID_REQUEST: the target project is not in your organization');
+  }
+  throw error;
+}
+
+export async function listTasks(auth: Authorization, input: unknown): Promise<Page<Task>> {
+  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  const projectWhere = query.projectId ? sql` and t.project_id = ${query.projectId}::uuid` : sql``;
+  const statusWhere = query.status ? sql` and t.status = ${query.status}` : sql``;
+  const priorityWhere = query.priority ? sql` and t.priority = ${query.priority}` : sql``;
+  const assigneeWhere = query.assigneePersonId
+    ? sql` and t.assignee_person_id = ${query.assigneePersonId}::uuid`
+    : sql``;
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    const [rows, counts] = await Promise.all([
+      tx.execute<Task>(sql`
+        select ${TASK_COLUMNS}
+        ${TASK_FROM}
+        where ${TASK_WHERE(auth)}
+          ${searchWhere(query.search)} ${projectWhere} ${statusWhere}
+          ${priorityWhere} ${assigneeWhere}
+        order by ${taskSortSql(query.sort, query.order)}
+        limit ${query.limit} offset ${query.offset}
+      `),
+      tx.execute<{ total: number }>(sql`
+        select count(*)::int as total
+        from public.work_tasks t
+        where ${TASK_WHERE(auth)}
+          ${searchWhere(query.search)} ${projectWhere} ${statusWhere}
+          ${priorityWhere} ${assigneeWhere}
+      `),
+    ]);
+    return {
+      rows: rows.rows,
+      total: counts.rows[0]?.total ?? 0,
+      limit: query.limit,
+      offset: query.offset,
+    };
+  });
+}
+
+/** Tasks assigned to the caller: the /mine endpoint. */
+export async function listMyTasks(auth: Authorization, input: unknown): Promise<Page<Task>> {
+  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  return listTasks(auth, { ...query, assigneePersonId: auth.ctx.personId });
+}
+
+/** Tasks in one project: the project-tasks endpoint forces projectId from the path. */
+export async function listProjectTasks(
+  auth: Authorization,
+  projectId: string,
+  input: unknown,
+): Promise<Page<Task>> {
+  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  // Concealment: an invisible project 404s before any task row is read.
+  await withAuthorizedDb(auth.ctx, async (tx) => {
+    await assertProjectVisible(tx, auth, projectId);
+  });
+  return listTasks(auth, { ...query, projectId });
+}
+
+export async function getTask(auth: Authorization, id: string): Promise<Task> {
+  const task = await withAuthorizedDb(auth.ctx, async (tx) => {
+    const res = await tx.execute<Task>(sql`
+      select ${TASK_COLUMNS}
+      ${TASK_FROM}
+      where ${TASK_WHERE(auth)}
+        and t.id = ${id}::uuid
+    `);
+    return res.rows[0] ?? null;
+  });
+  await assertTargetAffected(auth, task ? 1 : 0);
+  return task as Task;
+}
+
+export async function createTask(auth: Authorization, input: unknown): Promise<Task> {
+  const data = CreateTaskSchema.parse(input);
+  let id: string;
+  try {
+    id = await withAuthorizedDb(auth.ctx, async (tx) => {
+      if (data.projectId) await assertProjectVisible(tx, auth, data.projectId);
+      if (data.assigneePersonId) await assertAssigneeVisible(tx, auth, data.assigneePersonId);
+      if (data.parentTaskId) {
+        await assertParentTaskVisible(tx, auth, data.parentTaskId, data.projectId);
+      }
+      const res = await tx.execute<{ id: string }>(sql`
+        insert into public.work_tasks (
+          org_id, project_id, title, description, status, priority,
+          due_date, assignee_person_id, parent_task_id, created_by
+        ) values (
+          ${auth.ctx.orgId}::uuid,
+          ${data.projectId ?? null}::uuid,
+          ${data.title},
+          ${data.description ?? null},
+          ${data.status},
+          ${data.priority},
+          ${data.dueDate ?? null}::date,
+          ${data.assigneePersonId ?? null}::uuid,
+          ${data.parentTaskId ?? null}::uuid,
+          ${auth.ctx.personId}::uuid
+        )
+        returning id
+      `);
+      const row = res.rows[0];
+      if (!row) throw new Error('Task creation failed.');
+      return row.id;
+    });
+  } catch (error) {
+    invalidTaskWrite(error, false);
+  }
+  await writeAuditEntry(
+    auth.ctx,
+    {
+      action: 'task.created',
+      entityType: 'task',
+      entityId: id,
+      result: 'SUCCESS',
+      severity: 'LOW',
+      metadata: {
+        title: data.title,
+        projectId: data.projectId ?? null,
+        status: data.status,
+        priority: data.priority,
+      },
+    },
+    auth.meta,
+  );
+  return getTask(auth, id);
+}
+
+const UPDATE_COLUMNS: Record<keyof UpdateTaskInput, string> = {
+  projectId: 'project_id',
+  title: 'title',
+  description: 'description',
+  status: 'status',
+  priority: 'priority',
+  dueDate: 'due_date',
+  assigneePersonId: 'assignee_person_id',
+  parentTaskId: 'parent_task_id',
+};
+
+export async function updateTask(auth: Authorization, id: string, input: unknown): Promise<Task> {
+  const data = UpdateTaskSchema.parse(input);
+  const projectChanged = data.projectId !== undefined && data.projectId !== null;
+  try {
+    const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+      if (projectChanged) {
+        await assertProjectVisible(tx, auth, data.projectId as string);
+      }
+      if (data.assigneePersonId !== undefined && data.assigneePersonId !== null) {
+        await assertAssigneeVisible(tx, auth, data.assigneePersonId);
+      }
+      if (data.parentTaskId !== undefined && data.parentTaskId !== null) {
+        // Parent must be a live top-level task in the same org and project.
+        // Fetch the task's current project for the same-project check.
+        const cur = await tx.execute<{ project_id: string | null }>(sql`
+          select t.project_id
+          from public.work_tasks t
+          where t.id = ${id}::uuid
+            and ${TASK_WHERE(auth)}
+        `);
+        const currentProjectId = cur.rows[0]?.project_id ?? data.projectId ?? null;
+        await assertParentTaskVisible(tx, auth, data.parentTaskId, currentProjectId);
+      }
+      const sets = Object.entries(data).map(([key, value]) => {
+        const column = UPDATE_COLUMNS[key as keyof UpdateTaskInput];
+        if (column === 'due_date') return sql`${sql.raw(column)} = ${value ?? null}::date`;
+        if (
+          column === 'project_id' ||
+          column === 'assignee_person_id' ||
+          column === 'parent_task_id'
+        )
+          return sql`${sql.raw(column)} = ${value ?? null}::uuid`;
+        return sql`${sql.raw(column)} = ${value ?? null}`;
+      });
+      const res = await tx.execute(sql`
+        update public.work_tasks t
+        set ${sql.join(sets, sql`, `)}, updated_at = now()
+        where t.id = ${id}::uuid
+          and ${TASK_WHERE(auth)}
+        returning t.id
+      `);
+      return res.rowCount ?? 0;
+    });
+    await assertTargetAffected(auth, affected);
+  } catch (error) {
+    invalidTaskWrite(error, projectChanged);
+  }
+  await writeAuditEntry(
+    auth.ctx,
+    {
+      action: 'task.updated',
+      entityType: 'task',
+      entityId: id,
+      result: 'SUCCESS',
+      severity: 'LOW',
+      metadata: { fields: Object.keys(data).join(',') },
+    },
+    auth.meta,
+  );
+  return getTask(auth, id);
+}
+
+/**
+ * Kanban status move. Changes ONLY status — the MoveTaskSchema has no
+ * project_id field, so cross-project moves are impossible through this path.
+ * A move to the status the task is already in is a no-op: 200, no UPDATE, no
+ * audit row.
+ */
+export async function moveTask(
+  auth: Authorization,
+  id: string,
+  input: unknown,
+): Promise<MoveTaskResult> {
+  const data = MoveTaskSchema.parse(input);
+  const toStatus = data.status;
+  const result = await withAuthorizedDb(auth.ctx, async (tx) => {
+    const cur = await tx.execute<{ status: TaskStatus }>(sql`
+      select t.status
+      from public.work_tasks t
+      where t.id = ${id}::uuid
+        and ${TASK_WHERE(auth)}
+    `);
+    const row = cur.rows[0] ?? null;
+    await assertTargetAffected(auth, row ? 1 : 0);
+    const fromStatus = (row as { status: TaskStatus }).status;
+    if (fromStatus === toStatus) {
+      return { fromStatus, toStatus, noop: true };
+    }
+    const upd = await tx.execute(sql`
+      update public.work_tasks t
+      set status = ${toStatus}, updated_at = now()
+      where t.id = ${id}::uuid
+        and ${TASK_WHERE(auth)}
+      returning t.id
+    `);
+    await assertTargetAffected(auth, upd.rowCount ?? 0);
+    return { fromStatus, toStatus, noop: false };
+  });
+
+  if (!result.noop) {
+    await writeAuditEntry(
+      auth.ctx,
+      {
+        action: 'task.moved',
+        entityType: 'task',
+        entityId: id,
+        result: 'SUCCESS',
+        severity: 'LOW',
+        metadata: {
+          fromStatus: result.fromStatus,
+          toStatus: result.toStatus,
+          actorPersonId: auth.ctx.personId,
+        },
+      },
+      auth.meta,
+    );
+  }
+  return { ok: true, taskId: id, fromStatus: result.fromStatus, toStatus: result.toStatus };
+}
+
+/**
+ * Assign (or, with null, unassign) a task. The assignee must be live and
+ * visible in the caller's org; unassign accepts null. The PATCH route exposes
+ * this under tasks.edit; the dedicated tasks.assign key covers assignment
+ * flows built on these service functions.
+ */
+export async function assignTask(
+  auth: Authorization,
+  id: string,
+  personId: string | null,
+): Promise<Task> {
+  const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+    if (personId !== null) {
+      await assertAssigneeVisible(tx, auth, personId);
+    }
+    const res = await tx.execute(sql`
+      update public.work_tasks t
+      set assignee_person_id = ${personId}::uuid, updated_at = now()
+      where t.id = ${id}::uuid
+        and ${TASK_WHERE(auth)}
+      returning t.id
+    `);
+    return res.rowCount ?? 0;
+  });
+  await assertTargetAffected(auth, affected);
+  await writeAuditEntry(
+    auth.ctx,
+    {
+      action: personId === null ? 'task.unassigned' : 'task.assigned',
+      entityType: 'task',
+      entityId: id,
+      result: 'SUCCESS',
+      severity: 'LOW',
+      metadata: { personId, actorPersonId: auth.ctx.personId },
+    },
+    auth.meta,
+  );
+  return getTask(auth, id);
+}
+
+export async function unassignTask(auth: Authorization, id: string): Promise<Task> {
+  return assignTask(auth, id, null);
+}
+
+/**
+ * Soft delete only: sets deleted_at via public.crm_soft_delete('task', …).
+ * Same two-step as src/lib/crm/soft-delete.ts: a no-op UPDATE runs as
+ * app_user under the table's real UPDATE policy (org, liveness, edit scope),
+ * taking a row lock; the SECURITY DEFINER function performs the write in the
+ * same transaction. Requires the 0042 migration to add 'task' → 'work_tasks'
+ * to the function's allowlist.
+ */
+export async function deleteTask(auth: Authorization, id: string): Promise<void> {
+  const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+    const probe = await tx.execute<{ id: string }>(sql`
+      update public.work_tasks t
+      set updated_at = updated_at
+      where t.id = ${id}::uuid
+        and ${TASK_WHERE(auth)}
+      returning t.id
+    `);
+    const rowId = probe.rows[0]?.id;
+    if (rowId) {
+      await tx.execute(sql`select public.crm_soft_delete('task', ${rowId}::uuid)`);
+    }
+    return probe.rowCount ?? 0;
+  });
+  await assertTargetAffected(auth, affected);
+  await writeAuditEntry(
+    auth.ctx,
+    {
+      action: 'task.deleted',
+      entityType: 'task',
+      entityId: id,
+      result: 'SUCCESS',
+      severity: 'MEDIUM',
+      metadata: {},
+    },
+    auth.meta,
+  );
+}
+
+// ── Subtasks ─────────────────────────────────────────────────────────────────
+// Subtasks are tasks with parent_task_id set. One level only — enforced by
+// assertParentTaskVisible() on write. These are convenience wrappers around
+// the canonical createTask/listTasks/moveTask paths.
+
+/** List the direct subtasks of a parent task (oldest first). */
+export async function listSubtasks(
+  auth: Authorization,
+  parentId: string,
+  input: unknown,
+): Promise<Page<Task>> {
+  const query = ListTasksQuerySchema.parse(input);
+  // Parent visibility probe first — fails closed before any subtask rows leak.
+  await getTask(auth, parentId);
+  const where = sql`${TASK_WHERE(auth)} and t.parent_task_id = ${parentId}::uuid`;
+  const [rows, counts] = await withAuthorizedDb(auth.ctx, async (tx) => {
+    const [r, c] = await Promise.all([
+      tx.execute<Task>(sql`
+        select ${TASK_COLUMNS}
+        ${TASK_FROM}
+        where ${where} ${searchWhere(query.search)}
+        order by t.created_at asc, t.id asc
+        limit ${query.limit} offset ${query.offset}
+      `),
+      tx.execute<{ total: number }>(sql`
+        select count(*)::int as total
+        from public.work_tasks t
+        where ${where}
+      `),
+    ]);
+    return [r, c] as const;
+  });
+  return {
+    rows: rows.rows,
+    total: counts.rows[0]?.total ?? 0,
+    limit: query.limit,
+    offset: query.offset,
+  };
+}
+
+/**
+ * Create a subtask under a parent task. The parent's project is inherited —
+ * the caller does not supply projectId (it is ignored if present).
+ */
+export async function createSubtask(
+  auth: Authorization,
+  parentId: string,
+  input: unknown,
+): Promise<Task> {
+  // Validate the parent first (visibility + top-level check).
+  const parent = await getTask(auth, parentId);
+  if (parent.parentTaskId) {
+    throw new Error('INVALID_REQUEST: a subtask cannot have its own subtasks');
+  }
+  const data = CreateTaskSchema.parse(input);
+  return createTask(auth, {
+    ...data,
+    projectId: parent.projectId,
+    parentTaskId: parentId,
+  });
+}
+
+/** A task together with all of its direct subtasks (oldest first). */
+export async function getTaskWithSubtasks(
+  auth: Authorization,
+  id: string,
+): Promise<TaskWithSubtasks> {
+  const task = await getTask(auth, id);
+  const subtasks = await withAuthorizedDb(auth.ctx, async (tx) => {
+    const res = await tx.execute<Task>(sql`
+      select ${TASK_COLUMNS}
+      ${TASK_FROM}
+      where ${TASK_WHERE(auth)}
+        and t.parent_task_id = ${id}::uuid
+      order by t.created_at asc, t.id asc
+    `);
+    return res.rows;
+  });
+  return { ...task, subtasks };
+}
+
+/**
+ * Set a task's status. Thin wrapper around moveTask() — the subtask checkbox
+ * in the UI toggles 'done' ⇄ 'todo' through this.
+ */
+export async function setTaskStatus(
+  auth: Authorization,
+  id: string,
+  input: unknown,
+): Promise<Task> {
+  const data = MoveTaskSchema.parse(input);
+  await moveTask(auth, id, data);
+  return getTask(auth, id);
+}

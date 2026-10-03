@@ -23,7 +23,7 @@ import type { CrmUiPermissions } from '../../app/(app)/crm/_permissions';
 const PAGE_SIZE = 25;
 
 const selectClasses =
-  'rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30';
+  'rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30';
 
 /** Searchable, type-filtered, paginated activities table. Data arrives from the Server Component. */
 export function ActivitiesList({
@@ -132,7 +132,7 @@ export function ActivitiesList({
               <TableBody>
                 {data.rows.map((a) => (
                   <TableRow key={a.id}>
-                    <TableCell className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                    <TableCell className="text-xs font-semibold uppercase tracking-wide text-brand">
                       {ACTIVITY_TYPE_LABELS[a.type]}
                     </TableCell>
                     <TableCell className="font-medium">
