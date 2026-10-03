@@ -79,7 +79,7 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
           <DeleteDialog
             resourceName="contact"
             recordName={contactDisplayName(contact)}
-            onDelete={() => deleteContactAction(contact.id)}
+            onDelete={deleteContactAction.bind(null, contact.id)}
             redirectTo="/crm/contacts"
           />
         )}
@@ -127,7 +127,7 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
                 ? []
                 : companiesRes.rows.map((c) => ({ id: c.id, name: c.name }))
             }
-            onSave={(input) => updateContactAction(contact.id, input)}
+            onSave={updateContactAction.bind(null, contact.id)}
           />
         </EditableSection>
       )}

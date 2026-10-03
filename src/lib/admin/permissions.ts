@@ -40,11 +40,11 @@ export async function listPermissionsWithHolders(
         coalesce(
           (select jsonb_agg(
              jsonb_build_object(
-               'roleCode', r.code,
+               'roleCode', r.key,
                'roleName', r.name,
                'scope', rp.scope::text
              )
-             order by r.code
+             order by r.key
            )
            from public.role_permissions rp
            join public.roles r on r.id = rp.role_id

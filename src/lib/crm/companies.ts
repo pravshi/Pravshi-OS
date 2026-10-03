@@ -111,7 +111,7 @@ export async function createCompany(auth: Authorization, input: unknown): Promis
         ${data.size ?? null}, ${data.website ?? null}, ${data.phone ?? null},
         ${data.addressLine1 ?? null}, ${data.addressLine2 ?? null},
         ${data.addressCity ?? null}, ${data.addressState ?? null},
-        ${data.addressPostalCode ?? null}, ${data.countryCode ?? null}
+        ${data.addressPostalCode ?? null}, ${data.countryCode}
       )
       returning id
     `);

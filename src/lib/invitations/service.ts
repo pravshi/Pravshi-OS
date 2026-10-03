@@ -52,13 +52,36 @@ export interface CreatedInvitation {
   orgName: string;
 }
 
-async function resolveRoleIds(tx: Tx, orgId: string, roleIds: string[]): Promise<void> {
+/**
+ * Binds a JS string array as a Postgres uuid[] WITHOUT passing it as a single
+ * parameter: drizzle's sql template serializes a JS array to one string value,
+ * so `id = any(${roleIds}::uuid[])` reaches Postgres as a malformed array
+ * literal (22P02) and every invitation creation 500s. Expanding the array into
+ * one bound parameter per element keeps the cast correct and the values bound.
+ * (P0-3, 2026-10-03.)
+ */
+function uuidArrayParam(roleIds: string[]) {
+  return roleIds.length === 0
+    ? sql`array[]::uuid[]`
+    : sql`array[${sql.join(
+        roleIds.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )}]`;
+}
+
+/**
+ * @internal Exported for regression tests — the invitation route reaches this
+ * only through createInvitation().
+ */
+export async function resolveRoleIds(tx: Tx, orgId: string, roleIds: string[]): Promise<void> {
+  const roleArray = uuidArrayParam(roleIds);
+  // SECURITY DEFINER lookup (migration 0040), not a raw SELECT: the roles select
+  // policy (roles_select_mine) shows a person only the roles they hold, so a
+  // query under RLS returns zero rows for invitable roles the inviter doesn't
+  // hold and the invitation wrongly fails with ROLE_NOT_FOUND. The function can
+  // only return ids of live roles of this organization.
   const rows = await tx.execute<{ id: string }>(sql`
-    select id from public.roles
-    where org_id = ${orgId}::uuid
-      and id = any(${roleIds}::uuid[])
-      and deleted_at is null
-      and status = 'ACTIVE'
+    select id from public.invitation_role_lookup(${roleArray}, ${orgId}::uuid)
   `);
   if (rows.rows.length !== roleIds.length) {
     throw new InvitationError('ROLE_NOT_FOUND', 'One or more roles do not exist or are archived.');
@@ -69,7 +92,7 @@ async function resolveRoleIds(tx: Tx, orgId: string, roleIds: string[]): Promise
   // trigger would refuse can never be issued in the first place.
   try {
     await tx.execute(sql`
-      select public.invitation_grant_check(${roleIds}::uuid[])
+      select public.invitation_grant_check(${roleArray})
     `);
   } catch (e) {
     // drizzle wraps the driver error in DrizzleQueryError, so the SQLSTATE

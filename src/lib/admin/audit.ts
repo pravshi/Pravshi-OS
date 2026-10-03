@@ -43,7 +43,7 @@ export async function queryAuditLogs(
       from public.audit_logs a
       where a.org_id = ${auth.ctx.orgId}::uuid
         and (${filters.action ?? null}::text is null or a.action = ${filters.action ?? null}::text)
-        and (${filters.result ?? null}::text is null or a.result = ${filters.result ?? null}::text)
+        and (${filters.result ?? null}::text is null or a.result::text = ${filters.result ?? null}::text)
         and (${filters.severity ?? null}::text is null or a.severity = ${filters.severity ?? null}::text)
       order by a.occurred_at desc
       limit ${limit}
