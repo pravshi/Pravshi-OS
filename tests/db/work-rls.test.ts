@@ -3,6 +3,7 @@ import { Pool } from '@neondatabase/serverless';
 import {
   ALL_WORK_PERMS,
   CODE,
+  PERMS,
   assertForceRls,
   ensureWorkSchema,
   inContext,
@@ -27,9 +28,15 @@ import {
  * property Phase 4 must never regress, so it gets its own matrix.
  *
  * Design pinned here (mirrors Phase 3 pipelines):
- *  - select/insert/update have app_user policies; there is NO delete policy —
- *    raw DELETE is denied with 42501 for everybody except app_owner, because
- *    deletes go through the soft-delete (UPDATE deleted_at) path.
+ *  - select/insert/update have app_user policies.
+ *  - work_projects has NO delete policy — raw DELETE is denied with 42501 for
+ *    everybody except app_owner, because deletes go through the soft-delete
+ *    (UPDATE deleted_at) path.
+ *  - work_tasks intentionally HAS a delete policy (work_tasks_delete, 0042):
+ *    the task's creator may hard-delete their own live task, and holders of
+ *    the tasks.delete scope may delete any own-org task. Anyone else —
+ *    including a non-creator without tasks.delete, and any cross-tenant
+ *    actor — gets 42501.
  *  - soft-deleted rows are invisible to app_user of ANY org.
  *
  * Schema comes from tests/work/helpers.ts ensureWorkSchema() (contract DDL)
@@ -45,6 +52,7 @@ let orgA = '';
 let orgB = '';
 let alice = '';
 let bob = '';
+let carol = '';
 let projectA = '';
 let projectB = '';
 let taskA = '';
@@ -58,10 +66,19 @@ beforeAll(async () => {
   const deptB = await mkDept(owner, orgB, `${CODE}_RB`);
   alice = await mkPerson(owner, orgA, 'Alice Rls');
   bob = await mkPerson(owner, orgB, 'Bob Rls');
+  carol = await mkPerson(owner, orgA, 'Carol Rls');
   await mkEngagement(owner, orgA, alice, deptA);
   await mkEngagement(owner, orgB, bob, deptB);
+  await mkEngagement(owner, orgA, carol, deptA);
   await mkRoleFor(owner, orgA, alice, `${CODE}_RA_FULL`, ALL_WORK_PERMS);
   await mkRoleFor(owner, orgB, bob, `${CODE}_RB_FULL`, ALL_WORK_PERMS);
+  // Carol has task scopes but deliberately NO tasks.delete — she exercises
+  // the creator arm of the work_tasks_delete policy, not the scope arm.
+  await mkRoleFor(owner, orgA, carol, `${CODE}_RC_NODELETE`, [
+    PERMS.tasks.view,
+    PERMS.tasks.create,
+    PERMS.tasks.edit,
+  ]);
   projectA = await mkProject(owner, orgA, `Matrix A ${CODE}`);
   projectB = await mkProject(owner, orgB, `Matrix B ${CODE}`);
   taskA = await mkTask(owner, orgA, `Matrix task A ${CODE}`, { projectId: projectA });
@@ -187,11 +204,45 @@ describe.each(TABLES)('cross-tenant matrix: $name', ({ name, rowA, rowB, seedNam
     );
   });
 
-  it('delete: raw DELETE of the own row is denied too (no delete policy — soft-delete only)', async () => {
-    expect(await sqlstateOf(inContext(asUser, ctxFor(alice, orgA), deleteOne, [rowA()]))).toBe(
-      '42501',
-    );
-  });
+  if (name === 'work_projects') {
+    it('delete: raw DELETE of the own row is denied too (no delete policy — soft-delete only)', async () => {
+      expect(await sqlstateOf(inContext(asUser, ctxFor(alice, orgA), deleteOne, [rowA()]))).toBe(
+        '42501',
+      );
+    });
+  } else {
+    // work_tasks: the 0042 work_tasks_delete policy grants hard-delete to the
+    // task's creator and to holders of tasks.delete; everyone else is denied.
+    it('delete: raw DELETE of the own row succeeds for the creator (no tasks.delete needed)', async () => {
+      // Carol has no tasks.delete scope — success here proves the creator arm.
+      const own = await mkTask(owner, orgA, `Creator delete ${CODE}`, { createdBy: carol });
+      const rows = await inContext<{ id: string }>(
+        asUser,
+        ctxFor(carol, orgA),
+        `${deleteOne} returning id`,
+        [own],
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('delete: raw DELETE of a non-creator row succeeds for tasks.delete', async () => {
+      const own = await mkTask(owner, orgA, `Admin delete ${CODE}`, { createdBy: carol });
+      const rows = await inContext<{ id: string }>(
+        asUser,
+        ctxFor(alice, orgA),
+        `${deleteOne} returning id`,
+        [own],
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('delete: raw DELETE of the own row is denied for a non-creator without tasks.delete', async () => {
+      const own = await mkTask(owner, orgA, `No delete perm ${CODE}`, { createdBy: alice });
+      expect(await sqlstateOf(inContext(asUser, ctxFor(carol, orgA), deleteOne, [own]))).toBe(
+        '42501',
+      );
+    });
+  }
 });
 
 describe('cross-tenant linkage attacks', () => {

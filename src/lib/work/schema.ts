@@ -155,6 +155,9 @@ export const ListTasksQuerySchema = ListQuerySchema.extend({
   status: TaskStatusSchema.optional(),
   priority: TaskPrioritySchema.optional(),
   assigneePersonId: uuid.optional(),
+  /** Due-date window filters (YYYY-MM-DD, must be valid calendar dates). */
+  dueBefore: dateString.optional(),
+  dueAfter: dateString.optional(),
   sort: z.enum(TASK_SORT_FIELDS).default('updatedAt'),
   order: sortOrder.default('desc'),
 });

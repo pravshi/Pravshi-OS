@@ -190,6 +190,8 @@ export async function listTasks(auth: Authorization, input: unknown): Promise<Pa
   const assigneeWhere = query.assigneePersonId
     ? sql` and t.assignee_person_id = ${query.assigneePersonId}::uuid`
     : sql``;
+  const dueBeforeWhere = query.dueBefore ? sql` and t.due_date <= ${query.dueBefore}::date` : sql``;
+  const dueAfterWhere = query.dueAfter ? sql` and t.due_date >= ${query.dueAfter}::date` : sql``;
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
       tx.execute<Task>(sql`
@@ -197,7 +199,7 @@ export async function listTasks(auth: Authorization, input: unknown): Promise<Pa
         ${TASK_FROM}
         where ${TASK_WHERE(auth)}
           ${searchWhere(query.search)} ${projectWhere} ${statusWhere}
-          ${priorityWhere} ${assigneeWhere}
+          ${priorityWhere} ${assigneeWhere} ${dueBeforeWhere} ${dueAfterWhere}
         order by ${taskSortSql(query.sort, query.order)}
         limit ${query.limit} offset ${query.offset}
       `),
@@ -206,7 +208,7 @@ export async function listTasks(auth: Authorization, input: unknown): Promise<Pa
         from public.work_tasks t
         where ${TASK_WHERE(auth)}
           ${searchWhere(query.search)} ${projectWhere} ${statusWhere}
-          ${priorityWhere} ${assigneeWhere}
+          ${priorityWhere} ${assigneeWhere} ${dueBeforeWhere} ${dueAfterWhere}
       `),
     ]);
     return {
@@ -525,13 +527,23 @@ export async function deleteTask(auth: Authorization, id: string): Promise<void>
 // assertParentTaskVisible() on write. These are convenience wrappers around
 // the canonical createTask/listTasks/moveTask paths.
 
-/** List the direct subtasks of a parent task (oldest first). */
+/** List the direct subtasks of a parent task. Defaults to oldest-first;
+ *  explicit sort/order query params are honored like listTasks. */
 export async function listSubtasks(
   auth: Authorization,
   parentId: string,
   input: unknown,
 ): Promise<Page<Task>> {
-  const query = ListTasksQuerySchema.parse(input);
+  // Subtask lists default to oldest-first (createdAt asc); explicit
+  // sort/order params override. The raw input is inspected so the zod
+  // defaults in ListTasksQuerySchema (updatedAt/desc) don't mask an
+  // omitted sort param.
+  const raw = (input ?? {}) as Record<string, unknown>;
+  const query: ListTasksQuery = ListTasksQuerySchema.parse({
+    ...raw,
+    sort: raw.sort ?? 'createdAt',
+    order: raw.order ?? 'asc',
+  });
   // Parent visibility probe first — fails closed before any subtask rows leak.
   await getTask(auth, parentId);
   const where = sql`${TASK_WHERE(auth)} and t.parent_task_id = ${parentId}::uuid`;
@@ -541,13 +553,13 @@ export async function listSubtasks(
         select ${TASK_COLUMNS}
         ${TASK_FROM}
         where ${where} ${searchWhere(query.search)}
-        order by t.created_at asc, t.id asc
+        order by ${taskSortSql(query.sort, query.order)}
         limit ${query.limit} offset ${query.offset}
       `),
       tx.execute<{ total: number }>(sql`
         select count(*)::int as total
         from public.work_tasks t
-        where ${where}
+        where ${where} ${searchWhere(query.search)}
       `),
     ]);
     return [r, c] as const;
