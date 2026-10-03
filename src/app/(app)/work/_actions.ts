@@ -50,9 +50,7 @@ const moveTaskInput = z.object({ status: z.enum(TASK_STATUSES) });
 
 // ── Projects ─────────────────────────────────────────────────────────────────
 
-export async function listProjectsAction(
-  input: unknown,
-): Promise<WorkResult<WorkPage<Project>>> {
+export async function listProjectsAction(input: unknown): Promise<WorkResult<WorkPage<Project>>> {
   try {
     const authorization = await requirePermission(await headers(), {
       permission: 'projects.view',
@@ -127,9 +125,7 @@ export async function listProjectTasksAction(
   }
 }
 
-export async function listMyTasksAction(
-  input?: unknown,
-): Promise<WorkResult<WorkPage<WorkTask>>> {
+export async function listMyTasksAction(input?: unknown): Promise<WorkResult<WorkPage<WorkTask>>> {
   try {
     const authorization = await requirePermission(await headers(), {
       permission: 'tasks.view',
@@ -162,10 +158,7 @@ export async function createTaskAction(input: unknown): Promise<WorkResult<WorkT
   }
 }
 
-export async function updateTaskAction(
-  id: string,
-  input: unknown,
-): Promise<WorkResult<WorkTask>> {
+export async function updateTaskAction(id: string, input: unknown): Promise<WorkResult<WorkTask>> {
   try {
     const authorization = await requirePermission(await headers(), {
       permission: 'tasks.edit',

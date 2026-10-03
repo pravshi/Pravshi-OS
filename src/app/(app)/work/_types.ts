@@ -66,7 +66,7 @@ export interface Project {
 
 export interface WorkTask {
   id: string;
-  projectId: string;
+  projectId: string | null;
   projectName: string | null;
   title: string;
   description: string | null;
