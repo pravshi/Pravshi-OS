@@ -3,6 +3,14 @@ allowBuilds:
   esbuild: true
   unrs-resolver: true
 
+# braces <=3.0.3 carries HIGH severity advisory GHSA-vfj7-8cjw-p6xm
+# (stack exhaustion via deeply nested patterns). No patched release exists;
+# it reaches us only through dev/build tooling (shadcn, ts-morph, eslint).
+# Ignore this specific GHSA in audit; all other high advisories still fail.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
+
 # postcss <8.5.18 carries two high-severity advisories (GHSA-6g55-p6wh-862q,
 # GHSA-r28c-9q8g-f849) and reaches us transitively through next. Pin the patched
 # range rather than lowering the CI audit threshold, which would weaken a guard.
