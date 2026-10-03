@@ -104,7 +104,7 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `documents.download` | G | G | G | D | — | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
 | `documents.verify` | G | — | G | D | — | — | — | — | — | — | — | — | — |
 | `policies.manage` | G | G | G | — | — | — | — | — | — | — | — | — | — |
-| `policies.acknowledge` | S | S | S | S | — | S | S | S | S | S | S | S | S |
+| `policies.acknowledge` | S | S | S | S | S | S | S | S | S | S | S | S | S |
 | `policies.view_compliance` | G | G | G | D | — | D | — | D | — | — | — | — | — |
 | `reports.view` | G | G | G | D | — | D | S | D | P | — | — | G⁴ | — |
 | `audit_logs.view` | G | G | — | — | — | — | — | — | — | — | — | — | — |
