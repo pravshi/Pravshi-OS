@@ -91,7 +91,7 @@
 --   * seed_system_roles() is recreated with the Phase 4 matrix rows, exactly
 --     as 0037 did for the pipeline keys: the function in 0037 is the base,
 --     never edited in place. Existing organizations are backfilled with the
---     same 16 grants per org (protection trigger disabled/re-enabled, the
+--     same 17 grants per org (protection trigger disabled/re-enabled, the
 --     0010/0033/0034/0037 pattern), and a verification block fails the
 --     migration if any grant is missing.
 --   * parent_task_id is a self-referencing FK with ON DELETE CASCADE:
@@ -523,6 +523,12 @@ create policy work_tasks_delete on public.work_tasks
 -- manager-gated policy.
 revoke delete on public.work_projects
   from app_user, app_admin;
+
+-- work_tasks hard-delete is governed by the work_tasks_delete RLS policy
+-- above (creator or tasks.delete holder). The table-level privilege must be
+-- granted for the policy to be evaluated; without it, PostgreSQL raises
+-- "permission denied for table" before RLS is consulted.
+grant delete on public.work_tasks to app_user;
 
 -- ═════════════════════════════════════════════════════════════════════════════════
 -- work_tasks_project_org_guard() — the task's project must be its org's
@@ -1132,6 +1138,7 @@ begin
     ('MANAGER','projects.edit','DEPARTMENT'),
     ('MANAGER','tasks.view','DEPARTMENT'),('MANAGER','tasks.create','DEPARTMENT'),
     ('MANAGER','tasks.edit','DEPARTMENT'),
+    ('MANAGER','policies.acknowledge','SELF'),
     -- ADMIN
     ('ADMIN','projects.delete','GLOBAL'),
     ('ADMIN','tasks.create','GLOBAL'),('ADMIN','tasks.delete','GLOBAL'),
@@ -1156,7 +1163,7 @@ $$;
 -- a migration is not, so it is disabled for the insert and re-enabled immediately
 -- — the same pattern migrations 0010, 0033, 0034 and 0037 used.
 --
--- 16 grants per org (MANAGER 6 + ADMIN 3 + tasks.create 7), all at the scopes
+-- 17 grants per org (MANAGER 7 + ADMIN 3 + tasks.create 7), all at the scopes
 -- in the matrix. Only the new pairs are inserted — no legacy cleanup,
 -- no re-seeding of existing grants (on conflict do nothing).
 -- SUPER_ADMIN needs no backfill: the keys predate this migration, so the
@@ -1183,6 +1190,7 @@ join (values
   ('MANAGER','projects.edit','DEPARTMENT'),
   ('MANAGER','tasks.view','DEPARTMENT'),('MANAGER','tasks.create','DEPARTMENT'),
   ('MANAGER','tasks.edit','DEPARTMENT'),
+  ('MANAGER','policies.acknowledge','SELF'),
   ('ADMIN','projects.delete','GLOBAL'),
   ('ADMIN','tasks.create','GLOBAL'),('ADMIN','tasks.delete','GLOBAL'),
   ('SALES_MANAGER','tasks.create','DEPARTMENT'),
@@ -1211,7 +1219,7 @@ $$;
 -- ── Verification ──────────────────────────────────────────────────────────────
 --
 -- Fail the migration rather than leave a half-seeded authorization model: all
--- 16 role/key pairs must be granted on every organization's system roles.
+-- 17 role/key pairs must be granted on every organization's system roles.
 -- (Future orgs are covered by the recreated seed_system_roles() above; this
 -- checks the orgs that already exist.)
 
@@ -1225,6 +1233,7 @@ begin
     ('MANAGER','projects.view'),('MANAGER','projects.create'),
     ('MANAGER','projects.edit'),
     ('MANAGER','tasks.view'),('MANAGER','tasks.create'),('MANAGER','tasks.edit'),
+    ('MANAGER','policies.acknowledge'),
     ('ADMIN','projects.delete'),
     ('ADMIN','tasks.create'),('ADMIN','tasks.delete'),
     ('SALES_MANAGER','tasks.create'),

@@ -327,6 +327,8 @@ describe.skipIf(!ready)('work API: tasks', () => {
       ['tasks.delete', 'GLOBAL'],
     ]);
     const roleB = await F().mkCustomRole(owner, orgB, `${CODE}_TBR`, [
+      ['projects.view', 'GLOBAL'],
+      ['projects.create', 'GLOBAL'],
       ['tasks.view', 'GLOBAL'],
       ['tasks.create', 'GLOBAL'],
       ['tasks.edit', 'GLOBAL'],

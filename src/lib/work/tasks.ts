@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
-import { isPgCode } from './errors';
+import { isPgCode, parseRequest } from './errors';
 import {
   CreateTaskSchema,
   ListTasksQuerySchema,
@@ -25,12 +25,12 @@ import {
  *    query re-states the org predicate explicitly (defense in depth over RLS)
  *  - created_by is stamped from auth.ctx.personId on insert, never from the body
  *  - the task's project_id must reference a live project in the caller's org:
- *    a visibility probe fails closed with NOT_FOUND concealment (the composite
- *    org FK may not exist yet — the probe is the enforcement point, mirroring
- *    src/lib/crm/refs.ts). A same-org race is backstopped by the 0042 trigger,
- *    whose 42501 maps to 400 INVALID_REQUEST here
- *  - the assignee must be a live, visible person in the caller's org (people
- *    RLS: org isolation + liveness + people.view scope); invisible → NOT_FOUND
+ *    write paths (create/update) fail with 400 INVALID_REQUEST on a foreign
+ *    project; read paths (list/get) use NOT_FOUND concealment via the
+ *    visibility probe (mirroring src/lib/crm/refs.ts). A same-org race is
+ *    backstopped by the 0042 trigger, whose 42501 maps to 400 INVALID_REQUEST
+ *  - the assignee must be a live, visible person in the caller's org; write
+ *    paths fail with 400 INVALID_REQUEST on a foreign assignee
  *  - moveTask() changes ONLY status — project_id is not accepted, so
  *    cross-project moves are impossible through it. Changing projects is PATCH
  *    with projectId (same-org validation above)
@@ -121,15 +121,46 @@ async function assertProjectVisible(tx: Tx, auth: Authorization, projectId: stri
   await assertTargetAffected(auth, res.rowCount ?? 0);
 }
 
-/** The assignee must be live and visible in the caller's org (people RLS:
- *  org isolation + liveness + people.view scope apply inside the probe). */
-async function assertAssigneeVisible(tx: Tx, auth: Authorization, personId: string): Promise<void> {
+/**
+ * Write-path variant: a foreign project reference in a create/update is a
+ * 400 INVALID_REQUEST, not 404 concealment. Read paths (list/get) keep the
+ * NOT_FOUND probe above; writes name the bad reference explicitly so callers
+ * can distinguish "bad request" from "invisible target".
+ */
+async function assertProjectVisibleForWrite(
+  tx: Tx,
+  auth: Authorization,
+  projectId: string,
+): Promise<void> {
+  const res = await tx.execute(sql`
+    select 1
+    from public.work_projects p
+    where p.id = ${projectId}::uuid
+      and p.org_id = ${auth.ctx.orgId}::uuid
+      and p.deleted_at is null
+  `);
+  if ((res.rowCount ?? 0) === 0) {
+    throw new Error('INVALID_REQUEST: project not found in your organization');
+  }
+}
+
+/**
+ * Write-path variant for assignees: a foreign person reference in a
+ * create/update/assign is a 400 INVALID_REQUEST, not 404 concealment.
+ */
+async function assertAssigneeVisibleForWrite(
+  tx: Tx,
+  auth: Authorization,
+  personId: string,
+): Promise<void> {
   const res = await tx.execute(sql`
     select 1
     from public.people per
     where per.id = ${personId}::uuid
   `);
-  await assertTargetAffected(auth, res.rowCount ?? 0);
+  if ((res.rowCount ?? 0) === 0) {
+    throw new Error('INVALID_REQUEST: assignee not found in your organization');
+  }
 }
 
 /**
@@ -183,7 +214,7 @@ function invalidTaskWrite(error: unknown, projectChanged: boolean): never {
 }
 
 export async function listTasks(auth: Authorization, input: unknown): Promise<Page<Task>> {
-  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  const query: ListTasksQuery = parseRequest(ListTasksQuerySchema, input ?? {});
   const projectWhere = query.projectId ? sql` and t.project_id = ${query.projectId}::uuid` : sql``;
   const statusWhere = query.status ? sql` and t.status = ${query.status}` : sql``;
   const priorityWhere = query.priority ? sql` and t.priority = ${query.priority}` : sql``;
@@ -222,7 +253,7 @@ export async function listTasks(auth: Authorization, input: unknown): Promise<Pa
 
 /** Tasks assigned to the caller: the /mine endpoint. */
 export async function listMyTasks(auth: Authorization, input: unknown): Promise<Page<Task>> {
-  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  const query: ListTasksQuery = parseRequest(ListTasksQuerySchema, input ?? {});
   return listTasks(auth, { ...query, assigneePersonId: auth.ctx.personId });
 }
 
@@ -232,7 +263,7 @@ export async function listProjectTasks(
   projectId: string,
   input: unknown,
 ): Promise<Page<Task>> {
-  const query: ListTasksQuery = ListTasksQuerySchema.parse(input);
+  const query: ListTasksQuery = parseRequest(ListTasksQuerySchema, input ?? {});
   // Concealment: an invisible project 404s before any task row is read.
   await withAuthorizedDb(auth.ctx, async (tx) => {
     await assertProjectVisible(tx, auth, projectId);
@@ -255,12 +286,13 @@ export async function getTask(auth: Authorization, id: string): Promise<Task> {
 }
 
 export async function createTask(auth: Authorization, input: unknown): Promise<Task> {
-  const data = CreateTaskSchema.parse(input);
+  const data = parseRequest(CreateTaskSchema, input);
   let id: string;
   try {
     id = await withAuthorizedDb(auth.ctx, async (tx) => {
-      if (data.projectId) await assertProjectVisible(tx, auth, data.projectId);
-      if (data.assigneePersonId) await assertAssigneeVisible(tx, auth, data.assigneePersonId);
+      if (data.projectId) await assertProjectVisibleForWrite(tx, auth, data.projectId);
+      if (data.assigneePersonId)
+        await assertAssigneeVisibleForWrite(tx, auth, data.assigneePersonId);
       if (data.parentTaskId) {
         await assertParentTaskVisible(tx, auth, data.parentTaskId, data.projectId);
       }
@@ -321,15 +353,15 @@ const UPDATE_COLUMNS: Record<keyof UpdateTaskInput, string> = {
 };
 
 export async function updateTask(auth: Authorization, id: string, input: unknown): Promise<Task> {
-  const data = UpdateTaskSchema.parse(input);
+  const data = parseRequest(UpdateTaskSchema, input);
   const projectChanged = data.projectId !== undefined && data.projectId !== null;
   try {
     const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
       if (projectChanged) {
-        await assertProjectVisible(tx, auth, data.projectId as string);
+        await assertProjectVisibleForWrite(tx, auth, data.projectId as string);
       }
       if (data.assigneePersonId !== undefined && data.assigneePersonId !== null) {
-        await assertAssigneeVisible(tx, auth, data.assigneePersonId);
+        await assertAssigneeVisibleForWrite(tx, auth, data.assigneePersonId);
       }
       if (data.parentTaskId !== undefined && data.parentTaskId !== null) {
         // Parent must be a live top-level task in the same org and project.
@@ -393,7 +425,7 @@ export async function moveTask(
   id: string,
   input: unknown,
 ): Promise<MoveTaskResult> {
-  const data = MoveTaskSchema.parse(input);
+  const data = parseRequest(MoveTaskSchema, input);
   const toStatus = data.status;
   const result = await withAuthorizedDb(auth.ctx, async (tx) => {
     const cur = await tx.execute<{ status: TaskStatus }>(sql`
@@ -453,7 +485,7 @@ export async function assignTask(
 ): Promise<Task> {
   const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
     if (personId !== null) {
-      await assertAssigneeVisible(tx, auth, personId);
+      await assertAssigneeVisibleForWrite(tx, auth, personId);
     }
     const res = await tx.execute(sql`
       update public.work_tasks t
@@ -539,7 +571,7 @@ export async function listSubtasks(
   // defaults in ListTasksQuerySchema (updatedAt/desc) don't mask an
   // omitted sort param.
   const raw = (input ?? {}) as Record<string, unknown>;
-  const query: ListTasksQuery = ListTasksQuerySchema.parse({
+  const query: ListTasksQuery = parseRequest(ListTasksQuerySchema, {
     ...raw,
     sort: raw.sort ?? 'createdAt',
     order: raw.order ?? 'asc',
@@ -586,7 +618,7 @@ export async function createSubtask(
   if (parent.parentTaskId) {
     throw new Error('INVALID_REQUEST: a subtask cannot have its own subtasks');
   }
-  const data = CreateTaskSchema.parse(input);
+  const data = parseRequest(CreateTaskSchema, input);
   return createTask(auth, {
     ...data,
     projectId: parent.projectId,
@@ -622,7 +654,7 @@ export async function setTaskStatus(
   id: string,
   input: unknown,
 ): Promise<Task> {
-  const data = MoveTaskSchema.parse(input);
+  const data = parseRequest(MoveTaskSchema, input);
   await moveTask(auth, id, data);
   return getTask(auth, id);
 }

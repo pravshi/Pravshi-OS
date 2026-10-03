@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
-import { isPgCode } from './errors';
+import { isPgCode, parseRequest } from './errors';
 import {
   AddProjectMemberSchema,
   CreateProjectSchema,
@@ -97,7 +97,7 @@ export async function listProjects(
   auth: Authorization,
   input: unknown,
 ): Promise<Page<ProjectListRow>> {
-  const query: ListProjectsQuery = ListProjectsQuerySchema.parse(input);
+  const query: ListProjectsQuery = parseRequest(ListProjectsQuerySchema, input ?? {});
   const archivedWhere = query.includeArchived ? sql`` : sql` and p.is_archived = false`;
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
@@ -149,7 +149,7 @@ export async function getProject(auth: Authorization, id: string): Promise<Proje
 }
 
 export async function createProject(auth: Authorization, input: unknown): Promise<Project> {
-  const data = CreateProjectSchema.parse(input);
+  const data = parseRequest(CreateProjectSchema, input);
   let id: string;
   try {
     id = await withAuthorizedDb(auth.ctx, async (tx) => {
@@ -190,7 +190,7 @@ export async function updateProject(
   id: string,
   input: unknown,
 ): Promise<Project> {
-  const data = UpdateProjectSchema.parse(input);
+  const data = parseRequest(UpdateProjectSchema, input);
   try {
     const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
       const sets: SQL[] = [];
@@ -310,7 +310,7 @@ export async function addProjectMember(
   projectId: string,
   input: unknown,
 ): Promise<ProjectMember[]> {
-  const data = AddProjectMemberSchema.parse(input);
+  const data = parseRequest(AddProjectMemberSchema, input);
   try {
     await withAuthorizedDb(auth.ctx, async (tx) => {
       await assertProjectVisible(tx, auth, projectId);
@@ -432,7 +432,7 @@ export async function linkProjectToDeal(
   projectId: string,
   input: unknown,
 ): Promise<DealLinkSummary> {
-  const data = LinkDealSchema.parse(input);
+  const data = parseRequest(LinkDealSchema, input);
   let summary: DealLinkSummary;
   try {
     summary = await withAuthorizedDb(auth.ctx, async (tx) => {
