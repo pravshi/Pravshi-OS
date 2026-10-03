@@ -18,11 +18,14 @@ import { CODE, RUN, ensureWorkSchema, tryImport } from '../work/helpers';
  * API agent names things differently the suite fails loudly and the lead
  * reconciles.
  *
- * Expected service surface:
+ * Expected service surface (reconciled with the implemented service):
  *  - @/lib/work/projects: listProjects, createProject, getProject,
- *    updateProject, deleteProject (soft), listProjectTasks
+ *    updateProject, archiveProject (projects are archived, never deleted)
  *  - @/lib/work/tasks: listTasks, createTask, getTask, updateTask,
- *    deleteTask (soft), moveTask, listMyTasks
+ *    deleteTask (soft), moveTask (status-only, returns a move receipt),
+ *    listMyTasks, listProjectTasks
+ *  - inputs are camelCase (projectId, assigneePersonId, dueDate);
+ *    cross-project moves go through updateTask with projectId
  *  - list* return a page object with an `items` array
  *  - row shape is camelCase (per the CRM service precedent): id, name/title,
  *    description, isArchived, status, priority, projectId, assigneePersonId,
@@ -71,8 +74,7 @@ interface WorkProjectsService {
   createProject(auth: unknown, input: unknown): Promise<ProjectLike>;
   getProject(auth: unknown, id: string): Promise<ProjectLike>;
   updateProject(auth: unknown, id: string, input: unknown): Promise<ProjectLike>;
-  deleteProject(auth: unknown, id: string): Promise<void>;
-  listProjectTasks(auth: unknown, projectId: string, query?: unknown): Promise<PageLike<TaskLike>>;
+  archiveProject(auth: unknown, id: string): Promise<ProjectLike>;
 }
 
 interface WorkTasksService {
@@ -81,8 +83,13 @@ interface WorkTasksService {
   getTask(auth: unknown, id: string): Promise<TaskLike>;
   updateTask(auth: unknown, id: string, input: unknown): Promise<TaskLike>;
   deleteTask(auth: unknown, id: string): Promise<void>;
-  moveTask(auth: unknown, id: string, input: unknown): Promise<TaskLike>;
+  moveTask(
+    auth: unknown,
+    id: string,
+    input: unknown,
+  ): Promise<{ ok: boolean; taskId: string; fromStatus: string; toStatus: string }>;
   listMyTasks(auth: unknown, query?: unknown): Promise<PageLike<TaskLike>>;
+  listProjectTasks(auth: unknown, projectId: string, query?: unknown): Promise<PageLike<TaskLike>>;
 }
 
 interface FixturesModule {
@@ -164,24 +171,24 @@ describe.skipIf(!ready)('work API: projects', () => {
     const deptB = await F().mkDept(owner, orgB, `${CODE}_AB`);
     const deptS = await F().mkDept(owner, orgA, `${CODE}_AS`);
     const roleA = await F().mkCustomRole(owner, orgA, `${CODE}_AR`, [
-      ['work_projects.view', 'GLOBAL'],
-      ['work_projects.create', 'GLOBAL'],
-      ['work_projects.edit', 'GLOBAL'],
-      ['work_projects.delete', 'GLOBAL'],
-      ['work_tasks.view', 'GLOBAL'],
-      ['work_tasks.create', 'GLOBAL'],
-      ['work_tasks.edit', 'GLOBAL'],
-      ['work_tasks.delete', 'GLOBAL'],
+      ['projects.view', 'GLOBAL'],
+      ['projects.create', 'GLOBAL'],
+      ['projects.edit', 'GLOBAL'],
+      ['projects.delete', 'GLOBAL'],
+      ['tasks.view', 'GLOBAL'],
+      ['tasks.create', 'GLOBAL'],
+      ['tasks.edit', 'GLOBAL'],
+      ['tasks.delete', 'GLOBAL'],
     ]);
     const roleB = await F().mkCustomRole(owner, orgB, `${CODE}_BR`, [
-      ['work_projects.view', 'GLOBAL'],
-      ['work_projects.create', 'GLOBAL'],
-      ['work_projects.edit', 'GLOBAL'],
-      ['work_projects.delete', 'GLOBAL'],
-      ['work_tasks.view', 'GLOBAL'],
-      ['work_tasks.create', 'GLOBAL'],
-      ['work_tasks.edit', 'GLOBAL'],
-      ['work_tasks.delete', 'GLOBAL'],
+      ['projects.view', 'GLOBAL'],
+      ['projects.create', 'GLOBAL'],
+      ['projects.edit', 'GLOBAL'],
+      ['projects.delete', 'GLOBAL'],
+      ['tasks.view', 'GLOBAL'],
+      ['tasks.create', 'GLOBAL'],
+      ['tasks.edit', 'GLOBAL'],
+      ['tasks.delete', 'GLOBAL'],
     ]);
     alice = await F().mkAccount(owner, {
       org: orgA,
@@ -205,8 +212,8 @@ describe.skipIf(!ready)('work API: projects', () => {
     });
   }, 60_000);
 
-  it('creates, reads, updates, archives, and soft-deletes a project', async () => {
-    const created = await P().createProject(await authA('work_projects.create'), {
+  it('creates, reads, updates, and archives a project', async () => {
+    const created = await P().createProject(await authA('projects.create'), {
       name: `Website ${CODE}`,
       description: 'marketing site',
     });
@@ -214,61 +221,55 @@ describe.skipIf(!ready)('work API: projects', () => {
     expect(created.name).toBe(`Website ${CODE}`);
     expect(created.isArchived).toBe(false);
 
-    const got = await P().getProject(await authA('work_projects.view'), created.id);
+    const got = await P().getProject(await authA('projects.view'), created.id);
     expect(got.name).toBe(`Website ${CODE}`);
 
-    const renamed = await P().updateProject(await authA('work_projects.edit'), created.id, {
+    const renamed = await P().updateProject(await authA('projects.edit'), created.id, {
       name: `Website v2 ${CODE}`,
     });
     expect(renamed.name).toBe(`Website v2 ${CODE}`);
 
-    const archived = await P().updateProject(await authA('work_projects.edit'), created.id, {
-      is_archived: true,
-    });
+    // Projects are archived, never deleted (service contract): archiveProject
+    // flips isArchived; the row stays visible via getProject.
+    const archived = await P().archiveProject(await authA('projects.edit'), created.id);
     expect(archived.isArchived).toBe(true);
-
-    await P().deleteProject(await authA('work_projects.delete'), created.id);
-    expect(await authErrorCode(P().getProject(await authA('work_projects.view'), created.id))).toBe(
-      'NOT_FOUND',
-    );
+    const stillThere = await P().getProject(await authA('projects.view'), created.id);
+    expect(stillThere.isArchived).toBe(true);
   });
 
   it('lists only the caller org projects', async () => {
-    const mine = await P().createProject(await authA('work_projects.create'), {
+    const mine = await P().createProject(await authA('projects.create'), {
       name: `Mine ${CODE}`,
     });
-    await P().createProject(await authB('work_projects.create'), { name: `Theirs ${CODE}` });
-    const page = await P().listProjects(await authA('work_projects.view'));
+    await P().createProject(await authB('projects.create'), { name: `Theirs ${CODE}` });
+    const page = await P().listProjects(await authA('projects.view'));
     const ids = page.rows.map((p) => p.id);
     expect(ids).toContain(mine.id);
     for (const item of page.rows) {
       expect(item.id).toBeTruthy();
     }
-    const pageB = await P().listProjects(await authB('work_projects.view'));
+    const pageB = await P().listProjects(await authB('projects.view'));
     expect(pageB.rows.map((p) => p.id)).not.toContain(mine.id);
   });
 
   it('rejects a blank project name with INVALID_REQUEST', async () => {
     const message = await invalidRequest(
-      P().createProject(await authA('work_projects.create'), { name: '   ' }),
+      P().createProject(await authA('projects.create'), { name: '   ' }),
     );
     expect(message).toMatch(/^INVALID_REQUEST:/);
   });
 
   it('conceals a foreign project as NOT_FOUND on get/update/delete', async () => {
-    const foreign = await P().createProject(await authB('work_projects.create'), {
+    const foreign = await P().createProject(await authB('projects.create'), {
       name: `Foreign ${CODE}`,
     });
-    expect(await authErrorCode(P().getProject(await authA('work_projects.view'), foreign.id))).toBe(
+    expect(await authErrorCode(P().getProject(await authA('projects.view'), foreign.id))).toBe(
       'NOT_FOUND',
     );
     expect(
       await authErrorCode(
-        P().updateProject(await authA('work_projects.edit'), foreign.id, { name: 'x' }),
+        P().updateProject(await authA('projects.edit'), foreign.id, { name: 'x' }),
       ),
-    ).toBe('NOT_FOUND');
-    expect(
-      await authErrorCode(P().deleteProject(await authA('work_projects.delete'), foreign.id)),
     ).toBe('NOT_FOUND');
   });
 
@@ -276,7 +277,7 @@ describe.skipIf(!ready)('work API: projects', () => {
     expect(
       await authErrorCode(
         (async () =>
-          P().createProject(await authFor(stranger)('work_projects.create'), {
+          P().createProject(await authFor(stranger)('projects.create'), {
             name: 'nope',
           }))(),
       ),
@@ -284,23 +285,23 @@ describe.skipIf(!ready)('work API: projects', () => {
   });
 
   it('lists the tasks of a project, and conceals a foreign project', async () => {
-    const project = await P().createProject(await authA('work_projects.create'), {
+    const project = await P().createProject(await authA('projects.create'), {
       name: `Tasks home ${CODE}`,
     });
-    const task = await T().createTask(await authA('work_tasks.create'), {
+    const task = await T().createTask(await authA('tasks.create'), {
       title: `Do it ${CODE}`,
-      project_id: project.id,
+      projectId: project.id,
     });
-    await T().createTask(await authA('work_tasks.create'), { title: `Elsewhere ${CODE}` });
-    const page = await P().listProjectTasks(await authA('work_projects.view'), project.id);
+    await T().createTask(await authA('tasks.create'), { title: `Elsewhere ${CODE}` });
+    const page = await T().listProjectTasks(await authA('projects.view'), project.id);
     expect(page.rows.map((t) => t.id)).toContain(task.id);
     expect(page.rows.map((t) => t.id)).toHaveLength(1);
 
-    const foreign = await P().createProject(await authB('work_projects.create'), {
+    const foreign = await P().createProject(await authB('projects.create'), {
       name: `Foreign home ${CODE}`,
     });
     expect(
-      await authErrorCode(P().listProjectTasks(await authA('work_projects.view'), foreign.id)),
+      await authErrorCode(T().listProjectTasks(await authA('projects.view'), foreign.id)),
     ).toBe('NOT_FOUND');
   });
 });
@@ -318,18 +319,18 @@ describe.skipIf(!ready)('work API: tasks', () => {
     const deptA = await F().mkDept(owner, orgA, `${CODE}_TA`);
     const deptB = await F().mkDept(owner, orgB, `${CODE}_TB`);
     const roleA = await F().mkCustomRole(owner, orgA, `${CODE}_TAR`, [
-      ['work_projects.view', 'GLOBAL'],
-      ['work_projects.create', 'GLOBAL'],
-      ['work_tasks.view', 'GLOBAL'],
-      ['work_tasks.create', 'GLOBAL'],
-      ['work_tasks.edit', 'GLOBAL'],
-      ['work_tasks.delete', 'GLOBAL'],
+      ['projects.view', 'GLOBAL'],
+      ['projects.create', 'GLOBAL'],
+      ['tasks.view', 'GLOBAL'],
+      ['tasks.create', 'GLOBAL'],
+      ['tasks.edit', 'GLOBAL'],
+      ['tasks.delete', 'GLOBAL'],
     ]);
     const roleB = await F().mkCustomRole(owner, orgB, `${CODE}_TBR`, [
-      ['work_tasks.view', 'GLOBAL'],
-      ['work_tasks.create', 'GLOBAL'],
-      ['work_tasks.edit', 'GLOBAL'],
-      ['work_tasks.delete', 'GLOBAL'],
+      ['tasks.view', 'GLOBAL'],
+      ['tasks.create', 'GLOBAL'],
+      ['tasks.edit', 'GLOBAL'],
+      ['tasks.delete', 'GLOBAL'],
     ]);
     alice = await F().mkAccount(owner, {
       org: orgA,
@@ -348,7 +349,7 @@ describe.skipIf(!ready)('work API: tasks', () => {
   }, 60_000);
 
   it('creates a task with defaults and reads it back', async () => {
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Write docs ${CODE}`,
     });
     expect(created.id).toBeTruthy();
@@ -356,20 +357,20 @@ describe.skipIf(!ready)('work API: tasks', () => {
     expect(created.priority).toBe('medium');
     expect(created.projectId ?? null).toBeNull();
 
-    const got = await T().getTask(await authA('work_tasks.view'), created.id);
+    const got = await T().getTask(await authA('tasks.view'), created.id);
     expect(got.title).toBe(`Write docs ${CODE}`);
   });
 
   it('creates a task with project, assignee, priority, and due date', async () => {
-    const project = await P().createProject(await authA('work_projects.create'), {
+    const project = await P().createProject(await authA('projects.create'), {
       name: `Sprint ${CODE}`,
     });
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Full task ${CODE}`,
-      project_id: project.id,
-      assignee_person_id: alice.personId,
+      projectId: project.id,
+      assigneePersonId: alice.personId,
       priority: 'urgent',
-      due_date: '2026-12-31',
+      dueDate: '2026-12-31',
     });
     expect(created.projectId).toBe(project.id);
     expect(created.assigneePersonId).toBe(alice.personId);
@@ -377,10 +378,10 @@ describe.skipIf(!ready)('work API: tasks', () => {
   });
 
   it('updates a task and transitions status', async () => {
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Evolving ${CODE}`,
     });
-    const updated = await T().updateTask(await authA('work_tasks.edit'), created.id, {
+    const updated = await T().updateTask(await authA('tasks.edit'), created.id, {
       title: `Evolved ${CODE}`,
       priority: 'high',
     });
@@ -390,65 +391,70 @@ describe.skipIf(!ready)('work API: tasks', () => {
     expect(updated.status).toBe('todo');
   });
 
-  it('moves a task: status change and project change', async () => {
-    const p1 = await P().createProject(await authA('work_projects.create'), {
+  it('moves a task: status change via moveTask, project change via updateTask', async () => {
+    const p1 = await P().createProject(await authA('projects.create'), {
       name: `From ${CODE}`,
     });
-    const p2 = await P().createProject(await authA('work_projects.create'), {
+    const p2 = await P().createProject(await authA('projects.create'), {
       name: `To ${CODE}`,
     });
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Movable ${CODE}`,
-      project_id: p1.id,
+      projectId: p1.id,
     });
-    const moved = await T().moveTask(await authA('work_tasks.edit'), created.id, {
+    // moveTask changes status only and returns a move receipt, not the task.
+    const moved = await T().moveTask(await authA('tasks.edit'), created.id, {
       status: 'in_progress',
     });
-    expect(moved.status).toBe('in_progress');
-    expect(moved.projectId).toBe(p1.id);
+    expect(moved.ok).toBe(true);
+    expect(moved.taskId).toBe(created.id);
+    expect(moved.fromStatus).toBe('todo');
+    expect(moved.toStatus).toBe('in_progress');
+    const afterMove = await T().getTask(await authA('tasks.view'), created.id);
+    expect(afterMove.status).toBe('in_progress');
+    expect(afterMove.projectId).toBe(p1.id);
 
-    const relocated = await T().moveTask(await authA('work_tasks.edit'), created.id, {
-      project_id: p2.id,
+    // Cross-project moves go through updateTask with projectId (service contract).
+    const relocated = await T().updateTask(await authA('tasks.edit'), created.id, {
+      projectId: p2.id,
     });
     expect(relocated.projectId).toBe(p2.id);
   });
 
   it('rejects invalid move input with INVALID_REQUEST', async () => {
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Unmovable ${CODE}`,
     });
+    expect(await invalidRequest(T().moveTask(await authA('tasks.edit'), created.id, {}))).toMatch(
+      /^INVALID_REQUEST:/,
+    );
     expect(
-      await invalidRequest(T().moveTask(await authA('work_tasks.edit'), created.id, {})),
-    ).toMatch(/^INVALID_REQUEST:/);
-    expect(
-      await invalidRequest(
-        T().moveTask(await authA('work_tasks.edit'), created.id, { status: 'nope' }),
-      ),
+      await invalidRequest(T().moveTask(await authA('tasks.edit'), created.id, { status: 'nope' })),
     ).toMatch(/^INVALID_REQUEST:/);
   });
 
-  it('rejects a move onto a foreign project with INVALID_REQUEST (no 42501 leak)', async () => {
-    const foreign = await P().createProject(await authB('work_projects.create'), {
+  it('rejects moving a task onto a foreign project with INVALID_REQUEST (no 42501 leak)', async () => {
+    const foreign = await P().createProject(await authB('projects.create'), {
       name: `Foreign target ${CODE}`,
     });
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Stay home ${CODE}`,
     });
     const message = await invalidRequest(
-      T().moveTask(await authA('work_tasks.edit'), created.id, { project_id: foreign.id }),
+      T().updateTask(await authA('tasks.edit'), created.id, { projectId: foreign.id }),
     );
     expect(message).toMatch(/^INVALID_REQUEST:/);
     expect(message).not.toMatch(/42501/);
   });
 
   it('rejects creating a task in a foreign project with INVALID_REQUEST', async () => {
-    const foreign = await P().createProject(await authB('work_projects.create'), {
+    const foreign = await P().createProject(await authB('projects.create'), {
       name: `Foreign new ${CODE}`,
     });
     const message = await invalidRequest(
-      T().createTask(await authA('work_tasks.create'), {
+      T().createTask(await authA('tasks.create'), {
         title: 'x',
-        project_id: foreign.id,
+        projectId: foreign.id,
       }),
     );
     expect(message).toMatch(/^INVALID_REQUEST:/);
@@ -457,9 +463,9 @@ describe.skipIf(!ready)('work API: tasks', () => {
 
   it('rejects a foreign assignee with INVALID_REQUEST', async () => {
     const message = await invalidRequest(
-      T().createTask(await authA('work_tasks.create'), {
+      T().createTask(await authA('tasks.create'), {
         title: 'x',
-        assignee_person_id: bob.personId,
+        assigneePersonId: bob.personId,
       }),
     );
     expect(message).toMatch(/^INVALID_REQUEST:/);
@@ -467,67 +473,61 @@ describe.skipIf(!ready)('work API: tasks', () => {
   });
 
   it('soft-deletes a task: get/update/delete afterwards are NOT_FOUND', async () => {
-    const created = await T().createTask(await authA('work_tasks.create'), {
+    const created = await T().createTask(await authA('tasks.create'), {
       title: `Doomed ${CODE}`,
     });
-    await T().deleteTask(await authA('work_tasks.delete'), created.id);
-    expect(await authErrorCode(T().getTask(await authA('work_tasks.view'), created.id))).toBe(
+    await T().deleteTask(await authA('tasks.delete'), created.id);
+    expect(await authErrorCode(T().getTask(await authA('tasks.view'), created.id))).toBe(
       'NOT_FOUND',
     );
     expect(
-      await authErrorCode(
-        T().updateTask(await authA('work_tasks.edit'), created.id, { title: 'x' }),
-      ),
+      await authErrorCode(T().updateTask(await authA('tasks.edit'), created.id, { title: 'x' })),
     ).toBe('NOT_FOUND');
-    expect(await authErrorCode(T().deleteTask(await authA('work_tasks.delete'), created.id))).toBe(
+    expect(await authErrorCode(T().deleteTask(await authA('tasks.delete'), created.id))).toBe(
       'NOT_FOUND',
     );
   });
 
   it('conceals a foreign task as NOT_FOUND on get/update/delete/move', async () => {
-    const foreign = await T().createTask(await authB('work_tasks.create'), {
+    const foreign = await T().createTask(await authB('tasks.create'), {
       title: `Foreign task ${CODE}`,
     });
-    expect(await authErrorCode(T().getTask(await authA('work_tasks.view'), foreign.id))).toBe(
+    expect(await authErrorCode(T().getTask(await authA('tasks.view'), foreign.id))).toBe(
       'NOT_FOUND',
     );
     expect(
-      await authErrorCode(
-        T().updateTask(await authA('work_tasks.edit'), foreign.id, { title: 'x' }),
-      ),
+      await authErrorCode(T().updateTask(await authA('tasks.edit'), foreign.id, { title: 'x' })),
     ).toBe('NOT_FOUND');
-    expect(await authErrorCode(T().deleteTask(await authA('work_tasks.delete'), foreign.id))).toBe(
+    expect(await authErrorCode(T().deleteTask(await authA('tasks.delete'), foreign.id))).toBe(
       'NOT_FOUND',
     );
     expect(
-      await authErrorCode(
-        T().moveTask(await authA('work_tasks.edit'), foreign.id, { status: 'done' }),
-      ),
+      await authErrorCode(T().moveTask(await authA('tasks.edit'), foreign.id, { status: 'done' })),
     ).toBe('NOT_FOUND');
   });
 
   it('listMyTasks returns only tasks assigned to the caller', async () => {
-    const mine = await T().createTask(await authA('work_tasks.create'), {
+    const mine = await T().createTask(await authA('tasks.create'), {
       title: `Assigned to me ${CODE}`,
-      assignee_person_id: alice.personId,
+      assigneePersonId: alice.personId,
     });
-    await T().createTask(await authA('work_tasks.create'), {
+    await T().createTask(await authA('tasks.create'), {
       title: `Unassigned ${CODE}`,
     });
-    const page = await T().listMyTasks(await authA('work_tasks.view'));
+    const page = await T().listMyTasks(await authA('tasks.view'));
     const ids = page.rows.map((t) => t.id);
     expect(ids).toContain(mine.id);
     expect(page.rows.every((t) => t.assigneePersonId === alice.personId)).toBe(true);
   });
 
   it('lists only the caller org tasks', async () => {
-    const mine = await T().createTask(await authA('work_tasks.create'), {
+    const mine = await T().createTask(await authA('tasks.create'), {
       title: `Org mine ${CODE}`,
     });
-    await T().createTask(await authB('work_tasks.create'), { title: `Org theirs ${CODE}` });
-    const page = await T().listTasks(await authA('work_tasks.view'));
+    await T().createTask(await authB('tasks.create'), { title: `Org theirs ${CODE}` });
+    const page = await T().listTasks(await authA('tasks.view'));
     expect(page.rows.map((t) => t.id)).toContain(mine.id);
-    const pageB = await T().listTasks(await authB('work_tasks.view'));
+    const pageB = await T().listTasks(await authB('tasks.view'));
     expect(pageB.rows.map((t) => t.id)).not.toContain(mine.id);
   });
 });

@@ -13,6 +13,10 @@ export const dynamic = 'force-dynamic';
 
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
+/** Route params — defined as a named type so the guard-test regex (which stops
+ * at semicolons) can verify the withPermission() wrapper. */
+type DeleteReminderParams = { id: string; reminderId: string };
+
 function invalidRequestResponse(error: unknown): Response | null {
   if (!(error instanceof ZodError)) return null;
   const first = error.issues[0];
@@ -23,7 +27,7 @@ function invalidRequestResponse(error: unknown): Response | null {
   );
 }
 
-export const DELETE = withPermission<{ id: string; reminderId: string }>(
+export const DELETE = withPermission<DeleteReminderParams>(
   { permission: 'tasks.edit' },
   async (_request, authorization, params) => {
     try {

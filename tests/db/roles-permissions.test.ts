@@ -1173,6 +1173,7 @@ describe('direct SQL attacks from app_user', () => {
       'people.edit',
       'people.view',
       'policies.acknowledge',
+      'tasks.create',
       'tasks.edit',
       'tasks.view',
     ]);

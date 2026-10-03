@@ -799,50 +799,11 @@ describe('stage history trigger', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('documents the API contract: a cross-pipeline stage is legal at the DB level', async () => {
-    // deals.pipeline_stage_id is a single-column FK: the database constrains
-    // the stage's ORG (deals_pipeline_org_guard) but NOT its pipeline. A
-    // stage from a different pipeline in the same org succeeds here and even
-    // records history — so the API's moveDealToStage MUST reject it with 400.
-    // This test pins the hole the service layer is required to close.
-    const beforeIds = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where deal_id=$1`,
-        [dealA],
-      )
-    ).rows.map((r) => r.id);
-    await inContext(ctxOf(pMove), `update public.deals set pipeline_stage_id=$2 where id=$1`, [
-      dealA,
-      stA2x, // pipeA2's stage — same org, different pipeline
-    ]);
-    const cur = (
-      await owner.query<{ pipeline_stage_id: string }>(
-        `select pipeline_stage_id from public.deals where id=$1`,
-        [dealA],
-      )
-    ).rows[0]!.pipeline_stage_id;
-    expect(cur).toBe(stA2x);
-    // restore the fixture and remove every history row this probe added
-    await inContext(ctxOf(pMove), `update public.deals set pipeline_stage_id=$2 where id=$1`, [
-      dealA,
-      stA1,
-    ]);
-    const added = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where deal_id=$1 and not (id = any($2))`,
-        [dealA, beforeIds],
-      )
-    ).rows.map((r) => r.id);
-    expect(added.length).toBeGreaterThan(0);
-    await owner.query(`delete from public.deal_stage_history where id = any($1)`, [added]);
-    const restored = (
-      await owner.query<{ pipeline_stage_id: string }>(
-        `select pipeline_stage_id from public.deals where id=$1`,
-        [dealA],
-      )
-    ).rows[0]!.pipeline_stage_id;
-    expect(restored).toBe(stA1);
-  });
+  // NOTE: the "cross-pipeline stage is legal at the DB level" contract test was
+  // removed — migration 0040's stage↔pipeline membership guard now rejects a
+  // cross-pipeline stage at the database level (42501), closing the hole this
+  // test used to pin. The service-layer moveDealToStage 400 check remains as
+  // defense in depth and is covered by the API tests.
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════

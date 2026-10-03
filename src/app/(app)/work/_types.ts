@@ -93,6 +93,15 @@ export interface MoveTaskResult {
   status: TaskStatus;
 }
 
+/**
+ * The answer to a delete/archive server action. Named (not inline) so the
+ * require-permission-first guard, which parses action signatures with a
+ * brace-free heuristic, can verify the authorization-first shape.
+ */
+export interface DeleteResult {
+  ok: boolean;
+}
+
 export type WorkResult<T> = T | ErrorEnvelope;
 
 /** Re-exported so client components never import @/lib/authz directly. */

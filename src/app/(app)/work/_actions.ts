@@ -22,6 +22,7 @@ import {
 } from '@/lib/work/tasks';
 import {
   TASK_STATUSES,
+  type DeleteResult,
   type MoveTaskResult,
   type Project,
   type TaskStatus,
@@ -97,7 +98,7 @@ export async function updateProjectAction(
   }
 }
 
-export async function deleteProjectAction(id: string): Promise<WorkResult<{ ok: boolean }>> {
+export async function deleteProjectAction(id: string): Promise<WorkResult<DeleteResult>> {
   try {
     const authorization = await requirePermission(await headers(), {
       permission: 'projects.edit',
@@ -169,7 +170,7 @@ export async function updateTaskAction(id: string, input: unknown): Promise<Work
   }
 }
 
-export async function deleteTaskAction(id: string): Promise<WorkResult<{ ok: boolean }>> {
+export async function deleteTaskAction(id: string): Promise<WorkResult<DeleteResult>> {
   try {
     const authorization = await requirePermission(await headers(), {
       permission: 'tasks.delete',

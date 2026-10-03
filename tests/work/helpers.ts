@@ -608,8 +608,8 @@ begin
   -- gate, and a probe that touches nothing raises 02000 — missing, foreign,
   -- and already-deleted rows are indistinguishable (no tenant leak).
   v_perm := case p_entity
-    when 'project' then 'work_projects.delete'
-    when 'task' then 'work_tasks.delete'
+    when 'project' then 'projects.delete'
+    when 'task' then 'tasks.delete'
   end;
   if v_perm is null then
     raise exception 'unknown work entity: %', p_entity using errcode = '42501';

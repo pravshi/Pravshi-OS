@@ -864,6 +864,19 @@ begin
   if not (select authz.has(v_perm)) then
     raise exception 'missing delete permission for %', p_entity using errcode = '42501';
   end if;
+  -- Phase 4: a pipeline with live deals cannot be soft-deleted. The caller must
+  -- move or close the deals first. The guard is scoped to the caller's org so
+  -- a foreign pipeline still raises 02000 (no tenant leak) via the probe below.
+  if p_entity = 'pipeline' then
+    if exists (
+      select 1 from public.deals d
+      where d.pipeline_id = p_id
+        and d.org_id = (select authz.org_id())
+        and d.deleted_at is null
+    ) then
+      raise exception 'pipeline has live deals' using errcode = '42501';
+    end if;
+  end if;
   execute format(
     'update public.%I set deleted_at = now(), updated_at = now() '
     'where id = $1 and org_id = authz.org_id() and deleted_at is null',

@@ -41,7 +41,8 @@ impersonation is a serious audit and consent question, not a convenience feature
 **G** = GLOBAL · **D** = DEPARTMENT · **T** = TEAM · **P** = PROJECT · **S** = SELF · **—** = no access
 
 | Permission | SUPER_ADMIN | ADMIN | HR_ADMIN | HR_MANAGER | MANAGER | SALES_MANAGER | SALES | PROJECT_MANAGER | DEVELOPER | VIBECODER | INTERN | FINANCE | EMPLOYEE |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|| `users.view` | G | G | G | D | — | — | — | — | — | — | — | — | — |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `users.view` | G | G | G | D | — | — | — | — | — | — | — | — | — |
 | `users.create` | G | G | G | — | — | — | — | — | — | — | — | — | — |
 | `users.suspend` | G | G | D¹ | — | — | — | — | — | — | — | — | — | — |
 | `sessions.revoke` | G | G | D¹ | — | — | — | — | — | — | — | — | — | — |
