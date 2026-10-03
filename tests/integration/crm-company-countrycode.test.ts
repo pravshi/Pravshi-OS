@@ -35,6 +35,8 @@ const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIG
 
 /** Unique per run: the companies table is permanent and the suite must be re-runnable. */
 const RUN = Math.random().toString(36).slice(2, 8);
+/** departments.code requires ^[A-Z][A-Z0-9_]{1,15}$ — uppercase only. */
+const RUN_UPPER = RUN.toUpperCase();
 
 describe.skipIf(!HAS_DB)('company countryCode default (P1-1)', () => {
   let createCompany: (
@@ -66,10 +68,10 @@ describe.skipIf(!HAS_DB)('company countryCode default (P1-1)', () => {
     const dept = (
       await owner!.query<{ id: string }>(
         `insert into public.departments (org_id, code, name) values ($1,$2,$3) returning id`,
-        [org, `P11_${RUN}`, `P1-1 Dept ${RUN}`],
+        [org, `P11_${RUN_UPPER}`, `P1-1 Dept ${RUN}`],
       )
     ).rows[0]!.id;
-    const role = await mkCustomRole(owner!, org, `P11_C_${RUN}`, [
+    const role = await mkCustomRole(owner!, org, `P11_C_${RUN_UPPER}`, [
       ['companies.view', 'GLOBAL'],
       ['companies.create', 'GLOBAL'],
       ['companies.edit', 'GLOBAL'],
