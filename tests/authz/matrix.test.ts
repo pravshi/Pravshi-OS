@@ -62,8 +62,10 @@ const SEED_DECISIONS: Readonly<Record<string, Cell>> = {
   'SUPER_ADMIN policies.acknowledge': 'GLOBAL',
 };
 
-/** Blueprint 6.1 roles with no matrix column; 0008 seeds them with no grants at all. */
-const UNMAPPED_ROLES = ['MANAGER', 'MARKETING'];
+/** Blueprint 6.1 roles with no matrix column; 0008 seeds them with no grants at all.
+ * Phase 4 (0042) grants MANAGER six work permissions plus policies.acknowledge,
+ * so only MARKETING remains unmapped. */
+const UNMAPPED_ROLES = ['MARKETING'];
 
 /** Task 1.15 decision 1: the set the catalogue must produce on its own, with no role named in code. */
 const PRIVILEGED = ['ADMIN', 'FINANCE', 'HR_ADMIN', 'SUPER_ADMIN'];
@@ -169,7 +171,11 @@ beforeAll(async () => {
   // Then the privileged set, and only it, verifies a second factor; its cells are answered at aal2.
   await mapLimit(PRIVILEGED, 2, async (role) => {
     const enrolled = await enrolTotp(accounts[role]!.cookie);
-    accounts[role] = { ...accounts[role]!, cookie: enrolled.cookie, secret: enrolled.secret };
+    accounts[role] = {
+      ...accounts[role]!,
+      cookie: enrolled.cookie,
+      secret: enrolled.secret,
+    };
   });
 }, 300_000);
 
@@ -178,12 +184,13 @@ afterAll(async () => {
 });
 
 describe('the matrix as written', () => {
-  it('has 64 permissions for 12 roles', () => {
+  it('has 67 permissions for 13 roles', () => {
     expect(matrix.roles).toEqual([
       'SUPER_ADMIN',
       'ADMIN',
       'HR_ADMIN',
       'HR_MANAGER',
+      'MANAGER',
       'SALES_MANAGER',
       'SALES',
       'PROJECT_MANAGER',
@@ -193,8 +200,8 @@ describe('the matrix as written', () => {
       'FINANCE',
       'EMPLOYEE',
     ]);
-    expect(matrix.rows).toHaveLength(64);
-    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(64);
+    expect(matrix.rows).toHaveLength(67);
+    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(67);
   });
 
   it('names only permissions in the catalogue', () => {
@@ -242,7 +249,9 @@ describe.each(ROLES)('%s', (role) => {
     const aal = PRIVILEGED.includes(role) ? 'aal2' : 'aal1';
     const mismatches = await mapLimit(matrix.rows, 4, async ({ permission, printed }) => {
       const want = expectedScope(role, permission, printed);
-      const got = await requirePermission(headersFor(account.cookie), { permission }).then(
+      const got = await requirePermission(headersFor(account.cookie), {
+        permission,
+      }).then(
         (authorization): string | null =>
           authorization.aal === aal
             ? authorization.scope

@@ -174,7 +174,7 @@ export function DealForm({
                 value={values.stage}
                 onChange={(e) => set('stage', e.target.value)}
                 disabled={pending}
-                className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30"
               >
                 {DEAL_STAGES.map((s) => (
                   <option key={s} value={s}>
@@ -208,7 +208,7 @@ export function DealForm({
               <FieldError message={fieldErrors.expectedCloseDate} />
             </div>
           </div>
-          {formError && <p className="text-sm text-destructive">{formError}</p>}
+          {formError && <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>}
           <div className="flex gap-3">
             <Button type="submit" disabled={pending}>
               {pending ? 'Saving…' : initial ? 'Save changes' : 'Create deal'}

@@ -176,7 +176,7 @@ export function CompanyLinks({
               value={linkType}
               onChange={(e) => setLinkType(e.target.value as CompanyLinkType)}
               disabled={pending}
-              className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
             >
               {COMPANY_LINK_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -188,7 +188,7 @@ export function CompanyLinks({
           <Button type="submit" disabled={pending || !otherId}>
             {pending ? 'Linking…' : 'Link company'}
           </Button>
-          {error && <p className="w-full text-xs text-destructive">{error}</p>}
+          {error && <p className="w-full text-xs text-red-600 dark:text-red-400">{error}</p>}
         </form>
       )}
     </section>

@@ -44,7 +44,7 @@ export default async function AdminAuditLogsPage({
             <select
               name="severity"
               defaultValue={filters.severity ?? ''}
-              className="rounded-md border border-line bg-background px-2 py-1"
+              className="rounded-md border border-line bg-white px-2 py-1"
             >
               <option value="">All</option>
               <option value="LOW">Low</option>
@@ -119,7 +119,9 @@ export default async function AdminAuditLogsPage({
                   <td className="px-4 py-2 font-mono text-xs">{e.action}</td>
                   <td className="px-4 py-2 text-ink-muted">{e.entityType ?? '—'}</td>
                   <td className="px-4 py-2">
-                    <span className={e.result === 'DENIED' ? 'text-destructive' : 'text-ok'}>
+                    <span
+                      className={e.result === 'DENIED' ? 'text-destructive' : 'text-emerald-700'}
+                    >
                       {e.result}
                     </span>
                   </td>

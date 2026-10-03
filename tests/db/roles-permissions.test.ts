@@ -536,10 +536,11 @@ describe('system roles', () => {
   });
 
   it('marks every seeded role is_system, and only SUPER_ADMIN is_protected', async () => {
-    const { rows } = await owner.query<{ key: string; is_system: boolean; is_protected: boolean }>(
-      `select key, is_system, is_protected from public.roles where org_id=$1`,
-      [orgA],
-    );
+    const { rows } = await owner.query<{
+      key: string;
+      is_system: boolean;
+      is_protected: boolean;
+    }>(`select key, is_system, is_protected from public.roles where org_id=$1`, [orgA]);
     for (const r of rows) expect(r.is_system, r.key).toBe(true);
     expect(rows.filter((r) => r.is_protected).map((r) => r.key)).toEqual(['SUPER_ADMIN']);
   });
@@ -558,7 +559,11 @@ describe('system roles', () => {
     expect(Number(rows[0]!.global)).toBe(108);
   });
 
-  it('seeds MANAGER and MARKETING with no grants rather than guessing at them', async () => {
+  it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants', async () => {
+    // 0042 deliberately grants MANAGER projects.view/create/edit and
+    // tasks.view/create/edit at DEPARTMENT (line management needs project/task
+    // operations), plus policies.acknowledge at SELF (universal employee
+    // permission). MARKETING remains unmapped with no grants.
     const { rows } = await owner.query<{ key: string; count: string }>(
       `select r.key, count(rp.permission_id) count
        from public.roles r left join public.role_permissions rp on rp.role_id=r.id
@@ -567,7 +572,7 @@ describe('system roles', () => {
       [orgA],
     );
     expect(rows.map((r) => [r.key, Number(r.count)])).toEqual([
-      ['MANAGER', 0],
+      ['MANAGER', 7],
       ['MARKETING', 0],
     ]);
   });
@@ -1170,6 +1175,7 @@ describe('direct SQL attacks from app_user', () => {
       'people.edit',
       'people.view',
       'policies.acknowledge',
+      'tasks.create',
       'tasks.edit',
       'tasks.view',
     ]);
@@ -1397,7 +1403,11 @@ describe('RLS and privileges', () => {
   const tables = ['roles', 'permissions', 'role_permissions', 'person_roles'];
 
   it('enables AND forces row level security on all four tables', async () => {
-    const { rows } = await owner.query<{ relname: string; enabled: boolean; forced: boolean }>(
+    const { rows } = await owner.query<{
+      relname: string;
+      enabled: boolean;
+      forced: boolean;
+    }>(
       `select c.relname, c.relrowsecurity enabled, c.relforcerowsecurity forced
        from pg_class c join pg_namespace n on n.oid=c.relnamespace
        where n.nspname='public' and c.relname = any($1) order by c.relname`,
@@ -1418,7 +1428,11 @@ describe('RLS and privileges', () => {
   });
 
   it('has no app_user policy that can be satisfied without an identity', async () => {
-    const { rows } = await owner.query<{ tablename: string; policyname: string; qual: string }>(
+    const { rows } = await owner.query<{
+      tablename: string;
+      policyname: string;
+      qual: string;
+    }>(
       `select tablename, policyname, qual from pg_policies
        where schemaname='public' and tablename = any($1) and 'app_user' = any(roles)`,
       [tables],
@@ -1432,7 +1446,10 @@ describe('RLS and privileges', () => {
   });
 
   it('grants app_user no write privilege on any of them', async () => {
-    const { rows } = await owner.query<{ table_name: string; privilege_type: string }>(
+    const { rows } = await owner.query<{
+      table_name: string;
+      privilege_type: string;
+    }>(
       `select table_name, privilege_type from information_schema.table_privileges
        where table_schema='public' and grantee='app_user' and table_name = any($1)
          and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER')`,
@@ -1442,7 +1459,10 @@ describe('RLS and privileges', () => {
   });
 
   it('grants app_user SELECT only, which the policies then govern', async () => {
-    const { rows } = await owner.query<{ table_name: string; privilege_type: string }>(
+    const { rows } = await owner.query<{
+      table_name: string;
+      privilege_type: string;
+    }>(
       `select table_name, privilege_type from information_schema.table_privileges
        where table_schema='public' and grantee='app_user' and table_name = any($1)
        order by table_name`,

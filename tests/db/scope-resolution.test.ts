@@ -736,8 +736,12 @@ describe('has() and scope_for() can never disagree', () => {
     for (const [key, rows] of swept) {
       expectAgreement(rows, key);
       const held = rows.filter((r) => r.h).length;
-      if (key === 'MANAGER' || key === 'MARKETING' || key === 'SUPER_ADMIN') {
+      if (key === 'MARKETING' || key === 'SUPER_ADMIN') {
         expect(held, `${key} holds nothing`).toBe(0);
+      } else if (key === 'MANAGER') {
+        // Phase 4 (0042): MANAGER holds six work grants at DEPARTMENT plus
+        // policies.acknowledge at SELF.
+        expect(held, `${key} holds the seven Phase 4 grants`).toBe(7);
       } else {
         expect(held, `${key} holds something`).toBeGreaterThan(0);
       }
@@ -825,7 +829,10 @@ describe('my_departments()', () => {
     expect(await departmentsOf({ personId: null, orgId: null })).toEqual([]);
     expect(await departmentsOf({ personId: null, orgId: orgA })).toEqual([]);
     expect(
-      await departmentsOf({ personId: '00000000-0000-0000-0000-000000000000', orgId: orgA }),
+      await departmentsOf({
+        personId: '00000000-0000-0000-0000-000000000000',
+        orgId: orgA,
+      }),
     ).toEqual([]);
     // and a mismatched tenant claim denies rather than falls back
     expect(await departmentsOf({ personId: alice, orgId: orgB })).toEqual([]);
@@ -901,7 +908,7 @@ describe('RLS', () => {
     // activities, company_contacts, company_links and contact_links.
     // The Phase 3 migration (0037) adds eight more: select/insert/update on
     // pipelines and pipeline_stages, select/insert on deal_stage_history.
-    expect(Number(rows[0]!.n)).toBe(51);
+    expect(Number(rows[0]!.n)).toBe(66);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM

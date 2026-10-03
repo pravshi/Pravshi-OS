@@ -43,7 +43,20 @@ const AUDITED_TRACKB = [
 ] as const;
 // Phase 3 (migration 0037): the sales-pipeline tables.
 const AUDITED_PHASE3 = ['pipelines', 'pipeline_stages', 'deal_stage_history'] as const;
-const AUDITED_ALL = [...AUDITED, ...AUDITED_CRM, ...AUDITED_TRACKB, ...AUDITED_PHASE3] as const;
+// Phase 4 (migrations 0042/0043): the work-management tables.
+const AUDITED_PHASE4 = [
+  'work_projects',
+  'work_tasks',
+  'project_members',
+  'task_reminders',
+] as const;
+const AUDITED_ALL = [
+  ...AUDITED,
+  ...AUDITED_CRM,
+  ...AUDITED_TRACKB,
+  ...AUDITED_PHASE3,
+  ...AUDITED_PHASE4,
+] as const;
 
 let orgA = '';
 let orgB = '';
@@ -207,7 +220,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the seventeen approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the twenty-one approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -267,7 +280,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(17);
+    expect(rows.length).toBe(21);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -740,7 +753,7 @@ describe('nothing already approved has moved', () => {
     // company_links, contact_links) from migrations 0034/0035, plus the 8 Phase 3
     // policies (select/insert/update × pipelines, pipeline_stages; select/insert ×
     // deal_stage_history) from migration 0037.
-    expect(Number(policies.rows[0]!.n)).toBe(51);
+    expect(Number(policies.rows[0]!.n)).toBe(66);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

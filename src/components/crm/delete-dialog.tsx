@@ -65,7 +65,7 @@ export function DeleteDialog({
               trail and can be recovered by an administrator. This cannot be undone from here.
             </DialogDescription>
           </DialogHeader>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancel

@@ -56,7 +56,7 @@ export function StageColumn({
         onDropOnColumn(stage.id);
       }}
       className={`flex w-72 shrink-0 flex-col rounded-lg border bg-surface transition-colors ${
-        isDragOver ? 'border-ink bg-accent' : 'border-line'
+        isDragOver ? 'border-brand bg-brand-soft' : 'border-line'
       }`}
     >
       <header className="flex items-start gap-2 border-b border-line p-3">
@@ -71,9 +71,15 @@ export function StageColumn({
             <Badge variant="secondary" className="shrink-0">
               {deals.length}
             </Badge>
-            {stage.isWon && <Badge className="shrink-0 bg-ok/10 text-ok dark:bg-ok/20">Won</Badge>}
+            {stage.isWon && (
+              <Badge className="shrink-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+                Won
+              </Badge>
+            )}
             {stage.isLost && (
-              <Badge className="shrink-0 bg-danger/10 text-danger dark:bg-danger/20">Lost</Badge>
+              <Badge className="shrink-0 bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                Lost
+              </Badge>
             )}
           </div>
           <p className="mt-0.5 text-xs text-ink-muted">
