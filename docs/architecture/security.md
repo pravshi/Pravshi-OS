@@ -40,72 +40,74 @@ impersonation is a serious audit and consent question, not a convenience feature
 
 **G** = GLOBAL · **D** = DEPARTMENT · **T** = TEAM · **P** = PROJECT · **S** = SELF · **—** = no access
 
-| Permission | SUPER_ADMIN | ADMIN | HR_ADMIN | HR_MANAGER | SALES_MANAGER | SALES | PROJECT_MANAGER | DEVELOPER | VIBECODER | INTERN | FINANCE | EMPLOYEE |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `users.view` | G | G | G | D | — | — | — | — | — | — | — | — |
-| `users.create` | G | G | G | — | — | — | — | — | — | — | — | — |
-| `users.suspend` | G | G | D¹ | — | — | — | — | — | — | — | — | — |
-| `sessions.revoke` | G | G | D¹ | — | — | — | — | — | — | — | — | — |
-| `roles.manage` | G | — | — | — | — | — | — | — | — | — | — | — |
-| `permissions.manage` | G | — | — | — | — | — | — | — | — | — | — | — |
-| `departments.manage` | G | G | G | — | — | — | — | — | — | — | — | — |
-| `people.view` | G | G | G | D | D² | S | D² | S | S | S | S | S |
-| `people.edit` | G | G | G | D | — | S³ | — | S³ | S³ | S³ | S³ | S³ |
-| `people.export` | G | G | G | — | — | — | — | — | — | — | — | — |
-| `hr.sensitive.view` | G | — | G | D | — | — | — | — | — | S | — | S |
-| `compensation.view` | G | — | G | — | — | — | — | — | — | — | G | S |
-| `engagements.transition` | G | G | G | D | — | — | — | — | — | — | — | — |
-| `candidates.view` | G | G | G | G | D | — | D | — | — | — | — | — |
-| `scorecards.view_all` | G | — | G | G | D | — | D | — | — | — | — | — |
-| `offers.approve` | G | G | G | — | — | — | — | — | — | — | — | — |
-| `onboarding.manage` | G | G | G | D | D | — | D | — | — | — | — | — |
-| `offboarding.initiate` | G | G | G | D | D | — | D | — | — | — | — | — |
-| `companies.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `companies.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `companies.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `companies.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `contacts.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `contacts.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `contacts.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `contacts.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `contacts.export` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `deals.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `deals.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `deals.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `deals.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `deals.export` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `activities.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `activities.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `activities.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `activities.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `relationships.view` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `relationships.create` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `relationships.edit` | G | G | — | — | D | S | — | — | — | — | — | — |
-| `relationships.delete` | G | G | — | — | D | — | — | — | — | — | — | — |
-| `pipelines.view` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `pipelines.create` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `pipelines.edit` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `pipelines.delete` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `pipeline_stages.manage` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `clients.view` | G | — | — | — | — | — | D | P | P | P | G⁴ | — |
-| `clients.edit` | G | — | — | — | — | — | D | — | — | — | — | — |
-| `projects.view` | G | G | — | — | D | S | D | P | P | P | G⁴ | — |
-| `projects.create` | G | G | — | — | D | — | D | — | — | — | — | — |
-| `projects.edit` | G | G | — | — | D | — | D | P⁵ | — | — | — | — |
-| `projects.manage_members` | G | G | — | — | D | — | D | — | — | — | — | — |
-| `tasks.view` | G | G | — | — | D | S+P | D | P | P | S | — | S |
-| `tasks.edit` | G | G | — | — | D | S+P | D | P | P | S⁶ | — | S⁶ |
-| `tasks.assign` | G | G | — | — | D | — | D | P | — | — | — | — |
-| `documents.view` | G | G | G | D | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
-| `documents.upload` | G | G | G | D | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
-| `documents.download` | G | G | G | D | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
-| `documents.verify` | G | — | G | D | — | — | — | — | — | — | — | — |
-| `policies.manage` | G | G | G | — | — | — | — | — | — | — | — | — |
-| `policies.acknowledge` | S | S | S | S | S | S | S | S | S | S | S | S |
-| `policies.view_compliance` | G | G | G | D | D | — | D | — | — | — | — | — |
-| `reports.view` | G | G | G | D | D | S | D | P | — | — | G⁴ | — |
-| `audit_logs.view` | G | G | — | — | — | — | — | — | — | — | — | — |
-| `settings.manage` | G | G⁸ | — | — | — | — | — | — | — | — | — | — |
+| Permission | SUPER_ADMIN | ADMIN | HR_ADMIN | HR_MANAGER | MANAGER | SALES_MANAGER | SALES | PROJECT_MANAGER | DEVELOPER | VIBECODER | INTERN | FINANCE | EMPLOYEE |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|| `users.view` | G | G | G | D | — | — | — | — | — | — | — | — | — |
+| `users.create` | G | G | G | — | — | — | — | — | — | — | — | — | — |
+| `users.suspend` | G | G | D¹ | — | — | — | — | — | — | — | — | — | — |
+| `sessions.revoke` | G | G | D¹ | — | — | — | — | — | — | — | — | — | — |
+| `roles.manage` | G | — | — | — | — | — | — | — | — | — | — | — | — |
+| `permissions.manage` | G | — | — | — | — | — | — | — | — | — | — | — | — |
+| `departments.manage` | G | G | G | — | — | — | — | — | — | — | — | — | — |
+| `people.view` | G | G | G | D | — | D² | S | D² | S | S | S | S | S |
+| `people.edit` | G | G | G | D | — | — | S³ | — | S³ | S³ | S³ | S³ | S³ |
+| `people.export` | G | G | G | — | — | — | — | — | — | — | — | — | — |
+| `hr.sensitive.view` | G | — | G | D | — | — | — | — | — | — | S | — | S |
+| `compensation.view` | G | — | G | — | — | — | — | — | — | — | — | G | S |
+| `engagements.transition` | G | G | G | D | — | — | — | — | — | — | — | — | — |
+| `candidates.view` | G | G | G | G | — | D | — | D | — | — | — | — | — |
+| `scorecards.view_all` | G | — | G | G | — | D | — | D | — | — | — | — | — |
+| `offers.approve` | G | G | G | — | — | — | — | — | — | — | — | — | — |
+| `onboarding.manage` | G | G | G | D | — | D | — | D | — | — | — | — | — |
+| `offboarding.initiate` | G | G | G | D | — | D | — | D | — | — | — | — | — |
+| `companies.view` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `companies.create` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `companies.edit` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `companies.delete` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `contacts.view` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `contacts.create` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `contacts.edit` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `contacts.delete` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `contacts.export` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `deals.view` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `deals.create` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `deals.edit` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `deals.delete` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `deals.export` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `activities.view` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `activities.create` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `activities.edit` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `activities.delete` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `relationships.view` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `relationships.create` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `relationships.edit` | G | G | — | — | — | D | S | — | — | — | — | — | — |
+| `relationships.delete` | G | G | — | — | — | D | — | — | — | — | — | — | — |
+| `pipelines.view` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.create` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.edit` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `pipelines.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `pipeline_stages.manage` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `clients.view` | G | — | — | — | — | — | — | D | P | P | P | G⁴ | — |
+| `clients.edit` | G | — | — | — | — | — | — | D | — | — | — | — | — |
+| `projects.view` | G | G | — | — | D | D | S | D | P | P | P | G⁴ | — |
+| `projects.create` | G | G | — | — | D | D | — | D | — | — | — | — | — |
+| `projects.edit` | G | G | — | — | D | D | — | D | P⁵ | — | — | — | — |
+| `projects.manage_members` | G | G | — | — | — | D | — | D | — | — | — | — | — |
+| `projects.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `tasks.view` | G | G | — | — | D | D | S+P | D | P | P | S | — | S |
+| `tasks.create` | G | G | — | — | D | D | S | D | P | P | S | — | S |
+| `tasks.edit` | G | G | — | — | D | D | S+P | D | P | P | S⁶ | — | S⁶ |
+| `tasks.assign` | G | G | — | — | — | D | — | D | P | — | — | — | — |
+| `tasks.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `documents.view` | G | G | G | D | — | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
+| `documents.upload` | G | G | G | D | — | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
+| `documents.download` | G | G | G | D | — | D⁷ | S | D⁷ | S | S | S | G⁴ | S |
+| `documents.verify` | G | — | G | D | — | — | — | — | — | — | — | — | — |
+| `policies.manage` | G | G | G | — | — | — | — | — | — | — | — | — | — |
+| `policies.acknowledge` | S | S | S | S | — | S | S | S | S | S | S | S | S |
+| `policies.view_compliance` | G | G | G | D | — | D | — | D | — | — | — | — | — |
+| `reports.view` | G | G | G | D | — | D | S | D | P | — | — | G⁴ | — |
+| `audit_logs.view` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `settings.manage` | G | G⁸ | — | — | — | — | — | — | — | — | — | — | — |
 
 **Footnotes — these are where the real rules live:**
 

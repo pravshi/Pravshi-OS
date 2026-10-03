@@ -558,7 +558,10 @@ describe('system roles', () => {
     expect(Number(rows[0]!.global)).toBe(108);
   });
 
-  it('seeds MANAGER and MARKETING with no grants rather than guessing at them', async () => {
+  it('seeds MARKETING with no grants; MANAGER holds the six Phase 4 work grants', async () => {
+    // 0042 deliberately grants MANAGER projects.view/create/edit and
+    // tasks.view/create/edit at DEPARTMENT (line management needs project/task
+    // operations). MARKETING remains unmapped with no grants.
     const { rows } = await owner.query<{ key: string; count: string }>(
       `select r.key, count(rp.permission_id) count
        from public.roles r left join public.role_permissions rp on rp.role_id=r.id
@@ -567,7 +570,7 @@ describe('system roles', () => {
       [orgA],
     );
     expect(rows.map((r) => [r.key, Number(r.count)])).toEqual([
-      ['MANAGER', 0],
+      ['MANAGER', 6],
       ['MARKETING', 0],
     ]);
   });

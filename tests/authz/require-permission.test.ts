@@ -662,7 +662,7 @@ describe('the rest of the authorization model is unchanged', () => {
     // contact_links), and the Phase 3 sales-pipeline migration (0037) adds eight
     // more (select/insert/update on pipelines and pipeline_stages, select/insert on
     // deal_stage_history).
-    expect(policies.rows[0]!.n).toBe(51);
+    expect(policies.rows[0]!.n).toBe(66);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

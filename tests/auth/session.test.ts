@@ -427,7 +427,7 @@ describe('the authorization boundary is unmoved', () => {
     // sales-pipeline migration (0037) adds eight more — select/insert/update on
     // pipelines and pipeline_stages, select/insert on deal_stage_history.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(51);
+    expect(Number(policies.rows[0]!.n)).toBe(66);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

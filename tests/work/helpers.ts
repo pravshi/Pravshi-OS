@@ -32,19 +32,21 @@ import { Pool } from '@neondatabase/serverless';
  *    write itself passes
  */
 
-/** Permission keys this suite pins for the work module. */
+/** Permission keys this suite pins for the work module.
+ * These are the legacy projects.* / tasks.* keys seeded in 0008 — migration
+ * 0042 deliberately uses the existing catalogue, not work_projects.* keys. */
 export const PERMS = {
   projects: {
-    view: 'work_projects.view',
-    create: 'work_projects.create',
-    edit: 'work_projects.edit',
-    delete: 'work_projects.delete',
+    view: 'projects.view',
+    create: 'projects.create',
+    edit: 'projects.edit',
+    delete: 'projects.delete',
   },
   tasks: {
-    view: 'work_tasks.view',
-    create: 'work_tasks.create',
-    edit: 'work_tasks.edit',
-    delete: 'work_tasks.delete',
+    view: 'tasks.view',
+    create: 'tasks.create',
+    edit: 'tasks.edit',
+    delete: 'tasks.delete',
   },
 } as const;
 
@@ -395,7 +397,9 @@ export async function ensureWorkSchema(owner: Pool): Promise<boolean> {
   return false;
 }
 
-/** Permission seed extracted so the conformance path can run it alone. */
+/** Permission seed extracted so the conformance path can run it alone.
+ * Uses the legacy projects.* / tasks.* keys from 0008 (not work_projects.*).
+ * In CI these already exist; the ON CONFLICT makes this a no-op there. */
 const PERM_SEED = `
 insert into public.permissions (key, resource, action, module, description, is_sensitive)
 select
@@ -406,14 +410,14 @@ select
   c.description,
   c.is_sensitive
 from (values
-  ('work_projects.view',   'work', false, 'See work projects'),
-  ('work_projects.create', 'work', false, 'Create work projects'),
-  ('work_projects.edit',   'work', false, 'Change work projects'),
-  ('work_projects.delete', 'work', false, 'Delete work projects'),
-  ('work_tasks.view',      'work', false, 'See work tasks'),
-  ('work_tasks.create',    'work', false, 'Create work tasks'),
-  ('work_tasks.edit',      'work', false, 'Change work tasks'),
-  ('work_tasks.delete',    'work', false, 'Delete work tasks')
+  ('projects.view',   'work', false, 'See work projects'),
+  ('projects.create', 'work', false, 'Create work projects'),
+  ('projects.edit',   'work', false, 'Change work projects'),
+  ('projects.delete', 'work', false, 'Delete work projects'),
+  ('tasks.view',      'work', false, 'See work tasks'),
+  ('tasks.create',    'work', false, 'Create work tasks'),
+  ('tasks.edit',      'work', false, 'Change work tasks'),
+  ('tasks.delete',    'work', false, 'Delete work tasks')
 ) as c(key, module, is_sensitive, description)
 on conflict do nothing;
 `;

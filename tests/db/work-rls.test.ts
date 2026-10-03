@@ -95,7 +95,9 @@ describe('FORCE RLS catalogue flags', () => {
     await assertForceRls(owner, table);
   });
 
-  it('each table has select/insert/update app_user policies and an app_owner policy, and no delete policy', async () => {
+  it('each table has select/insert/update app_user policies and an app_owner policy', async () => {
+    // 0042: work_tasks carries a DELETE policy by design (creator hard-delete
+    // plus ADMIN via tasks.delete); work_projects is soft-delete-only.
     for (const table of ['work_projects', 'work_tasks']) {
       const { rows } = await owner.query<{ polname: string }>(
         `select p.polname
@@ -109,7 +111,11 @@ describe('FORCE RLS catalogue flags', () => {
       expect(names).toContain(`${table}_insert`);
       expect(names).toContain(`${table}_update`);
       expect(names).toContain(`${table}_owner_all`);
-      expect(names.some((n) => n.includes('delete'))).toBe(false);
+      if (table === 'work_projects') {
+        expect(names.some((n) => n.includes('delete'))).toBe(false);
+      } else {
+        expect(names).toContain(`${table}_delete`);
+      }
     }
   });
 });

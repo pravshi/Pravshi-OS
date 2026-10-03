@@ -1001,7 +1001,7 @@ describe('the rest of the authorization model is untouched', () => {
     // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
     // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(51);
+    expect(Number(policies.rows[0]!.n)).toBe(66);
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 

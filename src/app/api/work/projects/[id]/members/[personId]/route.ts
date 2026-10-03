@@ -13,7 +13,11 @@ export const dynamic = 'force-dynamic';
 
 const uuid = z.string().uuid();
 
-export const DELETE = withPermission<{ id: string; personId: string }>(
+/** Route params — defined as a named type so the guard-test regex (which stops
+ * at semicolons) can verify the withPermission() wrapper. */
+type DeleteMemberParams = { id: string; personId: string };
+
+export const DELETE = withPermission<DeleteMemberParams>(
   { permission: 'projects.manage_members' },
   async (_request, authorization, params) => {
     try {

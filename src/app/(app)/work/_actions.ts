@@ -2,8 +2,24 @@
 
 import { headers } from 'next/headers';
 import { z } from 'zod';
+import { requirePermission } from '@/lib/authz/require-permission';
 import { actionError } from '@/lib/authz/http';
-import type { ErrorEnvelope } from '@/lib/authz/errors';
+import {
+  archiveProject,
+  createProject,
+  getProject,
+  listProjects,
+  updateProject,
+} from '@/lib/work/projects';
+import {
+  createTask,
+  deleteTask,
+  getTask,
+  listMyTasks,
+  listProjectTasks,
+  moveTask,
+  updateTask,
+} from '@/lib/work/tasks';
 import {
   TASK_STATUSES,
   type MoveTaskResult,
@@ -12,150 +28,60 @@ import {
   type WorkPage,
   type WorkResult,
   type WorkTask,
-  isErrorEnvelope,
 } from './_types';
 
 /**
- * /work Server Actions — thin proxies over the /api/work/* REST routes.
+ * /work Server Actions — authorize first, always.
  *
- * The Phase 4 API track owns authorization, validation, and persistence; the
- * UI owns presentation. Every action forwards the request cookies so the API
- * sees the caller's session, then returns either the API's payload or an
- * error envelope (data, never a throw) — the same convention as the CRM
- * actions.
+ * Same convention as src/app/(app)/crm/pipelines/_actions.ts: each action
+ * takes untrusted input, calls requirePermission() as its first statement,
+ * then delegates to the service layer. Failures return the actionError()
+ * envelope (data, not a throw).
  *
- * Reads accept both `Page<T>` ({ rows, total, limit, offset }) and bare `T[]`
- * list bodies, whichever the API ships.
+ * The interactive board moves deliberately do NOT go through actions: the
+ * kanban calls POST /api/work/tasks/:id/move directly so it can distinguish
+ * 400 (invalid target) from 403/404 (lost access) for its toasts.
  */
 
-/** Boundary UUID check: malformed ids fail before any fetch is attempted. */
+/** Boundary UUID check: malformed ids fail before the service ever sees them. */
 const uuid = z.string().uuid();
 
 const moveTaskInput = z.object({ status: z.enum(TASK_STATUSES) });
 
-/** Absolute URL of this app, derived from the incoming request headers. */
-async function apiUrl(path: string): Promise<string> {
-  const h = await headers();
-  const host = h.get('host') ?? 'localhost:3000';
-  const proto = h.get('x-forwarded-proto') ?? 'http';
-  return `${proto}://${host}${path}`;
-}
-
-class ApiFailure extends Error {
-  status: number;
-  body: unknown;
-  constructor(status: number, body: unknown) {
-    super(`Work API request failed with status ${status}`);
-    this.status = status;
-    this.body = body;
-  }
-}
-
-async function apiFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const h = await headers();
-  const url = await apiUrl(path);
-  const res = await fetch(url, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      ...((init?.headers as Record<string, string> | undefined) ?? {}),
-      cookie: h.get('cookie') ?? '',
-    },
-  });
-  const body: unknown = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiFailure(res.status, body);
-  return body;
-}
-
-/** The API routes build envelopes field-by-field; pass them through untouched. */
-function envelopeFor(error: unknown): ErrorEnvelope {
-  if (error instanceof ApiFailure) {
-    if (isErrorEnvelope(error.body)) return error.body;
-    if (error.status === 401)
-      return {
-        error: { code: 'UNAUTHENTICATED', message: 'Your session expired. Please sign in again.' },
-      };
-    if (error.status === 403)
-      return {
-        error: { code: 'FORBIDDEN', message: 'You do not have permission to do that.' },
-      };
-    if (error.status === 404)
-      return { error: { code: 'NOT_FOUND', message: 'That record was not found.' } };
-    return {
-      error: {
-        code: 'INTERNAL',
-        message: 'The work service returned an unexpected error. Please try again.',
-      },
-    };
-  }
-  return actionError(error);
-}
-
-/** Normalize a list body into a WorkPage regardless of envelope shape. */
-function toWorkPage<T>(body: unknown): WorkPage<T> {
-  if (Array.isArray(body)) {
-    return { rows: body as T[], total: body.length, limit: body.length, offset: 0 };
-  }
-  if (
-    typeof body === 'object' &&
-    body !== null &&
-    'rows' in body &&
-    Array.isArray((body as { rows: unknown }).rows)
-  ) {
-    const page = body as WorkPage<T>;
-    return {
-      rows: page.rows ?? [],
-      total: page.total ?? page.rows.length,
-      limit: page.limit ?? page.rows.length,
-      offset: page.offset ?? 0,
-    };
-  }
-  return { rows: [], total: 0, limit: 0, offset: 0 };
-}
-
-function jsonBody(input: unknown): string {
-  return JSON.stringify(input ?? {});
-}
-
 // ── Projects ─────────────────────────────────────────────────────────────────
 
-export async function listProjectsAction(input: unknown): Promise<WorkResult<WorkPage<Project>>> {
+export async function listProjectsAction(
+  input: unknown,
+): Promise<WorkResult<WorkPage<Project>>> {
   try {
-    const query =
-      typeof input === 'object' && input !== null
-        ? (input as { limit?: number; offset?: number; status?: string })
-        : {};
-    const params = new URLSearchParams();
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
-    if (query.status) params.set('status', query.status);
-    const qs = params.toString();
-    const body = await apiFetch(`/api/work/projects${qs ? `?${qs}` : ''}`);
-    return toWorkPage<Project>(body);
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.view',
+    });
+    return await listProjects(authorization, input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function getProjectAction(id: string): Promise<WorkResult<Project>> {
   try {
-    const body = await apiFetch(`/api/work/projects/${uuid.parse(id)}`);
-    return body as Project;
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.view',
+    });
+    return await getProject(authorization, uuid.parse(id));
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function createProjectAction(input: unknown): Promise<WorkResult<Project>> {
   try {
-    const body = await apiFetch('/api/work/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: jsonBody(input),
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.create',
     });
-    return body as Project;
+    return await createProject(authorization, input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
@@ -164,23 +90,24 @@ export async function updateProjectAction(
   input: unknown,
 ): Promise<WorkResult<Project>> {
   try {
-    const body = await apiFetch(`/api/work/projects/${uuid.parse(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: jsonBody(input),
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.edit',
     });
-    return body as Project;
+    return await updateProject(authorization, uuid.parse(id), input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function deleteProjectAction(id: string): Promise<WorkResult<{ ok: boolean }>> {
   try {
-    await apiFetch(`/api/work/projects/${uuid.parse(id)}`, { method: 'DELETE' });
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.edit',
+    });
+    await archiveProject(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
@@ -191,83 +118,73 @@ export async function listProjectTasksAction(
   input?: unknown,
 ): Promise<WorkResult<WorkPage<WorkTask>>> {
   try {
-    const query =
-      typeof input === 'object' && input !== null
-        ? (input as { limit?: number; offset?: number; status?: string })
-        : {};
-    const params = new URLSearchParams();
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
-    if (query.status) params.set('status', query.status);
-    const qs = params.toString();
-    const body = await apiFetch(
-      `/api/work/projects/${uuid.parse(projectId)}/tasks${qs ? `?${qs}` : ''}`,
-    );
-    return toWorkPage<WorkTask>(body);
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.view',
+    });
+    return await listProjectTasks(authorization, uuid.parse(projectId), input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
-export async function listMyTasksAction(input?: unknown): Promise<WorkResult<WorkPage<WorkTask>>> {
+export async function listMyTasksAction(
+  input?: unknown,
+): Promise<WorkResult<WorkPage<WorkTask>>> {
   try {
-    const query =
-      typeof input === 'object' && input !== null
-        ? (input as { limit?: number; offset?: number; status?: string })
-        : {};
-    const params = new URLSearchParams();
-    if (query.limit !== undefined) params.set('limit', String(query.limit));
-    if (query.offset !== undefined) params.set('offset', String(query.offset));
-    if (query.status) params.set('status', query.status);
-    const qs = params.toString();
-    const body = await apiFetch(`/api/work/tasks/mine${qs ? `?${qs}` : ''}`);
-    return toWorkPage<WorkTask>(body);
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.view',
+    });
+    return await listMyTasks(authorization, input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function getTaskAction(id: string): Promise<WorkResult<WorkTask>> {
   try {
-    const body = await apiFetch(`/api/work/tasks/${uuid.parse(id)}`);
-    return body as WorkTask;
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.view',
+    });
+    return await getTask(authorization, uuid.parse(id));
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function createTaskAction(input: unknown): Promise<WorkResult<WorkTask>> {
   try {
-    const body = await apiFetch('/api/work/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: jsonBody(input),
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.create',
     });
-    return body as WorkTask;
+    return await createTask(authorization, input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
-export async function updateTaskAction(id: string, input: unknown): Promise<WorkResult<WorkTask>> {
+export async function updateTaskAction(
+  id: string,
+  input: unknown,
+): Promise<WorkResult<WorkTask>> {
   try {
-    const body = await apiFetch(`/api/work/tasks/${uuid.parse(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: jsonBody(input),
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.edit',
     });
-    return body as WorkTask;
+    return await updateTask(authorization, uuid.parse(id), input);
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
 export async function deleteTaskAction(id: string): Promise<WorkResult<{ ok: boolean }>> {
   try {
-    await apiFetch(`/api/work/tasks/${uuid.parse(id)}`, { method: 'DELETE' });
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.delete',
+    });
+    await deleteTask(authorization, uuid.parse(id));
     return { ok: true };
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
 
@@ -282,17 +199,16 @@ export async function moveTaskAction(
   input: unknown,
 ): Promise<WorkResult<MoveTaskResult>> {
   try {
-    const parsed = moveTaskInput.parse(input);
-    const body = await apiFetch(`/api/work/tasks/${uuid.parse(id)}/move`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(parsed),
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.edit',
     });
-    if (typeof body === 'object' && body !== null && 'status' in body) {
-      return { status: (body as { status: TaskStatus }).status };
+    const parsed = moveTaskInput.parse(input);
+    const result = await moveTask(authorization, uuid.parse(id), parsed);
+    if (typeof result === 'object' && result !== null && 'status' in result) {
+      return { status: (result as { status: TaskStatus }).status };
     }
     return { status: parsed.status };
   } catch (error) {
-    return envelopeFor(error);
+    return actionError(error);
   }
 }
