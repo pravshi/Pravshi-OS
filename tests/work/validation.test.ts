@@ -213,7 +213,9 @@ describe.skipIf(!schema)('work zod schemas', () => {
     it('rejects a project in the move payload (status-only by design)', () => {
       // Security: cross-project moves are forbidden via the move endpoint.
       // Changing projects is PATCH with projectId, not POST /move.
-      expect(() => parseObj(MoveTaskSchema, { status: 'done', projectId: projectId })).toThrow();
+      expect(() =>
+        parseObj(MoveTaskSchema, { status: 'done', projectId: 'some-project-id' }),
+      ).toThrow();
     });
 
     it('rejects an empty move (nothing to do)', () => {

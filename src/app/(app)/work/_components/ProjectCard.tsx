@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  projectStatusBadgeClass,
-  projectStatusLabel,
-  type Project,
-} from '../_types';
+import { projectStatusBadgeClass, projectStatusLabel, type Project } from '../_types';
 
 /** A project tile on the work home page. Server-rendered link card. */
 export function ProjectCard({ project }: { project: Project }) {
