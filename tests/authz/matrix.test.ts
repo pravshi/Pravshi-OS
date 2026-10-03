@@ -1,12 +1,9 @@
-import { readFileSync } from "node:fs";
-import { sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { resolveAuthContext } from "@/lib/auth/session";
-import {
-  requirePermission,
-  type AccessScope,
-} from "@/lib/authz/require-permission";
-import { withAuthorizedDb } from "@/lib/db/authorized";
+import { readFileSync } from 'node:fs';
+import { sql } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resolveAuthContext } from '@/lib/auth/session';
+import { requirePermission, type AccessScope } from '@/lib/authz/require-permission';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import {
   enrolTotp,
   headersFor,
@@ -18,7 +15,7 @@ import {
   ownerPool,
   runId,
   type Account,
-} from "./fixtures";
+} from './fixtures';
 
 /**
  * Task 1.15 — the security.md section 2 matrix, cell by cell, through requirePermission().
@@ -40,18 +37,18 @@ interface Matrix {
 }
 
 const LETTERS: Readonly<Record<string, AccessScope>> = {
-  G: "GLOBAL",
-  D: "DEPARTMENT",
-  T: "TEAM",
-  P: "PROJECT",
-  S: "SELF",
+  G: 'GLOBAL',
+  D: 'DEPARTMENT',
+  T: 'TEAM',
+  P: 'PROJECT',
+  S: 'SELF',
 };
 
 /** 0008: a grant carries one scope, so a printed union is seeded as its narrower half. */
-const UNION_CELLS: Readonly<Record<string, AccessScope>> = { "S+P": "SELF" };
+const UNION_CELLS: Readonly<Record<string, AccessScope>> = { 'S+P': 'SELF' };
 
 /** The em dash the document prints for "no access". */
-const NO_ACCESS = "—";
+const NO_ACCESS = '—';
 const FOOTNOTE_MARKS = /[¹²³⁰-⁹]/g;
 
 /**
@@ -62,48 +59,46 @@ const FOOTNOTE_MARKS = /[¹²³⁰-⁹]/g;
 const SEED_DECISIONS: Readonly<Record<string, Cell>> = {
   // 0008 gives SUPER_ADMIN the whole catalogue at GLOBAL, users.impersonate excepted. The printed
   // S in this row is the one cell of the matrix where that differs.
-  "SUPER_ADMIN policies.acknowledge": "GLOBAL",
+  'SUPER_ADMIN policies.acknowledge': 'GLOBAL',
 };
 
 /** Blueprint 6.1 roles with no matrix column; 0008 seeds them with no grants at all.
  * Phase 4 (0042) grants MANAGER six work permissions plus policies.acknowledge,
  * so only MARKETING remains unmapped. */
-const UNMAPPED_ROLES = ["MARKETING"];
+const UNMAPPED_ROLES = ['MARKETING'];
 
 /** Task 1.15 decision 1: the set the catalogue must produce on its own, with no role named in code. */
-const PRIVILEGED = ["ADMIN", "FINANCE", "HR_ADMIN", "SUPER_ADMIN"];
+const PRIVILEGED = ['ADMIN', 'FINANCE', 'HR_ADMIN', 'SUPER_ADMIN'];
 
 function readCell(raw: string, where: string): Cell {
-  const cell = raw.replace(FOOTNOTE_MARKS, "").trim();
+  const cell = raw.replace(FOOTNOTE_MARKS, '').trim();
   if (cell === NO_ACCESS) return null;
   const scope = UNION_CELLS[cell] ?? LETTERS[cell];
-  if (!scope)
-    throw new Error(`security.md section 2: cannot read "${raw}" at ${where}`);
+  if (!scope) throw new Error(`security.md section 2: cannot read "${raw}" at ${where}`);
   return scope;
 }
 
 function parseMatrix(markdown: string): Matrix {
   const lines = markdown.split(/\r?\n/);
   const header = lines.findIndex((line) => /^\|\s*Permission\s*\|/.test(line));
-  if (header === -1)
-    throw new Error("security.md section 2: matrix header not found");
-  if (!/^\|(\s*-+\s*\|)+$/.test(lines[header + 1]?.trim() ?? "")) {
-    throw new Error("security.md section 2: matrix separator row not found");
+  if (header === -1) throw new Error('security.md section 2: matrix header not found');
+  if (!/^\|(\s*-+\s*\|)+$/.test(lines[header + 1]?.trim() ?? '')) {
+    throw new Error('security.md section 2: matrix separator row not found');
   }
   const cells = (line: string) =>
     line
       .trim()
-      .replace(/^\|/, "")
-      .replace(/\|$/, "")
-      .split("|")
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
       .map((cell) => cell.trim());
 
   const roles = cells(lines[header]!).slice(1);
-  const rows: Matrix["rows"] = [];
+  const rows: Matrix['rows'] = [];
   for (const line of lines.slice(header + 2)) {
-    if (!line.trim().startsWith("|")) break;
+    if (!line.trim().startsWith('|')) break;
     const [first, ...values] = cells(line);
-    const permission = (first ?? "").replace(/`/g, "");
+    const permission = (first ?? '').replace(/`/g, '');
     if (values.length !== roles.length) {
       throw new Error(
         `security.md section 2: ${permission} has ${values.length} cells for ${roles.length} roles`,
@@ -119,28 +114,19 @@ function parseMatrix(markdown: string): Matrix {
 }
 
 const matrix = parseMatrix(
-  readFileSync(
-    new URL("../../docs/architecture/security.md", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL('../../docs/architecture/security.md', import.meta.url), 'utf8'),
 );
 const ROLES = [...matrix.roles, ...UNMAPPED_ROLES];
 
-const expectedScope = (
-  role: string,
-  permission: string,
-  printed: Record<string, Cell>,
-): Cell => {
+const expectedScope = (role: string, permission: string, printed: Record<string, Cell>): Cell => {
   const decision = `${role} ${permission}`;
-  return decision in SEED_DECISIONS
-    ? (SEED_DECISIONS[decision] ?? null)
-    : (printed[role] ?? null);
+  return decision in SEED_DECISIONS ? (SEED_DECISIONS[decision] ?? null) : (printed[role] ?? null);
 };
 
 const owner = ownerPool();
 const RUN = runId();
 
-let org = "";
+let org = '';
 let seededRoles: string[] = [];
 let catalogue: string[] = [];
 const accounts: Record<string, Account> = {};
@@ -155,7 +141,7 @@ beforeAll(async () => {
       org,
       dept,
       run: RUN,
-      label: `mx${role.toLowerCase().replace(/_/g, "")}`,
+      label: `mx${role.toLowerCase().replace(/_/g, '')}`,
       roles: [role],
     }),
   );
@@ -164,20 +150,17 @@ beforeAll(async () => {
   });
 
   seededRoles = (
-    await owner.query<{ key: string }>(
-      `select key from public.roles where org_id = $1`,
-      [org],
-    )
+    await owner.query<{ key: string }>(`select key from public.roles where org_id = $1`, [org])
   ).rows.map((r) => r.key);
-  catalogue = (
-    await owner.query<{ key: string }>(`select key from public.permissions`)
-  ).rows.map((r) => r.key);
+  catalogue = (await owner.query<{ key: string }>(`select key from public.permissions`)).rows.map(
+    (r) => r.key,
+  );
 
   // Before anybody is enrolled: which roles does requirePermission() send to a step-up?
   const outcomes = await mapLimit(ROLES, 4, (role) =>
     outcomeOf(
       requirePermission(headersFor(accounts[role]!.cookie), {
-        permission: "policies.acknowledge",
+        permission: 'policies.acknowledge',
       }),
     ),
   );
@@ -200,42 +183,38 @@ afterAll(async () => {
   await owner.end().catch(() => undefined);
 });
 
-describe("the matrix as written", () => {
-  it("has 67 permissions for 13 roles", () => {
+describe('the matrix as written', () => {
+  it('has 67 permissions for 13 roles', () => {
     expect(matrix.roles).toEqual([
-      "SUPER_ADMIN",
-      "ADMIN",
-      "HR_ADMIN",
-      "HR_MANAGER",
-      "MANAGER",
-      "SALES_MANAGER",
-      "SALES",
-      "PROJECT_MANAGER",
-      "DEVELOPER",
-      "VIBECODER",
-      "INTERN",
-      "FINANCE",
-      "EMPLOYEE",
+      'SUPER_ADMIN',
+      'ADMIN',
+      'HR_ADMIN',
+      'HR_MANAGER',
+      'MANAGER',
+      'SALES_MANAGER',
+      'SALES',
+      'PROJECT_MANAGER',
+      'DEVELOPER',
+      'VIBECODER',
+      'INTERN',
+      'FINANCE',
+      'EMPLOYEE',
     ]);
     expect(matrix.rows).toHaveLength(67);
     expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(67);
   });
 
-  it("names only permissions in the catalogue", () => {
-    expect(
-      matrix.rows
-        .map((r) => r.permission)
-        .filter((p) => !catalogue.includes(p)),
-    ).toEqual([]);
+  it('names only permissions in the catalogue', () => {
+    expect(matrix.rows.map((r) => r.permission).filter((p) => !catalogue.includes(p))).toEqual([]);
   });
 
-  it("covers every seeded role, plus the two it has no column for", () => {
+  it('covers every seeded role, plus the two it has no column for', () => {
     expect([...seededRoles].sort()).toEqual([...ROLES].sort());
   });
 
-  it("records each seed decision against a cell that still says something else", () => {
+  it('records each seed decision against a cell that still says something else', () => {
     for (const [decision, seeded] of Object.entries(SEED_DECISIONS)) {
-      const [role, permission] = decision.split(" ");
+      const [role, permission] = decision.split(' ');
       const row = matrix.rows.find((r) => r.permission === permission);
       expect(row, decision).toBeDefined();
       expect(row!.printed[role!], decision).not.toBe(seeded);
@@ -243,8 +222,8 @@ describe("the matrix as written", () => {
   });
 });
 
-describe("mandatory MFA", () => {
-  it("is derived from the catalogue for exactly SUPER_ADMIN, ADMIN, HR_ADMIN and FINANCE", async () => {
+describe('mandatory MFA', () => {
+  it('is derived from the catalogue for exactly SUPER_ADMIN, ADMIN, HR_ADMIN and FINANCE', async () => {
     const { rows } = await owner.query<{ key: string }>(
       `select distinct r.key
        from public.roles r
@@ -256,48 +235,38 @@ describe("mandatory MFA", () => {
     expect(rows.map((r) => r.key).sort()).toEqual(PRIVILEGED);
   });
 
-  it("sends exactly those roles to a step-up at aal1, and no other", () => {
-    expect(
-      ROLES.filter((role) => atAal1[role] === "STEP_UP_REQUIRED").sort(),
-    ).toEqual(PRIVILEGED);
+  it('sends exactly those roles to a step-up at aal1, and no other', () => {
+    expect(ROLES.filter((role) => atAal1[role] === 'STEP_UP_REQUIRED').sort()).toEqual(PRIVILEGED);
     for (const role of ROLES.filter((r) => !PRIVILEGED.includes(r))) {
-      expect(atAal1[role], role).toBe(
-        UNMAPPED_ROLES.includes(role) ? "FORBIDDEN" : "SUCCEEDED",
-      );
+      expect(atAal1[role], role).toBe(UNMAPPED_ROLES.includes(role) ? 'FORBIDDEN' : 'SUCCEEDED');
     }
   });
 });
 
-describe.each(ROLES)("%s", (role) => {
-  it("answers every cell of the matrix through requirePermission()", async () => {
+describe.each(ROLES)('%s', (role) => {
+  it('answers every cell of the matrix through requirePermission()', async () => {
     const account = accounts[role]!;
-    const aal = PRIVILEGED.includes(role) ? "aal2" : "aal1";
-    const mismatches = await mapLimit(
-      matrix.rows,
-      4,
-      async ({ permission, printed }) => {
-        const want = expectedScope(role, permission, printed);
-        const got = await requirePermission(headersFor(account.cookie), {
-          permission,
-        }).then(
-          (authorization): string | null =>
-            authorization.aal === aal
-              ? authorization.scope
-              : `${authorization.scope} at ${authorization.aal}`,
-          (error: { code?: unknown }): string | null =>
-            error?.code === "FORBIDDEN"
-              ? null
-              : `refusal ${String(error?.code ?? error)}`,
-        );
-        return got === want
-          ? null
-          : `${permission}: expected ${want ?? "FORBIDDEN"}, got ${got ?? "FORBIDDEN"}`;
-      },
-    );
+    const aal = PRIVILEGED.includes(role) ? 'aal2' : 'aal1';
+    const mismatches = await mapLimit(matrix.rows, 4, async ({ permission, printed }) => {
+      const want = expectedScope(role, permission, printed);
+      const got = await requirePermission(headersFor(account.cookie), {
+        permission,
+      }).then(
+        (authorization): string | null =>
+          authorization.aal === aal
+            ? authorization.scope
+            : `${authorization.scope} at ${authorization.aal}`,
+        (error: { code?: unknown }): string | null =>
+          error?.code === 'FORBIDDEN' ? null : `refusal ${String(error?.code ?? error)}`,
+      );
+      return got === want
+        ? null
+        : `${permission}: expected ${want ?? 'FORBIDDEN'}, got ${got ?? 'FORBIDDEN'}`;
+    });
     expect(mismatches.filter(Boolean)).toEqual([]);
   }, 180_000);
 
-  it("holds nothing the matrix does not print", async () => {
+  it('holds nothing the matrix does not print', async () => {
     const ctx = await resolveAuthContext(headersFor(accounts[role]!.cookie));
     expect(ctx).not.toBeNull();
     const held = await withAuthorizedDb(ctx!, (tx) =>
@@ -307,19 +276,17 @@ describe.each(ROLES)("%s", (role) => {
     );
     const actual = Object.fromEntries(held.rows.map((r) => [r.key, r.scope]));
     const expected: Record<string, string> =
-      role === "SUPER_ADMIN"
+      role === 'SUPER_ADMIN'
         ? Object.fromEntries(
             catalogue
-              .filter((key) => key !== "users.impersonate")
-              .map((key): [string, string] => [key, "GLOBAL"]),
+              .filter((key) => key !== 'users.impersonate')
+              .map((key): [string, string] => [key, 'GLOBAL']),
           )
         : Object.fromEntries(
-            matrix.rows.flatMap(
-              ({ permission, printed }): [string, string][] => {
-                const scope = expectedScope(role, permission, printed);
-                return scope ? [[permission, scope]] : [];
-              },
-            ),
+            matrix.rows.flatMap(({ permission, printed }): [string, string][] => {
+              const scope = expectedScope(role, permission, printed);
+              return scope ? [[permission, scope]] : [];
+            }),
           );
     expect(actual).toEqual(expected);
   }, 60_000);

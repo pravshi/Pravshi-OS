@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Pool } from "@neondatabase/serverless";
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Pool } from '@neondatabase/serverless';
 import {
   ALL_WORK_PERMS,
   CODE,
@@ -16,7 +16,7 @@ import {
   mkTask,
   sqlstateOf,
   type Ctx,
-} from "../work/helpers";
+} from '../work/helpers';
 
 /**
  * Phase 4 — work_tasks: DB-level CRUD, constraints, guards, RLS.
@@ -47,11 +47,11 @@ const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
 
 const ctxFor = (personId: string, orgId: string): Ctx => ({ personId, orgId });
 
-let orgA = "";
-let orgB = "";
-let alice = "";
-let bob = "";
-let projectA = "";
+let orgA = '';
+let orgB = '';
+let alice = '';
+let bob = '';
+let projectA = '';
 
 beforeAll(async () => {
   await ensureWorkSchema(owner);
@@ -59,8 +59,8 @@ beforeAll(async () => {
   orgB = await mkOrg(owner, `task-b-${CODE}`);
   const deptA = await mkDept(owner, orgA, `${CODE}_TA`);
   const deptB = await mkDept(owner, orgB, `${CODE}_TB`);
-  alice = await mkPerson(owner, orgA, "Alice Tasks");
-  bob = await mkPerson(owner, orgB, "Bob Tasks");
+  alice = await mkPerson(owner, orgA, 'Alice Tasks');
+  bob = await mkPerson(owner, orgB, 'Bob Tasks');
   await mkEngagement(owner, orgA, alice, deptA);
   await mkEngagement(owner, orgB, bob, deptB);
   await mkRoleFor(owner, orgA, alice, `${CODE}_TA_FULL`, ALL_WORK_PERMS);
@@ -73,14 +73,14 @@ afterAll(async () => {
   await asUser.end();
 });
 
-describe("FORCE RLS is on for work_tasks", () => {
-  it("pg_class.relforcerls is true", async () => {
-    await assertForceRls(owner, "work_tasks");
+describe('FORCE RLS is on for work_tasks', () => {
+  it('pg_class.relforcerls is true', async () => {
+    await assertForceRls(owner, 'work_tasks');
   });
 });
 
-describe("task CRUD as app_user", () => {
-  it("creates a task in a project with defaults and reads it back", async () => {
+describe('task CRUD as app_user', () => {
+  it('creates a task in a project with defaults and reads it back', async () => {
     const ctx = ctxFor(alice, orgA);
     const rows = await inContext<{ id: string }>(
       asUser,
@@ -101,22 +101,22 @@ describe("task CRUD as app_user", () => {
       )
     )[0]!;
     expect(got.project_id).toBe(projectA);
-    expect(got.status).toBe("todo");
-    expect(got.priority).toBe("medium");
+    expect(got.status).toBe('todo');
+    expect(got.priority).toBe('medium');
     expect(got.due_date).toBeNull();
     expect(got.assignee_person_id).toBeNull();
     expect(got.created_by).toBe(alice);
     expect(got.deleted_at).toBeNull();
   });
 
-  it("creates a standalone task (project_id NULL)", async () => {
+  it('creates a standalone task (project_id NULL)', async () => {
     const ctx = ctxFor(alice, orgA);
     const rows = await inContext<{ id: string }>(
       asUser,
       ctx,
       `insert into public.work_tasks (org_id, title, description, priority, due_date)
        values ($1, $2, $3, 'high', '2026-12-31') returning id`,
-      [orgA, `Ad-hoc ${CODE}`, "no project needed"],
+      [orgA, `Ad-hoc ${CODE}`, 'no project needed'],
     );
     const got = (
       await inContext<{
@@ -131,23 +131,21 @@ describe("task CRUD as app_user", () => {
       )
     )[0]!;
     expect(got.project_id).toBeNull();
-    expect(got.priority).toBe("high");
+    expect(got.priority).toBe('high');
     // node-postgres parses `date` columns into JS Dates (midnight UTC).
-    expect(got.due_date.toISOString().slice(0, 10)).toBe("2026-12-31");
+    expect(got.due_date.toISOString().slice(0, 10)).toBe('2026-12-31');
   });
 
-  it("transitions status todo → in_progress → done", async () => {
+  it('transitions status todo → in_progress → done', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Lifecycle ${CODE}`, {
       projectId: projectA,
     });
-    for (const status of ["in_progress", "done"]) {
-      await inContext(
-        asUser,
-        ctx,
-        `update public.work_tasks set status = $2 where id = $1`,
-        [id, status],
-      );
+    for (const status of ['in_progress', 'done']) {
+      await inContext(asUser, ctx, `update public.work_tasks set status = $2 where id = $1`, [
+        id,
+        status,
+      ]);
       const got = (
         await inContext<{ status: string }>(
           asUser,
@@ -160,7 +158,7 @@ describe("task CRUD as app_user", () => {
     }
   });
 
-  it("updates priority, assignee, and due_date", async () => {
+  it('updates priority, assignee, and due_date', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Reprioritize ${CODE}`, {
       projectId: projectA,
@@ -185,23 +183,21 @@ describe("task CRUD as app_user", () => {
         [id],
       )
     )[0]!;
-    expect(got.priority).toBe("urgent");
+    expect(got.priority).toBe('urgent');
     expect(got.assignee_person_id).toBe(alice);
-    expect(got.due_date.toISOString().slice(0, 10)).toBe("2026-11-30");
+    expect(got.due_date.toISOString().slice(0, 10)).toBe('2026-11-30');
   });
 
-  it("moves a task to another project in the same org", async () => {
+  it('moves a task to another project in the same org', async () => {
     const ctx = ctxFor(alice, orgA);
     const other = await mkProject(owner, orgA, `Other ${CODE}`);
     const id = await mkTask(owner, orgA, `Movable ${CODE}`, {
       projectId: projectA,
     });
-    await inContext(
-      asUser,
-      ctx,
-      `update public.work_tasks set project_id = $2 where id = $1`,
-      [id, other],
-    );
+    await inContext(asUser, ctx, `update public.work_tasks set project_id = $2 where id = $1`, [
+      id,
+      other,
+    ]);
     const got = (
       await inContext<{ project_id: string }>(
         asUser,
@@ -214,11 +210,11 @@ describe("task CRUD as app_user", () => {
   });
 });
 
-describe("status / priority / title constraints", () => {
+describe('status / priority / title constraints', () => {
   const ctx = () => ctxFor(alice, orgA);
 
-  it.each(["donee", "IN_PROGRESS", "", "archived"])(
-    "rejects invalid status %p with 23514",
+  it.each(['donee', 'IN_PROGRESS', '', 'archived'])(
+    'rejects invalid status %p with 23514',
     async (status) => {
       expect(
         await sqlstateOf(
@@ -229,12 +225,12 @@ describe("status / priority / title constraints", () => {
             [orgA, `Bad status ${CODE}`, status],
           ),
         ),
-      ).toBe("23514");
+      ).toBe('23514');
     },
   );
 
-  it.each(["critical", "MEDIUM", "", "p0"])(
-    "rejects invalid priority %p with 23514",
+  it.each(['critical', 'MEDIUM', '', 'p0'])(
+    'rejects invalid priority %p with 23514',
     async (priority) => {
       expect(
         await sqlstateOf(
@@ -245,40 +241,35 @@ describe("status / priority / title constraints", () => {
             [orgA, `Bad priority ${CODE}`, priority],
           ),
         ),
-      ).toBe("23514");
+      ).toBe('23514');
     },
   );
 
-  it("rejects an invalid status on update too", async () => {
+  it('rejects an invalid status on update too', async () => {
     const id = await mkTask(owner, orgA, `Constrained ${CODE}`);
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx(),
-          `update public.work_tasks set status = 'nope' where id = $1`,
-          [id],
-        ),
+        inContext(asUser, ctx(), `update public.work_tasks set status = 'nope' where id = $1`, [
+          id,
+        ]),
       ),
-    ).toBe("23514");
+    ).toBe('23514');
   });
 
-  it("rejects a blank title with 23514", async () => {
+  it('rejects a blank title with 23514', async () => {
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx(),
-          `insert into public.work_tasks (org_id, title) values ($1,$2)`,
-          [orgA, "  "],
-        ),
+        inContext(asUser, ctx(), `insert into public.work_tasks (org_id, title) values ($1,$2)`, [
+          orgA,
+          '  ',
+        ]),
       ),
-    ).toBe("23514");
+    ).toBe('23514');
   });
 });
 
-describe("project-org guard", () => {
-  it("rejects a task whose project lives in another org (42501)", async () => {
+describe('project-org guard', () => {
+  it('rejects a task whose project lives in another org (42501)', async () => {
     const projectB = await mkProject(owner, orgB, `Foreign ${CODE}`);
     expect(
       await sqlstateOf(
@@ -289,10 +280,10 @@ describe("project-org guard", () => {
           [orgA, projectB, `Cross-org ${CODE}`],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("rejects moving a task onto a foreign project (42501)", async () => {
+  it('rejects moving a task onto a foreign project (42501)', async () => {
     const ctx = ctxFor(alice, orgA);
     const projectB = await mkProject(owner, orgB, `Foreign move ${CODE}`);
     const id = await mkTask(owner, orgA, `Move me ${CODE}`, {
@@ -300,17 +291,15 @@ describe("project-org guard", () => {
     });
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx,
-          `update public.work_tasks set project_id = $2 where id = $1`,
-          [id, projectB],
-        ),
+        inContext(asUser, ctx, `update public.work_tasks set project_id = $2 where id = $1`, [
+          id,
+          projectB,
+        ]),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("rejects re-homing a task into another org_id (42501)", async () => {
+  it('rejects re-homing a task into another org_id (42501)', async () => {
     const id = await mkTask(owner, orgA, `Rehome ${CODE}`, {
       projectId: projectA,
     });
@@ -323,12 +312,12 @@ describe("project-org guard", () => {
           [id, orgB],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 });
 
-describe("assignee-org guard", () => {
-  it("rejects assigning a task to a person in another org (42501)", async () => {
+describe('assignee-org guard', () => {
+  it('rejects assigning a task to a person in another org (42501)', async () => {
     expect(
       await sqlstateOf(
         inContext(
@@ -338,10 +327,10 @@ describe("assignee-org guard", () => {
           [orgA, `Foreign assignee ${CODE}`, bob],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("rejects re-assigning to a foreign person on update (42501)", async () => {
+  it('rejects re-assigning to a foreign person on update (42501)', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Reassign ${CODE}`, {
       assignee: alice,
@@ -355,10 +344,10 @@ describe("assignee-org guard", () => {
           [id, bob],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("allows unassigning (assignee → NULL)", async () => {
+  it('allows unassigning (assignee → NULL)', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Unassign ${CODE}`, {
       assignee: alice,
@@ -381,15 +370,13 @@ describe("assignee-org guard", () => {
   });
 });
 
-describe("referential integrity", () => {
-  it("hard-deleting a project nulls the task project_id (ON DELETE SET NULL)", async () => {
+describe('referential integrity', () => {
+  it('hard-deleting a project nulls the task project_id (ON DELETE SET NULL)', async () => {
     const doomed = await mkProject(owner, orgA, `Doomed ${CODE}`);
     const id = await mkTask(owner, orgA, `Orphan ${CODE}`, {
       projectId: doomed,
     });
-    await owner.query(`delete from public.work_projects where id = $1`, [
-      doomed,
-    ]);
+    await owner.query(`delete from public.work_projects where id = $1`, [doomed]);
     const got = await owner.query<{ project_id: string | null }>(
       `select project_id from public.work_tasks where id = $1`,
       [id],
@@ -397,7 +384,7 @@ describe("referential integrity", () => {
     expect(got.rows[0]!.project_id).toBeNull();
   });
 
-  it("a task cannot reference a nonexistent project: the org guard fires first (42501)", async () => {
+  it('a task cannot reference a nonexistent project: the org guard fires first (42501)', async () => {
     // BEFORE triggers run ahead of FK constraint checks, so the
     // work_task_project_org_guard() denies the write with 42501 before the
     // foreign key could report 23503. The guard is the contract pin; the FK
@@ -408,72 +395,54 @@ describe("referential integrity", () => {
           asUser,
           ctxFor(alice, orgA),
           `insert into public.work_tasks (org_id, project_id, title) values ($1,$2,$3)`,
-          [
-            orgA,
-            "00000000-0000-0000-0000-000000000000",
-            `Ghost project ${CODE}`,
-          ],
+          [orgA, '00000000-0000-0000-0000-000000000000', `Ghost project ${CODE}`],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 });
 
-describe("soft-delete semantics for tasks", () => {
-  it("soft-deleted tasks vanish for app_user but remain for app_owner", async () => {
+describe('soft-delete semantics for tasks', () => {
+  it('soft-deleted tasks vanish for app_user but remain for app_owner', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Delete me ${CODE}`, {
       projectId: projectA,
     });
-    await inContext(asUser, ctx, `select public.work_soft_delete('task', $1)`, [
+    await inContext(asUser, ctx, `select public.work_soft_delete('task', $1)`, [id]);
+    expect(
+      await inContext(asUser, ctx, `select id from public.work_tasks where id = $1`, [id]),
+    ).toHaveLength(0);
+    const asOwner = await owner.query(`select deleted_at from public.work_tasks where id = $1`, [
       id,
     ]);
-    expect(
-      await inContext(
-        asUser,
-        ctx,
-        `select id from public.work_tasks where id = $1`,
-        [id],
-      ),
-    ).toHaveLength(0);
-    const asOwner = await owner.query(
-      `select deleted_at from public.work_tasks where id = $1`,
-      [id],
-    );
     expect(asOwner.rows).toHaveLength(1);
     expect(asOwner.rows[0]!.deleted_at).toBeTruthy();
   });
 
-  it("a direct UPDATE of deleted_at is denied with 42501", async () => {
+  it('a direct UPDATE of deleted_at is denied with 42501', async () => {
     const ctx = ctxFor(alice, orgA);
     const id = await mkTask(owner, orgA, `Direct ${CODE}`);
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx,
-          `update public.work_tasks set deleted_at = now() where id = $1`,
-          [id],
-        ),
+        inContext(asUser, ctx, `update public.work_tasks set deleted_at = now() where id = $1`, [
+          id,
+        ]),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("work_soft_delete raises 02000 for a foreign task (no tenant leak)", async () => {
+  it('work_soft_delete raises 02000 for a foreign task (no tenant leak)', async () => {
     const foreign = await mkTask(owner, orgB, `Foreign task del ${CODE}`);
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctxFor(alice, orgA),
-          `select public.work_soft_delete('task', $1)`,
-          [foreign],
-        ),
+        inContext(asUser, ctxFor(alice, orgA), `select public.work_soft_delete('task', $1)`, [
+          foreign,
+        ]),
       ),
-    ).toBe("02000");
+    ).toBe('02000');
   });
 
-  it("raw DELETE succeeds for a tasks.delete holder (0042 hard-delete policy)", async () => {
+  it('raw DELETE succeeds for a tasks.delete holder (0042 hard-delete policy)', async () => {
     // Alice holds ALL_WORK_PERMS including tasks.delete, so per the 0042
     // work_tasks_delete policy she may hard-delete any own-org task.
     const ctx = ctxFor(alice, orgA);
@@ -488,7 +457,7 @@ describe("soft-delete semantics for tasks", () => {
   });
 });
 
-describe("tenant isolation for work_tasks", () => {
+describe('tenant isolation for work_tasks', () => {
   it("org B cannot select org A's tasks", async () => {
     await mkTask(owner, orgA, `Secret task ${CODE}`, { projectId: projectA });
     const rows = await inContext(
@@ -500,7 +469,7 @@ describe("tenant isolation for work_tasks", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("org B cannot insert a task into org A (42501)", async () => {
+  it('org B cannot insert a task into org A (42501)', async () => {
     expect(
       await sqlstateOf(
         inContext(
@@ -510,7 +479,7 @@ describe("tenant isolation for work_tasks", () => {
           [orgA, `Sneaky task ${CODE}`],
         ),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
   it("org B cannot update org A's tasks (0 rows)", async () => {
@@ -535,52 +504,41 @@ describe("tenant isolation for work_tasks", () => {
       [id],
     );
     expect(rows).toHaveLength(0);
-    const { rows: still } = await owner.query(
-      `select 1 from public.work_tasks where id = $1`,
-      [id],
-    );
+    const { rows: still } = await owner.query(`select 1 from public.work_tasks where id = $1`, [
+      id,
+    ]);
     expect(still).toHaveLength(1);
   });
 });
 
-describe("permission gates for work_tasks", () => {
-  it("a user with no work permissions sees nothing and cannot write", async () => {
-    const ghost = await mkPerson(owner, orgA, "Ghost Writer");
+describe('permission gates for work_tasks', () => {
+  it('a user with no work permissions sees nothing and cannot write', async () => {
+    const ghost = await mkPerson(owner, orgA, 'Ghost Writer');
     const dept = await mkDept(owner, orgA, `${CODE}_TG`);
     await mkEngagement(owner, orgA, ghost, dept);
     const ctx = ctxFor(ghost, orgA);
     await mkTask(owner, orgA, `Hidden task ${CODE}`);
-    expect(
-      await inContext(asUser, ctx, `select id from public.work_tasks`),
-    ).toHaveLength(0);
+    expect(await inContext(asUser, ctx, `select id from public.work_tasks`)).toHaveLength(0);
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx,
-          `insert into public.work_tasks (org_id, title) values ($1,$2)`,
-          [orgA, `Nope ${CODE}`],
-        ),
+        inContext(asUser, ctx, `insert into public.work_tasks (org_id, title) values ($1,$2)`, [
+          orgA,
+          `Nope ${CODE}`,
+        ]),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("view+edit user can update but not create", async () => {
-    const editor = await mkPerson(owner, orgA, "Editor Only");
+  it('view+edit user can update but not create', async () => {
+    const editor = await mkPerson(owner, orgA, 'Editor Only');
     const dept = await mkDept(owner, orgA, `${CODE}_TE`);
     await mkEngagement(owner, orgA, editor, dept);
-    await mkRoleFor(owner, orgA, editor, `${CODE}_TE_ONLY`, [
-      PERMS.tasks.view,
-      PERMS.tasks.edit,
-    ]);
+    await mkRoleFor(owner, orgA, editor, `${CODE}_TE_ONLY`, [PERMS.tasks.view, PERMS.tasks.edit]);
     const ctx = ctxFor(editor, orgA);
     const id = await mkTask(owner, orgA, `Editable ${CODE}`);
-    await inContext(
-      asUser,
-      ctx,
-      `update public.work_tasks set title = 'edited' where id = $1`,
-      [id],
-    );
+    await inContext(asUser, ctx, `update public.work_tasks set title = 'edited' where id = $1`, [
+      id,
+    ]);
     const got = (
       await inContext<{ title: string }>(
         asUser,
@@ -589,29 +547,25 @@ describe("permission gates for work_tasks", () => {
         [id],
       )
     )[0]!;
-    expect(got.title).toBe("edited");
+    expect(got.title).toBe('edited');
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          ctx,
-          `insert into public.work_tasks (org_id, title) values ($1,$2)`,
-          [orgA, `Denied ${CODE}`],
-        ),
+        inContext(asUser, ctx, `insert into public.work_tasks (org_id, title) values ($1,$2)`, [
+          orgA,
+          `Denied ${CODE}`,
+        ]),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 
-  it("without the view permission a row is invisible to UPDATE too (0 rows, no error)", async () => {
+  it('without the view permission a row is invisible to UPDATE too (0 rows, no error)', async () => {
     // PostgreSQL applies the SELECT policy to the UPDATE's row lookup: a
     // caller who cannot SELECT a row cannot UPDATE it either, even holding
     // the edit permission. You cannot touch what you cannot see.
-    const editor = await mkPerson(owner, orgA, "Editor Two");
+    const editor = await mkPerson(owner, orgA, 'Editor Two');
     const dept = await mkDept(owner, orgA, `${CODE}_TE2`);
     await mkEngagement(owner, orgA, editor, dept);
-    await mkRoleFor(owner, orgA, editor, `${CODE}_TE2_ONLY`, [
-      PERMS.tasks.edit,
-    ]);
+    await mkRoleFor(owner, orgA, editor, `${CODE}_TE2_ONLY`, [PERMS.tasks.edit]);
     const ctx = ctxFor(editor, orgA);
     const id = await mkTask(owner, orgA, `Untouchable edit ${CODE}`);
     const rows = await inContext<{ id: string }>(
@@ -628,20 +582,16 @@ describe("permission gates for work_tasks", () => {
     expect(got.rows[0]!.title).toBe(`Untouchable edit ${CODE}`);
   });
 
-  it("no identity sees nothing and cannot insert (fail closed)", async () => {
+  it('no identity sees nothing and cannot insert (fail closed)', async () => {
     await mkTask(owner, orgA, `Fail closed ${CODE}`);
-    expect(
-      await inContext(asUser, {}, `select id from public.work_tasks`),
-    ).toHaveLength(0);
+    expect(await inContext(asUser, {}, `select id from public.work_tasks`)).toHaveLength(0);
     expect(
       await sqlstateOf(
-        inContext(
-          asUser,
-          {},
-          `insert into public.work_tasks (org_id, title) values ($1,$2)`,
-          [orgA, `Ghost ${CODE}`],
-        ),
+        inContext(asUser, {}, `insert into public.work_tasks (org_id, title) values ($1,$2)`, [
+          orgA,
+          `Ghost ${CODE}`,
+        ]),
       ),
-    ).toBe("42501");
+    ).toBe('42501');
   });
 });
