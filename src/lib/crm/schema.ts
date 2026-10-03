@@ -71,6 +71,13 @@ export type ListContactsQuery = z.infer<typeof ListContactsQuerySchema>;
 
 // ── Companies ────────────────────────────────────────────────────────────────────
 
+/** ISO 3166-1 alpha-2 country code, normalized to uppercase. */
+const countryCodeField = z
+  .string()
+  .trim()
+  .length(2)
+  .transform((s) => s.toUpperCase());
+
 export const CreateCompanySchema = z.strictObject({
   name: z.string().trim().min(1).max(255),
   domain: nullableText(255),
@@ -83,21 +90,23 @@ export const CreateCompanySchema = z.strictObject({
   addressCity: nullableText(128),
   addressState: nullableText(128),
   addressPostalCode: nullableText(32),
-  countryCode: z
-    .string()
-    .trim()
-    .length(2)
-    .transform((s) => s.toUpperCase())
-    .nullable()
-    .optional(),
+  /** DB column country_code is NOT NULL DEFAULT 'IN' — the zod default keeps
+   * the value visible in the app layer (same pattern as deals.currency →
+   * 'INR'), and an explicit null is rejected with a 400 instead of 500ing on
+   * the NOT NULL constraint. */
+  countryCode: countryCodeField.default('IN'),
 });
 export type CreateCompanyInput = z.infer<typeof CreateCompanySchema>;
 
 /** Partial update: every field optional, at least one required. */
-export const UpdateCompanySchema = CreateCompanySchema.partial().refine(
-  (v) => Object.keys(v).length > 0,
-  'at least one field is required',
-);
+export const UpdateCompanySchema = CreateCompanySchema.partial()
+  .extend({
+    // No .default() here: in zod v4 a default inside partial() would apply to
+    // omitted keys and clobber the stored value on unrelated updates. Omitting
+    // the field leaves the column untouched; null is rejected (NOT NULL).
+    countryCode: countryCodeField.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required');
 export type UpdateCompanyInput = z.infer<typeof UpdateCompanySchema>;
 
 export type Company = {
@@ -178,27 +187,36 @@ const dealValue = z
   ])
   .transform((v) => String(v));
 
+/** ISO 4217 currency code, normalized to uppercase. */
+const dealCurrency = z
+  .string()
+  .trim()
+  .length(3)
+  .transform((s) => s.toUpperCase());
+
 export const CreateDealSchema = z.strictObject({
   title: z.string().trim().min(1).max(255),
   companyId: uuid.nullable().optional(),
   contactId: uuid.nullable().optional(),
   value: dealValue.nullable().optional(),
-  currency: z
-    .string()
-    .trim()
-    .length(3)
-    .transform((s) => s.toUpperCase())
-    .default('INR'),
+  currency: dealCurrency.default('INR'),
   stage: DealStageSchema.default('NEW'),
   probability: z.number().int().min(0).max(100).nullable().optional(),
   expectedCloseDate: dateString.nullable().optional(),
 });
 export type CreateDealInput = z.infer<typeof CreateDealSchema>;
 
-export const UpdateDealSchema = CreateDealSchema.partial().refine(
-  (v) => Object.keys(v).length > 0,
-  'at least one field is required',
-);
+/** Partial update: every field optional, at least one required. */
+export const UpdateDealSchema = CreateDealSchema.partial()
+  .extend({
+    // No .default() here: in zod v4 a default inside partial() would apply to
+    // omitted keys and clobber the stored currency/stage on unrelated updates
+    // (and even defeat the non-empty refine, since the injected keys count).
+    // Omitting the field leaves the column untouched.
+    currency: dealCurrency.optional(),
+    stage: DealStageSchema.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'at least one field is required');
 export type UpdateDealInput = z.infer<typeof UpdateDealSchema>;
 
 export type Deal = {

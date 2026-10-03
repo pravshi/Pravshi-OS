@@ -55,7 +55,7 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
           <DeleteDialog
             resourceName="activity"
             recordName={activity.subject}
-            onDelete={() => deleteActivityAction(activity.id)}
+            onDelete={deleteActivityAction.bind(null, activity.id)}
             redirectTo="/crm/activities"
           />
         )}
@@ -91,14 +91,11 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
             entityType={activity.entityType}
             entityId={activity.entityId}
             entityName={activity.entityName}
-            onSave={(input) => {
-              // The (entityType, entityId) link is immutable: strip it before
-              // the update, which rejects unknown keys at the strict boundary.
-              const { entityType: _unusedEt, entityId: _unusedEid, ...rest } = input;
-              void _unusedEt;
-              void _unusedEid;
-              return updateActivityAction(activity.id, rest);
-            }}
+            // The (entityType, entityId) link is immutable: UpdateActivitySchema is
+            // non-strict zod, so it strips those keys from the input at the
+            // parse boundary. A bound server-action reference is serializable;
+            // the inline closure this replaces 500'd the page under RSC.
+            onSave={updateActivityAction.bind(null, activity.id)}
           />
         </EditableSection>
       )}

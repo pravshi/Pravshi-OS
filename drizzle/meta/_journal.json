@@ -297,6 +297,14 @@
       "tag": "0040_pipeline_stage_membership_guard",
       "breakpoints": true,
       "hash": "8c132bcee9b126eb7e14f8543bef41ca59df3a0609f6baa1b2ad60df6c836391"
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790984135416,
+      "tag": "0041_invitation_role_lookup",
+      "breakpoints": true,
+      "hash": "9f4fa7cbae4101fdcd45bc97e6f5e7a621faef6d27e39d32a0d2ddaf4340490f"
     }
   ]
 }

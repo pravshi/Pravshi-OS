@@ -8,7 +8,7 @@ import { DeleteDialog } from '@/components/crm/delete-dialog';
 import { DealForm } from '@/components/crm/deal-form';
 import { ActivityTimeline } from '@/components/crm/activity-timeline';
 import { StageTransition } from '@/components/crm/stage-transition';
-import { isErrorEnvelope, contactDisplayName, type DealStage } from '@/components/crm/types';
+import { isErrorEnvelope, contactDisplayName } from '@/components/crm/types';
 import {
   DEAL_STAGE_LABELS,
   formatMoney,
@@ -85,7 +85,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <DeleteDialog
             resourceName="deal"
             recordName={deal.title}
-            onDelete={() => deleteDealAction(deal.id)}
+            onDelete={deleteDealAction.bind(null, deal.id)}
             redirectTo="/crm/deals"
           />
         )}
@@ -96,11 +96,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           <CardTitle>Pipeline</CardTitle>
         </CardHeader>
         <CardContent>
-          <StageTransition
-            deal={deal}
-            onTransition={(dealId, input: { stage: DealStage }) => updateDealAction(dealId, input)}
-            disabled={!perms.canEdit}
-          />
+          <StageTransition deal={deal} onTransition={updateDealAction} disabled={!perms.canEdit} />
         </CardContent>
       </Card>
 
@@ -163,7 +159,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                     email: c.email,
                   }))
             }
-            onSave={(input) => updateDealAction(deal.id, input)}
+            onSave={updateDealAction.bind(null, deal.id)}
           />
         </EditableSection>
       )}

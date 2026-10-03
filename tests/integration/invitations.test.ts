@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 import { createHash, randomBytes } from 'node:crypto';
+import { resolveRoleIds } from '@/lib/invitations/service';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 
 /**
  * Invitation flow integration tests — the full lifecycle against a real database.
@@ -544,5 +546,43 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       // Unknown hashes return no row at all — indistinguishable from nothing.
       expect(rows).toHaveLength(0);
     }
+  });
+
+  it('resolves a real roleIds array instead of 500ing on a malformed array literal', async () => {
+    // P0-3 Bug 1: resolveRoleIds() interpolated the JS array as a single bind
+    // parameter (`id = any(${roleIds}::uuid[])`), which Postgres rejected with
+    // 22P02 malformed array literal — so invitation creation ALWAYS 500'd. These
+    // run the real service code path through withAuthorizedDb, the same
+    // authorized-transaction shape the route uses. A two-element array is the
+    // minimal reproduction.
+    await expect(
+      withAuthorizedDb({ personId: adminA, orgId: orgA, aal: 'aal1' }, (tx) =>
+        resolveRoleIds(tx, orgA, [roleEmployeeA, roleAdminA]),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('lets an admin resolve a role they do not hold', async () => {
+    // P0-3 Bug 2: the old raw SELECT ran under roles_select_mine RLS, which
+    // shows a person only the roles they hold. adminA holds ADMIN only, so
+    // inviting into EMPLOYEE returned 0 rows and wrongly failed ROLE_NOT_FOUND.
+    // invitation_role_lookup() is SECURITY DEFINER: any live role of the org is
+    // invitable, whether or not the inviter holds it.
+    await expect(
+      withAuthorizedDb({ personId: adminA, orgId: orgA, aal: 'aal1' }, (tx) =>
+        resolveRoleIds(tx, orgA, [roleEmployeeA]),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still fails closed on a role id that does not exist', async () => {
+    // The SECURITY DEFINER lookup must not become a rubber stamp: a role id that
+    // names nothing live in the organization still raises ROLE_NOT_FOUND.
+    const ghost = '00000000-0000-4000-8000-000000000000';
+    await expect(
+      withAuthorizedDb({ personId: adminA, orgId: orgA, aal: 'aal1' }, (tx) =>
+        resolveRoleIds(tx, orgA, [roleEmployeeA, ghost]),
+      ),
+    ).rejects.toMatchObject({ name: 'InvitationError', code: 'ROLE_NOT_FOUND' });
   });
 });
