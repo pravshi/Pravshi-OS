@@ -5,15 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorMessage } from '@/components/crm/error-message';
 import { EditableSection } from '@/components/crm/editable-section';
 import { DeleteDialog } from '@/components/crm/delete-dialog';
+import { SubtaskList } from '@/components/work/subtask-list';
+import { TaskReminders } from '@/components/work/task-reminders';
 import { DetailField, DetailLink } from '@/components/crm/detail-fields';
 import { formatDate, formatDateTime } from '@/components/crm/format';
 import { deleteTaskAction, getTaskAction, updateTaskAction } from '../../_actions';
+import { listSubtasksAction } from '../../subtasks/actions';
 import { WORK_PERMISSIONS, getWorkPermissions } from '../../_permissions';
 import {
   TASK_PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   assigneeDisplayName,
   isErrorEnvelope,
+  toRows,
   type PersonOption,
 } from '../../_types';
 import { EditTaskForm } from '../../_components/EditTaskForm';
@@ -47,6 +51,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const canEdit = held.has(WORK_PERMISSIONS.tasks.edit);
   const canDelete = held.has(WORK_PERMISSIONS.tasks.delete);
   const canAssign = held.has(WORK_PERMISSIONS.tasks.assign);
+  const canCreateSubtasks = held.has(WORK_PERMISSIONS.tasks.create);
+
+  // Subtasks load after the task itself; a permission failure here degrades to
+  // an empty list (SubtaskList gates its create/toggle forms from props).
+  const subtasksRes = await listSubtasksAction(task.id, {});
+  const initialSubtasks = isErrorEnvelope(subtasksRes) ? [] : toRows(subtasksRes);
 
   // Keep the current assignee selectable even when they appear on no other
   // visible task.
@@ -117,6 +127,15 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           </dl>
         </CardContent>
       </Card>
+
+      <SubtaskList
+        parentTaskId={task.id}
+        initialSubtasks={initialSubtasks}
+        canCreate={canCreateSubtasks}
+        canToggle={canEdit}
+      />
+
+      <TaskReminders taskId={task.id} canSet={canEdit} />
 
       {canEdit && (
         <EditableSection buttonLabel="Edit task">

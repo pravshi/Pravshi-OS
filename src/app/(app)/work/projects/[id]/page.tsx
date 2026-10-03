@@ -3,7 +3,6 @@ import { requirePagePermission } from '@/lib/authz/page';
 import { Badge } from '@/components/ui/badge';
 import { ErrorMessage } from '@/components/crm/error-message';
 import { EditableSection } from '@/components/crm/editable-section';
-import { DeleteDialog } from '@/components/crm/delete-dialog';
 import {
   createTaskAction,
   deleteProjectAction,
@@ -21,6 +20,10 @@ import {
 } from '../../_types';
 import { TaskBoard } from '../../_components/TaskBoard';
 import { EditProjectForm } from '../../_components/EditProjectForm';
+import { ArchiveProjectDialog } from '../../_components/ArchiveProjectDialog';
+import { UnarchiveProjectButton } from '../../_components/UnarchiveProjectButton';
+import { ProjectMembers } from '../../_components/ProjectMembers';
+import { unarchiveProjectAction } from '../../_components/unarchive-project.action';
 
 /**
  * /work/projects/[id] — the task kanban board. projects.view to see; task
@@ -53,6 +56,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const canEditProject = held.has(WORK_PERMISSIONS.projects.edit);
   const canDeleteProject = held.has(WORK_PERMISSIONS.projects.delete);
+  const canManageMembers = held.has(WORK_PERMISSIONS.projects.manageMembers);
   const canMoveTasks = held.has(WORK_PERMISSIONS.tasks.edit);
   const canCreateTasks = held.has(WORK_PERMISSIONS.tasks.create);
   const canAssignTasks = held.has(WORK_PERMISSIONS.tasks.assign);
@@ -89,14 +93,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <p className="mt-1 max-w-2xl text-sm text-ink-muted">{project.description}</p>
           )}
         </div>
-        {canDeleteProject && (
-          <DeleteDialog
-            resourceName="project"
-            recordName={project.name}
-            onDelete={deleteProjectAction.bind(null, project.id)}
-            redirectTo="/work"
-          />
-        )}
+        {canDeleteProject &&
+          (project.isArchived ? (
+            <UnarchiveProjectButton onUnarchive={unarchiveProjectAction.bind(null, project.id)} />
+          ) : (
+            <ArchiveProjectDialog
+              recordName={project.name}
+              onArchive={deleteProjectAction.bind(null, project.id)}
+            />
+          ))}
       </div>
 
       {canEditProject && (
@@ -109,6 +114,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </div>
         </EditableSection>
       )}
+
+      <ProjectMembers
+        projectId={project.id}
+        candidatePeople={assignees}
+        canManage={canManageMembers}
+      />
 
       {tasksUnavailable ? (
         <p className="rounded-lg border border-line bg-ground px-4 py-3 text-sm text-ink-muted">
