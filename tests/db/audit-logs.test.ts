@@ -997,7 +997,7 @@ describe('the rest of the model is untouched', () => {
     // contact_links (0035) — closing the set at fourteen. The Phase 3 sales-pipeline
     // migration (0037) adds pipelines, pipeline_stages and deal_stage_history —
     // closing the set at seventeen. The Phase 5 workflow-engine migration (0044)
-    // adds workflows and workflow_executions — closing the set at nineteen.
+    // adds workflows and workflow_executions — closing the set at twenty-three.
     // (workflow_execution_steps carry no audit trigger by design.)
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
