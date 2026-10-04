@@ -110,14 +110,14 @@ function sanitizeStoredMessage(message: string): string {
 }
 
 /** Normalizes a resolveTemplates throw into a recorded failure. */
-function templateFailure(error: unknown): { code: string; message: string } {
+function templateFailure(error: unknown): { errorCode: string; errorMessage: string } {
   if (error instanceof Error && error.message.startsWith('INVALID_REQUEST:')) {
     return {
-      code: 'INVALID_REQUEST',
-      message: error.message.slice('INVALID_REQUEST:'.length).trim(),
+      errorCode: 'INVALID_REQUEST',
+      errorMessage: error.message.slice('INVALID_REQUEST:'.length).trim(),
     };
   }
-  return { code: 'INTERNAL', message: 'failed to resolve action templates' };
+  return { errorCode: 'INTERNAL', errorMessage: 'failed to resolve action templates' };
 }
 
 // ── SECURITY DEFINER record helpers (D7) ──────────────────────────────────────
@@ -299,6 +299,7 @@ function toTaskSnapshot(task: Task): Record<string, unknown> {
     assignee_person_id: task.assigneePersonId,
     project_id: task.projectId,
     due_date: task.dueDate,
+    title: task.title,
   };
 }
 
@@ -430,8 +431,8 @@ async function processWorkflow(
           executionId,
           'FAILED',
           { steps: completedSteps, failedStep: i, decision: 'template_failed' },
-          failure.code,
-          failure.message,
+          failure.errorCode,
+          failure.errorMessage,
         );
         return executionId;
       }

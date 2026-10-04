@@ -513,7 +513,7 @@ begin
   if v_error_code is not null and length(v_error_code) > 64 then
     raise exception 'error_code must be 1..64 characters' using errcode = '22001';
   end if;
-  v_error_message := nullif(btrim(replace(coalesce(p_error_message, ''), chr(0), '')), '');
+  v_error_message := nullif(btrim(coalesce(p_error_message, '')), '');
   if v_error_message is not null and length(v_error_message) > 2000 then
     raise exception 'error_message must be at most 2000 characters' using errcode = '22001';
   end if;
@@ -685,7 +685,7 @@ begin
   if v_error_code is not null and length(v_error_code) > 64 then
     raise exception 'error_code must be 1..64 characters' using errcode = '22001';
   end if;
-  v_error_message := nullif(btrim(replace(coalesce(p_error_message, ''), chr(0), '')), '');
+  v_error_message := nullif(btrim(coalesce(p_error_message, '')), '');
   if v_error_message is not null and length(v_error_message) > 2000 then
     raise exception 'error_message must be at most 2000 characters' using errcode = '22001';
   end if;

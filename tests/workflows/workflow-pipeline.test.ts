@@ -6,18 +6,17 @@ import {
   ALL_WORKFLOW_PERMS,
   listSteps,
   mkOrg,
-  mkPerson,
   mkProject,
-  mkRoleFor,
   mkTask,
   mkWorkflow,
   waitForExecution,
 } from './helpers';
+import { mkAccount, headersFor } from '../authz/fixtures';
 import '@/lib/workflows/triggers';
 import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
 import { executeWorkflowManual } from '@/lib/workflows/engine';
 import { createTask } from '@/lib/work/tasks';
-import type { Authorization } from '@/lib/authz/require-permission';
+import { requirePermission, type Authorization } from '@/lib/authz/require-permission';
 
 /**
  * Phase 5 — full workflow-engine pipeline DB tests (A8). Runs on CI against
@@ -52,15 +51,24 @@ import type { Authorization } from '@/lib/authz/require-permission';
 const ready = DB_READY;
 const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 
-/** Cast, not constructed: the engine and services only read auth.ctx (+requestId for errors). */
-const authFor = (personId: string, orgId: string): Authorization =>
-  ({ ctx: { personId, orgId }, requestId: `wf-pipe-${CODE}` }) as unknown as Authorization;
+/**
+ * Real Authorization minted by requirePermission() through a real Better Auth
+ * session. The engine's buildSnapshot calls getTask → assertTargetAffected →
+ * assertAuthorization, which rejects the cast fake object the test used to use.
+ * Request workflows.view (every test actor holds it); the engine only needs
+ * the Authorization to be genuine, not a specific permission.
+ */
+const authFor = (cookie: string) => async (): Promise<Authorization> =>
+  (await requirePermission(headersFor(cookie), { permission: 'workflows.view' })) as Authorization;
 
 let orgA = '';
 let orgB = '';
 let alice = ''; // org A, all workflow perms
 let bob = ''; // org B, all workflow perms
 let dave = ''; // org A, workflows.view only (no execute)
+let aliceCookie = '';
+let bobCookie = '';
+let daveCookie = '';
 let projectA = '';
 let projectB = '';
 
@@ -87,21 +95,60 @@ async function countExecutions(workflowId: string, dedupKey: string): Promise<nu
   return Number(rows[0]!.n);
 }
 
+/** Create a role with grants, returning its ID (no person assignment — mkAccount takes customRoles). */
+async function mkRole(owner: Pool, org: string, key: string, permissions: readonly string[]): Promise<string> {
+  const roleKey = key.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+  const role = (
+    await owner.query<{ id: string }>(
+      `insert into public.roles (org_id, key, name) values ($1,$2,$3) returning id`,
+      [org, roleKey, `WF ${roleKey}`],
+    )
+  ).rows[0]!.id;
+  for (const permission of permissions) {
+    const { rowCount } = await owner.query(
+      `insert into public.role_permissions (role_id, permission_id, scope)
+       select $1, p.id, 'GLOBAL'::public.access_scope from public.permissions p where p.key = $2`,
+      [role, permission],
+    );
+    if (rowCount !== 1) {
+      throw new Error(`permission key ${permission} is not in the catalogue — cannot grant it`);
+    }
+  }
+  return role;
+}
+
+async function mkDept(owner: Pool, org: string, code: string): Promise<string> {
+  return (
+    await owner.query<{ id: string }>(
+      `insert into public.departments (org_id, code, name) values ($1,$2,$3) returning id`,
+      [org, code, `WF Dept ${code}`],
+    )
+  ).rows[0]!.id;
+}
+
 beforeAll(async () => {
   if (!ready) return;
   orgA = await mkOrg(owner, `pipe-a-${CODE}`);
   orgB = await mkOrg(owner, `pipe-b-${CODE}`);
-  alice = await mkPerson(owner, orgA, 'Alice Pipe');
-  bob = await mkPerson(owner, orgB, 'Bob Pipe');
-  dave = await mkPerson(owner, orgA, 'Dave Pipe');
-  await mkRoleFor(owner, orgA, alice, `WF_PIPE_${CODE}`, ALL_WORKFLOW_PERMS);
+  const deptA = await mkDept(owner, orgA, `D${CODE}A`);
+  const deptB = await mkDept(owner, orgB, `D${CODE}B`);
+  // Roles first (no assignment); mkAccount assigns via customRoles.
+  const pipeRoleA = await mkRole(owner, orgA, `WF_PIPE_${CODE}`, ALL_WORKFLOW_PERMS);
   // D2: workflow actions execute under the trigger actor's own Authorization,
-  // so alice also needs the RLS permissions the action executors' service
+  // so the actor also needs the RLS permissions the action executors' service
   // calls require (projects.view for the project write-visibility probe,
-  // tasks.create for the work_tasks insert policy).
-  await mkRoleFor(owner, orgA, alice, `WF_ACT_${CODE}`, ['projects.view', 'tasks.create']);
-  await mkRoleFor(owner, orgB, bob, `WF_PIPE_${CODE}`, ALL_WORKFLOW_PERMS);
-  await mkRoleFor(owner, orgA, dave, `WF_VIEW_${CODE}`, ['workflows.view']);
+  // tasks.view for the engine's source-record snapshot, tasks.create for the
+  // work_tasks insert policy). Both orgs need it (bob fires org-B workflows).
+  const actRoleA = await mkRole(owner, orgA, `WF_ACT_${CODE}`, ['projects.view', 'tasks.view', 'tasks.create']);
+  const pipeRoleB = await mkRole(owner, orgB, `WF_PIPE_${CODE}`, ALL_WORKFLOW_PERMS);
+  const actRoleB = await mkRole(owner, orgB, `WF_ACT_${CODE}`, ['projects.view', 'tasks.view', 'tasks.create']);
+  const viewRoleA = await mkRole(owner, orgA, `WF_VIEW_${CODE}`, ['workflows.view']);
+  const aliceAcct = await mkAccount(owner, { org: orgA, dept: deptA, run: CODE, label: 'AlicePipe', customRoles: [pipeRoleA, actRoleA] });
+  const bobAcct = await mkAccount(owner, { org: orgB, dept: deptB, run: CODE, label: 'BobPipe', customRoles: [pipeRoleB, actRoleB] });
+  const daveAcct = await mkAccount(owner, { org: orgA, dept: deptA, run: CODE, label: 'DavePipe', customRoles: [viewRoleA] });
+  alice = aliceAcct.personId; aliceCookie = aliceAcct.cookie;
+  bob = bobAcct.personId; bobCookie = bobAcct.cookie;
+  dave = daveAcct.personId; daveCookie = daveAcct.cookie;
   projectA = await mkProject(owner, orgA, `proj-a-${CODE}`);
   projectB = await mkProject(owner, orgB, `proj-b-${CODE}`);
 });
@@ -116,6 +163,8 @@ describe.skipIf(!ready)('workflow pipeline: full success path', () => {
     const wf = await mkWorkflow(owner, orgA, {
       name: `success-${CODE}`,
       trigger: taskCreatedTrigger(),
+      // Prevent infinite loop: the create_task action's output must not re-trigger.
+      conditions: [{ field: 'task.title', operator: 'not_contains', value: 'Auto:' }],
       actions: [
         {
           type: 'create_task',
@@ -125,7 +174,7 @@ describe.skipIf(!ready)('workflow pipeline: full success path', () => {
       createdBy: alice,
     });
 
-    const auth = authFor(alice, orgA);
+    const auth = await authFor(aliceCookie)();
     const event = {
       type: 'task.created' as const,
       entityType: 'task' as const,
@@ -173,7 +222,7 @@ describe.skipIf(!ready)('workflow pipeline: full success path', () => {
       createdBy: alice,
     });
 
-    const auth = authFor(alice, orgA);
+    const auth = await authFor(aliceCookie)();
     const exec = await dispatchAndWait(auth, wf.id, {
       type: 'task.created',
       entityType: 'task',
@@ -200,7 +249,7 @@ describe.skipIf(!ready)('workflow pipeline: idempotency (A8 flagged)', () => {
       createdBy: alice,
     });
 
-    const auth = authFor(alice, orgA);
+    const auth = await authFor(aliceCookie)();
     const event = {
       type: 'task.created' as const,
       entityType: 'task' as const,
@@ -246,7 +295,7 @@ describe.skipIf(!ready)('workflow pipeline: tenant isolation', () => {
       dedupKey: buildDedupKey('task', taskB),
       payload: {},
     };
-    const bExec = await dispatchAndWait(authFor(bob, orgB), wfB.id, bEvent);
+    const bExec = await dispatchAndWait(await authFor(bobCookie)(), wfB.id, bEvent);
     expect(bExec.status).toBe('SUCCEEDED');
 
     await new Promise((r) => setTimeout(r, 2000));
@@ -260,7 +309,7 @@ describe.skipIf(!ready)('workflow pipeline: tenant isolation', () => {
       dedupKey: buildDedupKey('task', taskA),
       payload: {},
     };
-    const aExec = await dispatchAndWait(authFor(alice, orgA), wfA.id, aEvent);
+    const aExec = await dispatchAndWait(await authFor(aliceCookie)(), wfA.id, aEvent);
     expect(aExec.status).toBe('SUCCEEDED');
     expect(await countExecutions(wfB.id, `${wfB.id}:${aEvent.dedupKey}`)).toBe(0);
   });
@@ -280,7 +329,7 @@ describe.skipIf(!ready)('workflow pipeline: disabled workflows never run', () =>
       });
 
       const dedupKey = buildDedupKey('task', sourceTask, status);
-      await dispatchWorkflowEvent(authFor(alice, orgA), {
+      await dispatchWorkflowEvent(await authFor(aliceCookie)(), {
         type: 'task.created',
         entityType: 'task',
         entityId: sourceTask,
@@ -309,7 +358,7 @@ describe.skipIf(!ready)('workflow pipeline: failure recording (A8 flagged)', () 
       createdBy: alice,
     });
 
-    const exec = await dispatchAndWait(authFor(alice, orgA), wf.id, {
+    const exec = await dispatchAndWait(await authFor(aliceCookie)(), wf.id, {
       type: 'task.created',
       entityType: 'task',
       entityId: sourceTask,
@@ -336,7 +385,7 @@ describe.skipIf(!ready)('workflow pipeline: failure recording (A8 flagged)', () 
     });
     const ghostTask = '99999999-9999-4999-8999-999999999999';
 
-    const exec = await dispatchAndWait(authFor(alice, orgA), wf.id, {
+    const exec = await dispatchAndWait(await authFor(aliceCookie)(), wf.id, {
       type: 'task.created',
       entityType: 'task',
       entityId: ghostTask,
@@ -359,7 +408,7 @@ describe.skipIf(!ready)('workflow pipeline: manual execute gate (A8 flagged)', (
       actions: [{ type: 'create_task', params: { title: 'manual x', projectId: projectA } }],
       createdBy: alice,
     });
-    await expect(executeWorkflowManual(authFor(dave, orgA), wf.id)).rejects.toThrow(/FORBIDDEN/);
+    await expect(executeWorkflowManual(await authFor(daveCookie)(), wf.id)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('INVALID_REQUEST for a non-ACTIVE workflow', async () => {
@@ -370,15 +419,15 @@ describe.skipIf(!ready)('workflow pipeline: manual execute gate (A8 flagged)', (
       actions: [{ type: 'create_task', params: { title: 'manual y', projectId: projectA } }],
       createdBy: alice,
     });
-    await expect(executeWorkflowManual(authFor(alice, orgA), wf.id)).rejects.toThrow(
+    await expect(executeWorkflowManual(await authFor(aliceCookie)(), wf.id)).rejects.toThrow(
       /INVALID_REQUEST: only ACTIVE workflows can be executed/,
     );
   });
 
   it('NOT_FOUND for a missing or foreign workflow id', async () => {
     await expect(
-      executeWorkflowManual(authFor(alice, orgA), '99999999-9999-4999-8999-999999999999'),
-    ).rejects.toThrow(/NOT_FOUND/);
+      executeWorkflowManual(await authFor(aliceCookie)(), '99999999-9999-4999-8999-999999999999'),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('ACTIVE manual run executes exactly once and SUCCEEDs', async () => {
@@ -392,7 +441,7 @@ describe.skipIf(!ready)('workflow pipeline: manual execute gate (A8 flagged)', (
     });
 
     // executeWorkflowManual awaits the pipeline: no polling needed.
-    const { executionId } = await executeWorkflowManual(authFor(alice, orgA), wf.id, {
+    const { executionId } = await executeWorkflowManual(await authFor(aliceCookie)(), wf.id, {
       input: { label: 'hello' },
     });
     expect(executionId).toMatch(/^[0-9a-f-]{36}$/i);
@@ -413,7 +462,7 @@ describe.skipIf(!ready)('workflow pipeline: manual execute gate (A8 flagged)', (
     expect(rows[0]!.result_summary).toMatchObject({ steps: 0 });
 
     // Manual runs carry a fresh-uuid dedup key: re-running executes again.
-    const again = await executeWorkflowManual(authFor(alice, orgA), wf.id, {
+    const again = await executeWorkflowManual(await authFor(aliceCookie)(), wf.id, {
       input: { label: 'hello' },
     });
     expect(again.executionId).not.toBe(executionId);
@@ -434,7 +483,7 @@ describe.skipIf(!ready)('workflow pipeline: dispatch never breaks the caller (D3
     // The pipeline will fail (NOT_FOUND snapshot) — but the dispatch itself
     // is awaited inline (D1) and must resolve, never reject, to the caller.
     await expect(
-      dispatchWorkflowEvent(authFor(alice, orgA), {
+      dispatchWorkflowEvent(await authFor(aliceCookie)(), {
         type: 'task.created',
         entityType: 'task',
         entityId: ghostTask,
@@ -466,7 +515,7 @@ describe.skipIf(!ready)('workflow engine: D4 chaining bound (real engine)', () =
       createdBy: alice,
     });
 
-    const auth = authFor(alice, orgA);
+    const auth = await authFor(aliceCookie)();
     // Seed through the REAL service so its post-commit emission enters the
     // engine — this is the production chaining path (service → dispatch →
     // engine → service → dispatch …). Dispatch is awaited inline (D1), so

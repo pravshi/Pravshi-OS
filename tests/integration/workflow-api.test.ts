@@ -180,23 +180,28 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
   beforeAll(async () => {
     orgA = await F().mkOrg(owner, `wf-api-a-${RUN}`);
     orgB = await F().mkOrg(owner, `wf-api-b-${RUN}`);
-    const deptA = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AA`);
-    const deptB = await F().mkDept(owner, orgB, `${RUN.toUpperCase()}_AB`);
-    const deptV = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AV`);
-    const deptS = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AS`);
+    const deptA = await F().mkDept(owner, orgA, `D${RUN.toUpperCase()}_AA`);
+    const deptB = await F().mkDept(owner, orgB, `D${RUN.toUpperCase()}_AB`);
+    const deptV = await F().mkDept(owner, orgA, `D${RUN.toUpperCase()}_AV`);
+    const deptS = await F().mkDept(owner, orgA, `D${RUN.toUpperCase()}_AS`);
     const roleA = await F().mkCustomRole(
       owner,
       orgA,
-      `${RUN}_AR`,
+      `W${RUN.toUpperCase()}_AR`,
       ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
     );
     const roleB = await F().mkCustomRole(
       owner,
       orgB,
-      `${RUN}_BR`,
+      `W${RUN.toUpperCase()}_BR`,
       ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
     );
-    const roleV = await F().mkCustomRole(owner, orgA, `${RUN}_VR`, [['workflows.view', 'GLOBAL']]);
+    const roleV = await F().mkCustomRole(
+      owner,
+      orgA,
+      `W${RUN.toUpperCase()}_VR`,
+      [['workflows.view', 'GLOBAL']],
+    );
     alice = await F().mkAccount(owner, {
       org: orgA,
       dept: deptA,

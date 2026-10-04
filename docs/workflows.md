@@ -92,7 +92,7 @@ groups.
 | Prefix | Fields |
 |---|---|
 | `deal.` | `title`, `value` (numeric), `stage`, `probability` (0–100), `is_won`, `is_lost`, `owner_person_id`, `pipeline_id` |
-| `task.` | `status`, `priority`, `assignee_person_id`, `project_id`, `due_date` |
+| `task.` | `status`, `priority`, `assignee_person_id`, `project_id`, `due_date`, `title` |
 | `project.` | `name`, `is_archived` |
 | `event.` | `actor_person_id` (who caused the event), `type` |
 

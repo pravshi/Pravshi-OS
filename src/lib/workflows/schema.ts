@@ -177,6 +177,7 @@ export const CONDITION_FIELD_TYPES: Record<string, ConditionFieldKind> = {
   'task.assignee_person_id': 'uuid',
   'task.project_id': 'uuid',
   'task.due_date': 'date',
+  'task.title': 'text',
   'project.name': 'text',
   'project.is_archived': 'boolean',
   'event.actor_person_id': 'uuid',
