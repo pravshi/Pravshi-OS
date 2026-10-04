@@ -96,7 +96,12 @@ async function countExecutions(workflowId: string, dedupKey: string): Promise<nu
 }
 
 /** Create a role with grants, returning its ID (no person assignment — mkAccount takes customRoles). */
-async function mkRole(owner: Pool, org: string, key: string, permissions: readonly string[]): Promise<string> {
+async function mkRole(
+  owner: Pool,
+  org: string,
+  key: string,
+  permissions: readonly string[],
+): Promise<string> {
   const roleKey = key.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
   const role = (
     await owner.query<{ id: string }>(
@@ -139,16 +144,45 @@ beforeAll(async () => {
   // calls require (projects.view for the project write-visibility probe,
   // tasks.view for the engine's source-record snapshot, tasks.create for the
   // work_tasks insert policy). Both orgs need it (bob fires org-B workflows).
-  const actRoleA = await mkRole(owner, orgA, `WF_ACT_${CODE}`, ['projects.view', 'tasks.view', 'tasks.create']);
+  const actRoleA = await mkRole(owner, orgA, `WF_ACT_${CODE}`, [
+    'projects.view',
+    'tasks.view',
+    'tasks.create',
+  ]);
   const pipeRoleB = await mkRole(owner, orgB, `WF_PIPE_${CODE}`, ALL_WORKFLOW_PERMS);
-  const actRoleB = await mkRole(owner, orgB, `WF_ACT_${CODE}`, ['projects.view', 'tasks.view', 'tasks.create']);
+  const actRoleB = await mkRole(owner, orgB, `WF_ACT_${CODE}`, [
+    'projects.view',
+    'tasks.view',
+    'tasks.create',
+  ]);
   const viewRoleA = await mkRole(owner, orgA, `WF_VIEW_${CODE}`, ['workflows.view']);
-  const aliceAcct = await mkAccount(owner, { org: orgA, dept: deptA, run: CODE, label: 'AlicePipe', customRoles: [pipeRoleA, actRoleA] });
-  const bobAcct = await mkAccount(owner, { org: orgB, dept: deptB, run: CODE, label: 'BobPipe', customRoles: [pipeRoleB, actRoleB] });
-  const daveAcct = await mkAccount(owner, { org: orgA, dept: deptA, run: CODE, label: 'DavePipe', customRoles: [viewRoleA] });
-  alice = aliceAcct.personId; aliceCookie = aliceAcct.cookie;
-  bob = bobAcct.personId; bobCookie = bobAcct.cookie;
-  dave = daveAcct.personId; daveCookie = daveAcct.cookie;
+  const aliceAcct = await mkAccount(owner, {
+    org: orgA,
+    dept: deptA,
+    run: CODE,
+    label: 'AlicePipe',
+    customRoles: [pipeRoleA, actRoleA],
+  });
+  const bobAcct = await mkAccount(owner, {
+    org: orgB,
+    dept: deptB,
+    run: CODE,
+    label: 'BobPipe',
+    customRoles: [pipeRoleB, actRoleB],
+  });
+  const daveAcct = await mkAccount(owner, {
+    org: orgA,
+    dept: deptA,
+    run: CODE,
+    label: 'DavePipe',
+    customRoles: [viewRoleA],
+  });
+  alice = aliceAcct.personId;
+  aliceCookie = aliceAcct.cookie;
+  bob = bobAcct.personId;
+  bobCookie = bobAcct.cookie;
+  dave = daveAcct.personId;
+  daveCookie = daveAcct.cookie;
   projectA = await mkProject(owner, orgA, `proj-a-${CODE}`);
   projectB = await mkProject(owner, orgB, `proj-b-${CODE}`);
 });
@@ -408,7 +442,9 @@ describe.skipIf(!ready)('workflow pipeline: manual execute gate (A8 flagged)', (
       actions: [{ type: 'create_task', params: { title: 'manual x', projectId: projectA } }],
       createdBy: alice,
     });
-    await expect(executeWorkflowManual(await authFor(daveCookie)(), wf.id)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(executeWorkflowManual(await authFor(daveCookie)(), wf.id)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
   });
 
   it('INVALID_REQUEST for a non-ACTIVE workflow', async () => {

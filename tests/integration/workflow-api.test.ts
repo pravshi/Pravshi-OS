@@ -196,12 +196,9 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
       `W${RUN.toUpperCase()}_BR`,
       ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
     );
-    const roleV = await F().mkCustomRole(
-      owner,
-      orgA,
-      `W${RUN.toUpperCase()}_VR`,
-      [['workflows.view', 'GLOBAL']],
-    );
+    const roleV = await F().mkCustomRole(owner, orgA, `W${RUN.toUpperCase()}_VR`, [
+      ['workflows.view', 'GLOBAL'],
+    ]);
     alice = await F().mkAccount(owner, {
       org: orgA,
       dept: deptA,
