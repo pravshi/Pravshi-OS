@@ -585,5 +585,9 @@ describe.skipIf(!ready)('workflow engine: D4 chaining bound (real engine)', () =
     // The seed task itself is untouched by the workflow (it was the trigger,
     // not an action output).
     expect(seed.title).toBe(seedTitle);
-  });
+    // Heavy real-DB chain (5 full engine executions, ~100 queries): the
+    // 30s default is legitimate for unit-speed tests, but a cold Neon branch
+    // legitimately exceeds it. The D4 guard itself is proven — this only
+    // budgets the branch's latency.
+  }, 90_000);
 });

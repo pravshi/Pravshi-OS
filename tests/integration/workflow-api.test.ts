@@ -188,7 +188,17 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
       owner,
       orgA,
       `W${RUN.toUpperCase()}_AR`,
-      ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
+      [
+        ...ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
+        // D2: workflow actions execute under the trigger actor's own
+        // Authorization, so alice (the execute-path actor) also needs the
+        // work-module perms the create_task action's service call requires
+        // (projects.view for the write-visibility probe, tasks.view for the
+        // source-record snapshot, tasks.create for the work_tasks insert).
+        ['projects.view', 'GLOBAL'],
+        ['tasks.view', 'GLOBAL'],
+        ['tasks.create', 'GLOBAL'],
+      ],
     );
     const roleB = await F().mkCustomRole(
       owner,
@@ -395,8 +405,13 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
     expect(await codeOf(S().createWorkflow(await authV('workflows.view'), input))).toBe(
       'FORBIDDEN',
     );
-    // Stranger holds nothing: even listing is 403.
-    expect(await codeOf(S().listWorkflows(await authS('workflows.view')))).toBe('FORBIDDEN');
+    // Stranger holds nothing: even listing is 403. Note: authS() itself throws
+    // the AuthorizationError (requirePermission rejects during argument
+    // evaluation, before the service is reached), so the entire expression
+    // must sit inside the closure for codeOf/outcomeOf to capture it.
+    expect(
+      await codeOf((async () => S().listWorkflows(await authS('workflows.view')))()),
+    ).toBe('FORBIDDEN');
     // No session at all: 401.
     const noAuth = await F().outcomeOf(
       authz!.requirePermission(F().headersFor(''), { permission: 'workflows.view' }),

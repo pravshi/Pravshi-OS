@@ -503,7 +503,9 @@ export const CreateWorkflowSchema = z.strictObject({
   description: optionalText(4000),
   trigger: TriggerConfigSchema,
   conditions: conditionTreeSchema().default([]),
-  actions: z.array(ActionConfigSchema).min(1, 'at least one action is required').max(20),
+  // DRAFT is "being built": empty action lists are legal at create time;
+  // activation-time validation enforces semantic completeness instead.
+  actions: z.array(ActionConfigSchema).max(20),
 });
 export type CreateWorkflowInput = z.infer<typeof CreateWorkflowSchema>;
 
@@ -514,6 +516,7 @@ export const UpdateWorkflowSchema = z.strictObject({
   description: optionalText(4000),
   trigger: TriggerConfigSchema.optional(),
   conditions: conditionTreeSchema().optional(),
-  actions: z.array(ActionConfigSchema).min(1, 'at least one action is required').max(20).optional(),
+  // Same as create: empty action lists are legal while DRAFT.
+  actions: z.array(ActionConfigSchema).max(20).optional(),
 });
 export type UpdateWorkflowInput = z.infer<typeof UpdateWorkflowSchema>;
