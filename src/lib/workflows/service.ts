@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { z, ZodError, type ZodType } from 'zod';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
+import { AuthorizationError } from '@/lib/authz/errors';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { executeWorkflowManual } from './engine';
 import {
@@ -69,6 +70,23 @@ function invalidWorkflowConflict(error: unknown): never {
     throw new Error('INVALID_REQUEST: a workflow with this name already exists');
   }
   throw error;
+}
+
+/**
+ * Check that the caller holds a workflow permission, before validating input.
+ * This ensures unauthorized callers get FORBIDDEN (not INVALID_REQUEST) when
+ * they lack the permission, matching the auth-gate test expectations.
+ */
+async function requireWorkflowPermission(auth: Authorization, permission: string): Promise<void> {
+  const check = await withAuthorizedDb(auth.ctx, (tx) =>
+    tx.execute<{ ok: boolean }>(sql`select authz.has(${permission}) as ok`),
+  );
+  if (check.rows[0]?.ok !== true) {
+    throw new AuthorizationError('FORBIDDEN', {
+      requestId: auth.requestId,
+      reason: 'PERMISSION_DENIED',
+    });
+  }
 }
 
 // ── Query schemas ─────────────────────────────────────────────────────────────
@@ -323,6 +341,7 @@ export async function getWorkflow(auth: Authorization, id: string): Promise<Work
 // ── Mutations ─────────────────────────────────────────────────────────────────
 
 export async function createWorkflow(auth: Authorization, input: unknown): Promise<Workflow> {
+  await requireWorkflowPermission(auth, 'workflows.create');
   const data: CreateWorkflowInput = parseRequest(CreateWorkflowSchema, input);
   let id: string;
   try {
@@ -377,6 +396,7 @@ export async function updateWorkflow(
   id: string,
   input: unknown,
 ): Promise<Workflow> {
+  await requireWorkflowPermission(auth, 'workflows.edit');
   const data = parseRequest(UpdateWorkflowSchema, input);
   const existing = await getWorkflow(auth, id);
 
@@ -456,6 +476,7 @@ export async function updateWorkflow(
  * with 'workflow' → public.workflows).
  */
 export async function deleteWorkflow(auth: Authorization, id: string): Promise<void> {
+  await requireWorkflowPermission(auth, 'workflows.delete');
   const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
     const probe = await tx.execute<{ id: string }>(sql`
       update public.workflows w
@@ -526,6 +547,7 @@ async function setWorkflowStatus(
 }
 
 export async function activateWorkflow(auth: Authorization, id: string): Promise<Workflow> {
+  await requireWorkflowPermission(auth, 'workflows.activate');
   const workflow = await getWorkflow(auth, id);
   if (workflow.status !== 'DRAFT' && workflow.status !== 'PAUSED') {
     throw new Error(
@@ -539,6 +561,7 @@ export async function activateWorkflow(auth: Authorization, id: string): Promise
 }
 
 export async function pauseWorkflow(auth: Authorization, id: string): Promise<Workflow> {
+  await requireWorkflowPermission(auth, 'workflows.activate');
   const workflow = await getWorkflow(auth, id);
   if (workflow.status !== 'ACTIVE') {
     throw new Error(
