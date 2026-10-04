@@ -184,22 +184,17 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
     const deptB = await F().mkDept(owner, orgB, `D${RUN.toUpperCase()}_AB`);
     const deptV = await F().mkDept(owner, orgA, `D${RUN.toUpperCase()}_AV`);
     const deptS = await F().mkDept(owner, orgA, `D${RUN.toUpperCase()}_AS`);
-    const roleA = await F().mkCustomRole(
-      owner,
-      orgA,
-      `W${RUN.toUpperCase()}_AR`,
-      [
-        ...ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
-        // D2: workflow actions execute under the trigger actor's own
-        // Authorization, so alice (the execute-path actor) also needs the
-        // work-module perms the create_task action's service call requires
-        // (projects.view for the write-visibility probe, tasks.view for the
-        // source-record snapshot, tasks.create for the work_tasks insert).
-        ['projects.view', 'GLOBAL'],
-        ['tasks.view', 'GLOBAL'],
-        ['tasks.create', 'GLOBAL'],
-      ],
-    );
+    const roleA = await F().mkCustomRole(owner, orgA, `W${RUN.toUpperCase()}_AR`, [
+      ...ALL_WORKFLOW_PERMS.map((p) => [p, 'GLOBAL'] as [string, string]),
+      // D2: workflow actions execute under the trigger actor's own
+      // Authorization, so alice (the execute-path actor) also needs the
+      // work-module perms the create_task action's service call requires
+      // (projects.view for the write-visibility probe, tasks.view for the
+      // source-record snapshot, tasks.create for the work_tasks insert).
+      ['projects.view', 'GLOBAL'],
+      ['tasks.view', 'GLOBAL'],
+      ['tasks.create', 'GLOBAL'],
+    ]);
     const roleB = await F().mkCustomRole(
       owner,
       orgB,
@@ -409,9 +404,9 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
     // the AuthorizationError (requirePermission rejects during argument
     // evaluation, before the service is reached), so the entire expression
     // must sit inside the closure for codeOf/outcomeOf to capture it.
-    expect(
-      await codeOf((async () => S().listWorkflows(await authS('workflows.view')))()),
-    ).toBe('FORBIDDEN');
+    expect(await codeOf((async () => S().listWorkflows(await authS('workflows.view')))())).toBe(
+      'FORBIDDEN',
+    );
     // No session at all: 401.
     const noAuth = await F().outcomeOf(
       authz!.requirePermission(F().headersFor(''), { permission: 'workflows.view' }),
