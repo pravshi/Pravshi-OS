@@ -68,14 +68,21 @@ function SubtaskRow({
         disabled={disabled}
         onClick={() => onToggle(subtask)}
         className={cn(
-          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-          completed
-            ? 'border-transparent bg-emerald-500 text-white'
-            : 'border-neutral-300 bg-transparent hover:border-neutral-400 dark:border-neutral-600 dark:hover:border-neutral-500',
+          'flex h-11 w-11 shrink-0 items-center justify-center transition-colors',
           disabled && 'cursor-not-allowed opacity-50',
         )}
       >
-        {completed && <Check className="h-3 w-3" strokeWidth={3} aria-hidden />}
+        <span
+          aria-hidden
+          className={cn(
+            'flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+            completed
+              ? 'border-transparent bg-emerald-500 text-white'
+              : 'border-neutral-300 bg-transparent hover:border-neutral-400 dark:border-neutral-600 dark:hover:border-neutral-500',
+          )}
+        >
+          {completed && <Check className="h-3 w-3" strokeWidth={3} aria-hidden />}
+        </span>
       </button>
       <span
         className={cn(

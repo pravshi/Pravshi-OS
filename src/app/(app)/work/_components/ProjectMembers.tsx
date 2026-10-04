@@ -115,7 +115,10 @@ export function ProjectMembers({
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         {loading ? (
-          <p className="text-sm text-ink-muted">Loading…</p>
+          <div className="space-y-2" aria-label="Loading members">
+            <div className="h-4 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
+          </div>
         ) : members.length === 0 ? (
           <p className="text-sm text-ink-muted">No members yet.</p>
         ) : (

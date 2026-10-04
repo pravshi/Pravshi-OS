@@ -77,6 +77,9 @@ export interface WorkTask {
   assigneePersonId: string | null;
   /** Display name — the UI must never show a raw assignee UUID. */
   assigneeName: string | null;
+  /** Subtask counts for top-level tasks; null when the task has no subtasks. */
+  subtaskTotal: number | null;
+  subtaskCompleted: number | null;
   createdAt: string;
   updatedAt: string;
 }

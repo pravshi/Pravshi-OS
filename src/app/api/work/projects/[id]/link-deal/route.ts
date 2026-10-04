@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { withPermission } from '@/lib/authz/http';
-import { linkProjectToDeal, unlinkProjectFromDeal } from '@/lib/work/projects';
+import { getProjectDeal, linkProjectToDeal, unlinkProjectFromDeal } from '@/lib/work/projects';
 import {
   invalidRequestResponse,
   serviceInvalidRequestResponse,
@@ -9,6 +9,7 @@ import {
 
 /**
  * /api/work/projects/[id]/link-deal — the Deal → Project seam.
+ * GET    projects.view → 200 + { deal } (the linked deal summary, or null)
  * POST   projects.edit → { dealId } → 200 + { deal } (the linked deal summary)
  *        400 when: the body is malformed, the deal is unknown / in another
  *        org / soft-deleted, or the deal is already linked to another project
@@ -20,6 +21,21 @@ import {
 export const dynamic = 'force-dynamic';
 
 const uuid = z.string().uuid();
+
+export const GET = withPermission<{ id: string }>(
+  { permission: 'projects.view' },
+  async (_request, authorization, params) => {
+    try {
+      const id = uuid.parse(params.id);
+      const deal = await getProjectDeal(authorization, id);
+      return Response.json({ deal }, { headers: noStoreHeaders });
+    } catch (error) {
+      const invalid = invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
+      if (invalid) return invalid;
+      throw error;
+    }
+  },
+);
 
 export const POST = withPermission<{ id: string }>(
   { permission: 'projects.edit' },

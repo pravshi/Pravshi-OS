@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { SubtaskCountBadge } from '@/components/work/subtask-count-badge';
 import { formatDate } from '@/components/crm/format';
 import {
   TASK_PRIORITY_LABELS,
@@ -51,6 +53,7 @@ export function TaskCard({
   onDragEnd: () => void;
   onKeyboardMove: (taskId: string, direction: -1 | 1) => void;
 }) {
+  const router = useRouter();
   const overdue = isOverdue(task.dueDate, task.status);
 
   return (
@@ -69,6 +72,11 @@ export function TaskCard({
       }}
       onDragEnd={onDragEnd}
       onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          router.push(`/work/tasks/${task.id}`);
+          return;
+        }
         if (!draggable) return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
           e.preventDefault();
@@ -94,6 +102,10 @@ export function TaskCard({
           <Badge className={PRIORITY_BADGE_CLASSES[task.priority]}>
             {TASK_PRIORITY_LABELS[task.priority]}
           </Badge>
+          <SubtaskCountBadge
+            total={task.subtaskTotal ?? 0}
+            completed={task.subtaskCompleted ?? 0}
+          />
           {task.dueDate && (
             <span
               className={`text-xs ${overdue ? 'font-medium text-red-700 dark:text-red-300' : 'text-ink-muted'}`}
@@ -105,7 +117,8 @@ export function TaskCard({
         </div>
         <p className="truncate text-xs text-ink-muted">{assigneeDisplayName(task)}</p>
         <span className="sr-only">
-          Press the left or right arrow key to move this task between columns.
+          Press the left or right arrow key to move this task between columns. Press Enter to open
+          the task detail page.
         </span>
       </CardContent>
     </Card>

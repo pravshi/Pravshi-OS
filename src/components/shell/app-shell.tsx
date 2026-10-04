@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Sidebar } from './sidebar';
+import { MobileTabBar } from './mobile-tab-bar-server';
 import { ThemeToggle } from './theme-toggle';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -11,8 +12,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="text-sm text-ink-muted">PRAVSHI OS</span>
           <ThemeToggle />
         </header>
-        <main className="min-w-0 flex-1 p-6">{children}</main>
+        {/* pb-20 on mobile clears the fixed bottom tab bar; removed at md+ */}
+        <main className="min-w-0 flex-1 p-6 pb-24 md:pb-6">{children}</main>
       </div>
+      <MobileTabBar />
     </div>
   );
 }
