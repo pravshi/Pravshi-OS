@@ -3,6 +3,7 @@ import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
+import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
 import {
   CreatePipelineSchema,
   CreatePipelineStageSchema,
@@ -611,7 +612,15 @@ export async function moveDealToStage(
     const deal_pipeline = dealRow.pipeline_id;
 
     if (from_stage_id === to_stage_id) {
-      return { from_stage_id, to_stage_id, stage_name: null as string | null, noop: true };
+      return {
+        from_stage_id,
+        to_stage_id,
+        stage_name: null as string | null,
+        to_is_won: false,
+        to_is_lost: false,
+        history_id: null as string | null,
+        noop: true,
+      };
     }
     if (deal_pipeline === null) {
       throw new Error('INVALID_REQUEST: the deal is not assigned to a pipeline');
@@ -662,8 +671,79 @@ export async function moveDealToStage(
       returning d.id
     `);
     await assertTargetAffected(auth, upd.rowCount ?? 0);
-    return { from_stage_id, to_stage_id, stage_name: stage.stage_name, noop: false };
+    // Read-only, in-tx: fetch the history row the DB recorder trigger just
+    // wrote so the post-commit emission gets a stable per-occurrence dedup
+    // key. The SELECT policy filters by RLS — a caller without deals.view
+    // sees zero rows and the emit falls back to a timestamp key; RLS never
+    // throws here, so this read cannot break the move.
+    const historyRes = await tx.execute<{ id: string }>(sql`
+      select h.id
+      from public.deal_stage_history h
+      where h.deal_id = ${dealId}::uuid
+        and h.to_stage_id = ${to_stage_id}::uuid
+      order by h.changed_at desc
+      limit 1
+    `);
+    return {
+      from_stage_id,
+      to_stage_id,
+      stage_name: stage.stage_name,
+      to_is_won: stage.is_won,
+      to_is_lost: stage.is_lost,
+      history_id: historyRes.rows[0]?.id ?? null,
+      noop: false,
+    };
   });
+
+  // Phase 5: post-commit workflow event. Awaited inline (D1); never throws (D3).
+  // Noop moves emit nothing. The history-row id gives a stable per-occurrence
+  // dedup key; when the history row is unreadable (caller lacks deals.view)
+  // the key falls back to a timestamp-based one.
+  if (!result.noop) {
+    // P1-2: the §9 payload also carries fromStageName, dealTitle, dealValue.
+    // The from-stage name resolves through the SECURITY DEFINER
+    // public.crm_resolve_pipeline_stage() (org-isolated inside the function),
+    // so callers without pipelines.view still get a complete payload; the
+    // deal row is read post-commit under the caller's RLS.
+    const [dealRes, fromStageRes] = await Promise.all([
+      withAuthorizedDb(auth.ctx, (tx) =>
+        tx.execute<{ title: string; value: string | null }>(sql`
+          select d.title, d.value::text as value
+          from public.deals d
+          where d.id = ${dealId}::uuid
+        `),
+      ),
+      result.from_stage_id === null
+        ? Promise.resolve({ rows: [] as { stage_name: string }[] })
+        : withAuthorizedDb(auth.ctx, (tx) =>
+            tx.execute<{ stage_name: string }>(sql`
+              select r.stage_name
+              from public.crm_resolve_pipeline_stage(${result.from_stage_id}::uuid) r
+            `),
+          ),
+    ]);
+    const dealRow = dealRes.rows[0];
+    await dispatchWorkflowEvent(auth, {
+      type: 'deal.stage_changed',
+      entityType: 'deal',
+      entityId: dealId,
+      dedupKey:
+        result.history_id !== null
+          ? buildDedupKey('deal_stage_history', result.history_id)
+          : buildDedupKey('deal_stage', dealId, result.to_stage_id, new Date().toISOString()),
+      payload: {
+        dealId,
+        fromStageId: result.from_stage_id,
+        toStageId: result.to_stage_id,
+        fromStageName: fromStageRes.rows[0]?.stage_name ?? null,
+        toStageName: result.stage_name,
+        isWon: result.to_is_won,
+        isLost: result.to_is_lost,
+        dealTitle: dealRow?.title ?? null,
+        dealValue: dealRow?.value ?? null,
+      },
+    });
+  }
 
   if (!result.noop) {
     await writeAuditEntry(
