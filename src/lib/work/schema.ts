@@ -221,6 +221,9 @@ export type Task = {
   assigneeName: string | null;
   /** Null for top-level tasks; set for subtasks. Never nested deeper than one level. */
   parentTaskId: string | null;
+  /** Subtask counts for top-level tasks; null when the task has no subtasks. */
+  subtaskTotal: number | null;
+  subtaskCompleted: number | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

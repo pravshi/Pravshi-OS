@@ -23,6 +23,7 @@ import { EditProjectForm } from '../../_components/EditProjectForm';
 import { ArchiveProjectDialog } from '../../_components/ArchiveProjectDialog';
 import { UnarchiveProjectButton } from '../../_components/UnarchiveProjectButton';
 import { ProjectMembers } from '../../_components/ProjectMembers';
+import { LinkedDealSection } from '@/components/work/linked-deal-section';
 import { unarchiveProjectAction } from '../../_components/unarchive-project.action';
 
 /**
@@ -120,6 +121,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         candidatePeople={assignees}
         canManage={canManageMembers}
       />
+
+      <LinkedDealSection projectId={project.id} canEdit={canEditProject} />
 
       {tasksUnavailable ? (
         <p className="rounded-lg border border-line bg-ground px-4 py-3 text-sm text-ink-muted">

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,6 +44,32 @@ export function LinkedDealSection({
   const [results, setResults] = useState<DealSearchRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingLink, setLoadingLink] = useState(initialDeal === undefined);
+
+  // When no initial deal is provided, fetch the current link on mount.
+  // initialDeal === null means "known unlinked" — no fetch needed.
+  useEffect(() => {
+    if (initialDeal !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/work/projects/${projectId}/link-deal`, {
+          credentials: 'same-origin',
+          headers: { 'Cache-Control': 'no-store' },
+        });
+        if (!res.ok) throw new Error(await readError(res));
+        const body = (await res.json()) as { deal: DealLinkSummary | null };
+        if (!cancelled) setDeal(body.deal);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load linked deal.');
+      } finally {
+        if (!cancelled) setLoadingLink(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, initialDeal]);
 
   async function readError(res: Response): Promise<string> {
     try {
@@ -118,7 +144,12 @@ export function LinkedDealSection({
         <CardTitle>Linked deal</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {deal ? (
+        {loadingLink ? (
+          <div className="space-y-2" aria-label="Loading linked deal">
+            <div className="h-4 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800" />
+          </div>
+        ) : deal ? (
           <>
             <dl className="divide-y divide-line">
               <DetailField label="Deal">

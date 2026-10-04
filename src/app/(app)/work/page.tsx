@@ -6,13 +6,21 @@ import { listProjectsAction } from './_actions';
 import { WORK_PERMISSIONS, getWorkPermissions } from './_permissions';
 import { isErrorEnvelope, toRows } from './_types';
 import { ProjectCard } from './_components/ProjectCard';
+import { ProjectSearchForm } from './_components/ProjectSearchForm';
 
-/** /work — project list/grid with a "New project" action. */
-export default async function WorkHomePage() {
+/** /work — project list/grid with search and a "New project" action. */
+export default async function WorkHomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   await requirePagePermission(WORK_PERMISSIONS.projects.view);
 
+  const params = await searchParams;
+  const q = params.q?.trim() ?? '';
+
   const [projectsRes, held] = await Promise.all([
-    listProjectsAction({ limit: 100, offset: 0 }),
+    listProjectsAction({ search: q === '' ? undefined : q, limit: 100, offset: 0 }),
     getWorkPermissions(),
   ]);
 
@@ -52,12 +60,18 @@ export default async function WorkHomePage() {
         </div>
       </div>
 
+      <ProjectSearchForm initialQuery={q} />
+
       {projects.length === 0 ? (
         <EmptyState
-          title="No projects yet"
-          description="Projects group related tasks on a kanban board. Create the first one to get started."
+          title={q ? 'No projects match your search' : 'No projects yet'}
+          description={
+            q
+              ? 'Try a different search term.'
+              : 'Projects group related tasks on a kanban board. Create the first one to get started.'
+          }
           action={
-            canCreate ? (
+            canCreate && !q ? (
               <LinkButton href="/work/projects/new" size="sm">
                 Create project
               </LinkButton>

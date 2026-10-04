@@ -16,6 +16,7 @@ import {
   type WorkTask,
 } from '../_types';
 import { PRIORITY_BADGE_CLASSES } from '../_components/TaskCard';
+import { MyTasksSearchForm } from './_components/MyTasksSearchForm';
 
 function MyTaskRow({ task }: { task: WorkTask }) {
   return (
@@ -48,10 +49,21 @@ function MyTaskRow({ task }: { task: WorkTask }) {
 }
 
 /** /work/my-tasks — tasks assigned to the current user, grouped by status. */
-export default async function MyTasksPage() {
+export default async function MyTasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   await requirePagePermission(WORK_PERMISSIONS.tasks.view);
 
-  const tasksRes = await listMyTasksAction({ limit: 200, offset: 0 });
+  const params = await searchParams;
+  const q = params.q?.trim() ?? '';
+
+  const tasksRes = await listMyTasksAction({
+    search: q === '' ? undefined : q,
+    limit: 200,
+    offset: 0,
+  });
 
   if (isErrorEnvelope(tasksRes)) {
     return (
@@ -79,10 +91,14 @@ export default async function MyTasksPage() {
         </p>
       </div>
 
+      <MyTasksSearchForm initialQuery={q} />
+
       {tasks.length === 0 ? (
         <EmptyState
-          title="Nothing assigned to you"
-          description="Tasks assigned to you will show up here."
+          title={q ? 'No tasks match your search' : 'Nothing assigned to you'}
+          description={
+            q ? 'Try a different search term.' : 'Tasks assigned to you will show up here.'
+          }
         />
       ) : (
         <div className="space-y-6">

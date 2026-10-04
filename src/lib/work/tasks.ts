@@ -55,6 +55,8 @@ const TASK_COLUMNS = sql`
   t.assignee_person_id as "assigneePersonId",
   coalesce(per.preferred_name, per.full_legal_name) as "assigneeName",
   t.parent_task_id as "parentTaskId",
+  sc.total as "subtaskTotal",
+  sc.completed as "subtaskCompleted",
   t.created_by as "createdBy",
   t.created_at as "createdAt",
   t.updated_at as "updatedAt"
@@ -68,6 +70,17 @@ const TASK_FROM = sql`
    and pr.deleted_at is null
   left join public.people per
     on per.id = t.assignee_person_id
+  left join (
+    select
+      parent_task_id,
+      org_id,
+      count(*)::int as total,
+      count(*) filter (where status = 'done')::int as completed
+    from public.work_tasks
+    where parent_task_id is not null
+      and deleted_at is null
+    group by parent_task_id, org_id
+  ) sc on sc.parent_task_id = t.id and sc.org_id = t.org_id
 `;
 
 const TASK_WHERE = (auth: Authorization) => sql`

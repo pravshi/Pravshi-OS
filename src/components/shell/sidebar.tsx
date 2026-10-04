@@ -21,6 +21,8 @@ const SECTIONS = [
   { label: 'Deals', href: '/crm/deals', permission: 'deals.view' },
   { label: 'Pipelines', href: '/crm/pipelines', permission: 'pipelines.view' },
   { label: 'Activities', href: '/crm/activities', permission: 'activities.view' },
+  { label: 'Work', href: '/work', permission: 'projects.view' },
+  { label: 'My tasks', href: '/work/my-tasks', permission: 'tasks.view' },
 ] as const;
 
 export async function Sidebar() {
