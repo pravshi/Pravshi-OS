@@ -100,18 +100,16 @@ jobs:
         env:
           DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
         run: |
-          echo "=== Drizzle migrations table ==="
-          psql "$DATABASE_URL_MIGRATE" -c "select id, hash, created_at from drizzle.drizzle_migrations order by created_at desc limit 5;"
-          echo "=== Policy count ==="
-          psql "$DATABASE_URL_MIGRATE" -c "select count(*) as n from pg_policies where schemaname='public' and 'app_user' = any(roles) and tablename not like '\_%';"
+          set +e
+          echo "=== Policy count (app_user) ==="
+          psql "$DATABASE_URL_MIGRATE" -t -c "select count(*) from pg_policies where schemaname='public' and 'app_user' = any(roles) and tablename not like '\_%';"
           echo "=== Workflow policies ==="
           psql "$DATABASE_URL_MIGRATE" -c "select policyname, tablename from pg_policies where schemaname='public' and tablename like 'workflow%';"
           echo "=== Workflow permissions ==="
           psql "$DATABASE_URL_MIGRATE" -c "select key from public.permissions where key like 'workflows.%';"
-
-      # Tests run as app_user on the POOLED host — the role that cannot bypass RLS.
-      # APP_URL is required because src/env.ts validates the runtime environment at
-      # import time, and CI has no .env file.
+          echo "=== Workflow tables ==="
+          psql "$DATABASE_URL_MIGRATE" -c "select tablename from pg_tables where schemaname='public' and tablename like 'workflow%';"
+          true
       - name: Test
         env:
           DATABASE_URL: ${{ steps.neon.outputs.db_url_app }}
