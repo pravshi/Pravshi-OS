@@ -906,7 +906,7 @@ grant execute on function public.crm_soft_delete(text, uuid) to app_user;
 -- Permission catalogue — the workflow keys
 -- ═════════════════════════════════════════════════════════════════════════════════
 --
--- Six keys, module 'workflow', all is_sensitive=false. Reads ride on
+-- Six keys, module 'workflows', all is_sensitive=false. Reads ride on
 -- workflows.view; definition writes need create/edit; lifecycle needs
 -- activate; manual runs need execute; deletion needs delete (admin path
 -- only — see the grant matrix below).
@@ -921,12 +921,12 @@ grant execute on function public.crm_soft_delete(text, uuid) to app_user;
 
 insert into public.permissions (key, resource, action, module, description, is_sensitive)
 values
-  ('workflows.view',     'workflows', 'view',     'workflow', 'See workflows and their execution history', false),
-  ('workflows.create',   'workflows', 'create',   'workflow', 'Create workflow definitions',               false),
-  ('workflows.edit',     'workflows', 'edit',     'workflow', 'Change workflow definitions',               false),
-  ('workflows.delete',   'workflows', 'delete',   'workflow', 'Soft-delete workflow definitions',          false),
-  ('workflows.activate', 'workflows', 'activate', 'workflow', 'Activate and pause workflows',              false),
-  ('workflows.execute',  'workflows', 'execute',  'workflow', 'Run a workflow manually',                   false)
+  ('workflows.view',     'workflows', 'view',     'workflows', 'See workflows and their execution history', false),
+  ('workflows.create',   'workflows', 'create',   'workflows', 'Create workflow definitions',               false),
+  ('workflows.edit',     'workflows', 'edit',     'workflows', 'Change workflow definitions',               false),
+  ('workflows.delete',   'workflows', 'delete',   'workflows', 'Soft-delete workflow definitions',          false),
+  ('workflows.activate', 'workflows', 'activate', 'workflows', 'Activate and pause workflows',              false),
+  ('workflows.execute',  'workflows', 'execute',  'workflows', 'Run a workflow manually',                   false)
 on conflict do nothing;
 
 -- ═════════════════════════════════════════════════════════════════════════════════

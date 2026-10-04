@@ -82,7 +82,7 @@ describe.skipIf(!ready)('workflow RLS: catalogue', () => {
     await assertForceRls(owner, 'workflow_execution_steps');
   });
 
-  it('seeds the six workflow permission keys (module workflow, non-sensitive)', async () => {
+  it('seeds the six workflow permission keys (module workflows, non-sensitive)', async () => {
     const { rows } = await owner.query<{ key: string; module: string; is_sensitive: boolean }>(
       `select key, module, is_sensitive from public.permissions where key like 'workflows.%' order by key`,
     );
@@ -94,7 +94,7 @@ describe.skipIf(!ready)('workflow RLS: catalogue', () => {
       'workflows.execute',
       'workflows.view',
     ]);
-    expect(rows.every((r) => r.module === 'workflow' && r.is_sensitive === false)).toBe(true);
+    expect(rows.every((r) => r.module === 'workflows' && r.is_sensitive === false)).toBe(true);
   });
 });
 
