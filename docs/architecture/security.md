@@ -25,6 +25,7 @@ Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-m
 | Legacy sales | `leads.view` `leads.create` `leads.edit` `leads.delete` `leads.assign` `leads.export` — retained in the catalogue but granted to no role since the CRM migration (0033); `clients.view` `clients.edit` remain granted only to non-CRM roles (project-management domain). `pipeline.manage` is catalogue-only. |
 | Projects | `projects.view` `projects.create` `projects.edit` `projects.delete` `projects.manage_members` |
 | Tasks | `tasks.view` `tasks.create` `tasks.edit` `tasks.assign` `tasks.delete` `tasks.comment` |
+| Workflows | `workflows.view` `workflows.create` `workflows.edit` `workflows.delete` `workflows.activate` `workflows.execute` |
 | Documents | `documents.view` `documents.upload` `documents.download` `documents.verify` `documents.delete` |
 | Policies | `policies.view` `policies.manage` `policies.acknowledge` `policies.view_compliance` |
 | Reports | `reports.view` `reports.export` |
@@ -87,6 +88,12 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `pipelines.edit` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `pipelines.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `pipeline_stages.manage` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `workflows.view` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `workflows.create` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `workflows.edit` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `workflows.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `workflows.activate` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `workflows.execute` | G | G | — | — | — | — | — | D | — | — | — | — | — |
 | `clients.view` | G | — | — | — | — | — | — | D | P | P | P | G⁴ | — |
 | `clients.edit` | G | — | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | D | S | D | P | P | P | G⁴ | — |

@@ -180,10 +180,10 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
   beforeAll(async () => {
     orgA = await F().mkOrg(owner, `wf-api-a-${RUN}`);
     orgB = await F().mkOrg(owner, `wf-api-b-${RUN}`);
-    const deptA = await F().mkDept(owner, orgA, `${RUN}_AA`);
-    const deptB = await F().mkDept(owner, orgB, `${RUN}_AB`);
-    const deptV = await F().mkDept(owner, orgA, `${RUN}_AV`);
-    const deptS = await F().mkDept(owner, orgA, `${RUN}_AS`);
+    const deptA = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AA`);
+    const deptB = await F().mkDept(owner, orgB, `${RUN.toUpperCase()}_AB`);
+    const deptV = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AV`);
+    const deptS = await F().mkDept(owner, orgA, `${RUN.toUpperCase()}_AS`);
     const roleA = await F().mkCustomRole(
       owner,
       orgA,

@@ -1001,7 +1001,11 @@ describe('the rest of the authorization model is untouched', () => {
     // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
     // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(66);
+    // The Phase 5 migration (0044) adds five more app_user policies — select/insert/
+    // update on workflows, select on workflow_executions, select on
+    // workflow_execution_steps — none of them scope-driven, so with_scope stays
+    // at twenty-two.
+    expect(Number(policies.rows[0]!.n)).toBe(71);
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 
@@ -1125,9 +1129,9 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    // 109: the 104 counted before, plus the five Phase 3 pipeline permissions
-    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037.
-    expect(Number(rows[0]!.total)).toBe(109);
+    // 115: the 109 counted before, plus the six Phase 5 workflow permissions
+    // (workflows.view/create/edit/delete/activate/execute) from migration 0044.
+    expect(Number(rows[0]!.total)).toBe(115);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,

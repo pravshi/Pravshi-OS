@@ -97,7 +97,7 @@ export const mkPerson = async (owner: Pool, org: string, name: string, status = 
       org,
     ])
   ).rows[0]!.c;
-  return (
+  const personId = (
     await owner.query<{ id: string }>(
       `insert into public.people
          (org_id, code, full_legal_name, person_status, date_of_birth, personal_email, phone)
@@ -106,6 +106,24 @@ export const mkPerson = async (owner: Pool, org: string, name: string, status = 
       [org, code, name, status, `${name.toLowerCase().replace(/[^a-z]/g, '')}.${RUN}@example.test`],
     )
   ).rows[0]!.id;
+  // authz.is_active() (and therefore every RLS policy and authz.has()) requires an
+  // ACTIVE engagement in an ACTIVE organization — a bare person row resolves no
+  // permissions. Mirror tests/work/helpers.ts: one department + one engagement.
+  // Department codes are unique per org, so each person gets their own.
+  const deptCode = `WF${RUN.toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const deptId = (
+    await owner.query<{ id: string }>(
+      `insert into public.departments (org_id, code, name) values ($1,$2,$3) returning id`,
+      [org, deptCode, `WF Dept ${deptCode}`],
+    )
+  ).rows[0]!.id;
+  await owner.query(
+    `insert into public.engagements
+       (org_id, person_id, department_id, engagement_type, status, start_date)
+     values ($1,$2,$3,'EMPLOYEE','ACTIVE'::public.engagement_status, current_date)`,
+    [org, personId, deptId],
+  );
+  return personId;
 };
 
 /** A custom role carrying exactly the given permission keys at GLOBAL scope, assigned to one person. */

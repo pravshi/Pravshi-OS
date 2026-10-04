@@ -936,7 +936,11 @@ describe('the rest of the model is untouched', () => {
     // The Phase 3 migration (0037) adds eight more app_user policies — select/insert/
     // update on pipelines and pipeline_stages, select/insert on deal_stage_history —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(66);
+    // The Phase 5 migration (0044) adds five more app_user policies — select/insert/
+    // update on workflows, select on workflow_executions, select on
+    // workflow_execution_steps — none of them scope-driven (they branch on
+    // authz.has, not scope_for), so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(71);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 
@@ -992,7 +996,9 @@ describe('the rest of the model is untouched', () => {
     // migrations add four more — activities (0034) and company_contacts, company_links,
     // contact_links (0035) — closing the set at fourteen. The Phase 3 sales-pipeline
     // migration (0037) adds pipelines, pipeline_stages and deal_stage_history —
-    // closing the set at seventeen.
+    // closing the set at seventeen. The Phase 5 workflow-engine migration (0044)
+    // adds workflows and workflow_executions — closing the set at nineteen.
+    // (workflow_execution_steps carry no audit trigger by design.)
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
     // mechanism entirely.
@@ -1026,6 +1032,8 @@ describe('the rest of the model is untouched', () => {
       'task_reminders',
       'work_projects',
       'work_tasks',
+      'workflow_executions',
+      'workflows',
     ]);
     // and never on audit_logs itself, which would recurse
     expect(rows.map((r) => r.relname)).not.toContain('audit_logs');
