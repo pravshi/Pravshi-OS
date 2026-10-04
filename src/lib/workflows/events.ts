@@ -95,6 +95,26 @@ const MAX_DISPATCH_DEPTH = 5;
 const dispatchDepthStorage = new AsyncLocalStorage<number>();
 
 /**
+ * Fallback depth tracker for environments where AsyncLocalStorage context
+ * is lost (e.g., Neon serverless driver's fetch-based Pool in CI).
+ * Keyed by Authorization object (same object flows through the entire
+ * dispatch → engine → action → dispatch chain). WeakMap ensures no leaks.
+ */
+const fallbackDepthByAuth = new WeakMap<object, number>();
+
+function getDispatchDepth(auth: Authorization): number {
+  // Primary: AsyncLocalStorage (works with pg driver, local dev)
+  const alsDepth = dispatchDepthStorage.getStore();
+  if (alsDepth !== undefined) return alsDepth;
+  // Fallback: WeakMap by auth object (robust against ALS context loss)
+  return fallbackDepthByAuth.get(auth) ?? 0;
+}
+
+function setFallbackDepth(auth: Authorization, depth: number): void {
+  fallbackDepthByAuth.set(auth, depth);
+}
+
+/**
  * Dispatches a workflow event to the Phase 5 engine and awaits the pipeline
  * inline in the request (D1: in-request execution; no queue in Phase 5).
  *
@@ -111,7 +131,7 @@ export async function dispatchWorkflowEvent(
   event: WorkflowEventInput,
 ): Promise<void> {
   try {
-    const depth = dispatchDepthStorage.getStore() ?? 0;
+    const depth = getDispatchDepth(auth);
     if (depth >= MAX_DISPATCH_DEPTH) {
       console.error('[workflows] dispatch depth guard tripped — event dropped', {
         type: event.type,
@@ -138,7 +158,20 @@ export async function dispatchWorkflowEvent(
     // once the response is sent, so a fire-and-forget kickoff is not
     // guaranteed to run. The incremented ALS context is what makes the D4
     // depth guard hold across the async pipeline.
-    await dispatchDepthStorage.run(depth + 1, () => runWorkflowsForEvent(auth, fullEvent));
+    // Fallback: also set WeakMap depth so the guard holds even if ALS
+    // context is lost (e.g., Neon serverless driver in CI).
+    const nextDepth = depth + 1;
+    setFallbackDepth(auth, nextDepth);
+    try {
+      await dispatchDepthStorage.run(nextDepth, () => runWorkflowsForEvent(auth, fullEvent));
+    } finally {
+      // Restore previous fallback depth (or delete if was 0)
+      if (depth === 0) {
+        fallbackDepthByAuth.delete(auth);
+      } else {
+        setFallbackDepth(auth, depth);
+      }
+    }
   } catch (error) {
     // The originating mutation must not fail because of the engine.
     console.error('[workflows] event dispatch failed — event dropped', {
