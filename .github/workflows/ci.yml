@@ -51,6 +51,10 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     needs: guards
+    # Dependabot PRs cannot provision ephemeral Neon branches: GitHub withholds
+    # NEON_API_KEY from Dependabot builds. Guards (format, audit, secret-scan,
+    # typecheck via tsc) already validate dependency bumps; skip DB tests.
+    if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -125,10 +129,11 @@ jobs:
         run: pnpm build
 
   # always(): the branch must die even when ci is cancelled or fails, on every event.
+  # Skipped for Dependabot PRs: no branch was created (no secret to create one).
   cleanup:
     runs-on: ubuntu-latest
     needs: [ci]
-    if: always()
+    if: always() && github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
