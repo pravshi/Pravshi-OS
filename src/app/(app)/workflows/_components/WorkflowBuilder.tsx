@@ -1,33 +1,41 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   CreateWorkflowSchema,
   type ConditionNode,
   type TriggerConfig,
-} from '@/lib/workflows/schema';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { FieldLabel, FieldError } from '@/components/crm/pickers';
-import { LinkButton } from '@/components/crm/link-button';
-import { TriggerPicker } from './TriggerPicker';
-import { ConditionBuilder } from './ConditionBuilder';
-import { ActionBuilder, type BuilderAction } from './ActionBuilder';
-import { executeWorkflowViaApi } from '../_test-run';
+} from "@/lib/workflows/schema";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { FieldLabel, FieldError } from "@/components/crm/pickers";
+import { LinkButton } from "@/components/crm/link-button";
+import { TriggerPicker } from "./TriggerPicker";
+import { ConditionBuilder } from "./ConditionBuilder";
+import { ActionBuilder, type BuilderAction } from "./ActionBuilder";
+import { executeWorkflowViaApi } from "../_test-run";
 import {
   isErrorEnvelope,
   type ActionConfig,
   type CreateWorkflowInput,
   type Workflow,
   type WorkflowResult,
-} from '../_types';
+} from "../_types";
 
 const textareaClasses =
-  'w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30';
+  "w-full rounded-md border border-line bg-white px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-input/30";
 
-function StepHeader({ n, title, hint }: { n: number; title: string; hint: string }) {
+function StepHeader({
+  n,
+  title,
+  hint,
+}: {
+  n: number;
+  title: string;
+  hint: string;
+}) {
   return (
     <div className="mb-3">
       <h2 className="text-sm font-semibold">
@@ -74,12 +82,14 @@ export function WorkflowBuilder({
   submitLabel: string;
 }) {
   const router = useRouter();
-  const [name, setName] = useState(initial?.name ?? '');
-  const [description, setDescription] = useState(initial?.description ?? '');
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
   const [trigger, setTrigger] = useState<TriggerConfig>(
-    initial?.trigger ?? { type: 'deal.stage_changed', entityType: 'deal' },
+    initial?.trigger ?? { type: "deal.stage_changed", entityType: "deal" },
   );
-  const [conditions, setConditions] = useState<ConditionNode[]>(initial?.conditions ?? []);
+  const [conditions, setConditions] = useState<ConditionNode[]>(
+    initial?.conditions ?? [],
+  );
   const [actions, setActions] = useState<BuilderAction[]>(() =>
     toBuilderActions(initial?.actions ?? []),
   );
@@ -90,15 +100,17 @@ export function WorkflowBuilder({
 
   const triggerType = String(trigger.type);
 
-  function applyZodErrors(issues: { path: readonly PropertyKey[]; message: string }[]) {
+  function applyZodErrors(
+    issues: { path: readonly PropertyKey[]; message: string }[],
+  ) {
     const next: Record<string, string> = {};
     for (const issue of issues) {
-      const top = typeof issue.path[0] === 'string' ? issue.path[0] : 'form';
+      const top = typeof issue.path[0] === "string" ? issue.path[0] : "form";
       if (next[top] === undefined) next[top] = issue.message;
     }
     setFieldErrors(next);
     const first = issues[0];
-    return first ? first.message : 'Please fix the highlighted fields.';
+    return first ? first.message : "Please fix the highlighted fields.";
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -108,7 +120,7 @@ export function WorkflowBuilder({
 
     const payload = {
       name: name.trim(),
-      description: description.trim() === '' ? undefined : description.trim(),
+      description: description.trim() === "" ? undefined : description.trim(),
       trigger,
       conditions,
       // BuilderAction → ActionConfig: the zod parse below re-validates every
@@ -124,7 +136,7 @@ export function WorkflowBuilder({
     const parsed = CreateWorkflowSchema.safeParse(payload);
     if (!parsed.success) {
       const message = applyZodErrors(parsed.error.issues);
-      toast.error('Could not save', { description: message });
+      toast.error("Could not save", { description: message });
       return;
     }
 
@@ -133,19 +145,20 @@ export function WorkflowBuilder({
       const result = await onSave(parsed.data);
       if (isErrorEnvelope(result)) {
         setFormError(result.error.message);
-        toast.error('Could not save', { description: result.error.message });
+        toast.error("Could not save", { description: result.error.message });
         return;
       }
-      toast.success(initial ? 'Workflow updated' : 'Workflow created', {
+      toast.success(initial ? "Workflow updated" : "Workflow created", {
         description: initial
           ? undefined
-          : 'It starts as a draft — activate it from its page when ready.',
+          : "It starts as a draft — activate it from its page when ready.",
       });
       router.push(`/workflows/${result.id}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Something went wrong.';
+      const message =
+        error instanceof Error ? error.message : "Something went wrong.";
       setFormError(message);
-      toast.error('Could not save', { description: message });
+      toast.error("Could not save", { description: message });
     } finally {
       setPending(false);
     }
@@ -157,16 +170,16 @@ export function WorkflowBuilder({
     try {
       const outcome = await executeWorkflowViaApi(initial.id);
       if (outcome.ok) {
-        toast.success('Test run accepted', {
+        toast.success("Test run accepted", {
           description:
-            `Execution ${outcome.executionId ?? ''} ${outcome.executionStatus ?? ''}`.trim(),
+            `Execution ${outcome.executionId ?? ""} ${outcome.executionStatus ?? ""}`.trim(),
         });
       } else {
-        toast.error('Test run failed', {
+        toast.error("Test run failed", {
           description:
             outcome.error ??
             (outcome.status === 400
-              ? 'Only ACTIVE workflows can run — activate this workflow first.'
+              ? "Only ACTIVE workflows can run — activate this workflow first."
               : `HTTP ${outcome.status}`),
         });
       }
@@ -190,7 +203,7 @@ export function WorkflowBuilder({
               placeholder="e.g. Won deal → onboarding"
               onChange={(e) => setName(e.target.value)}
               aria-invalid={fieldErrors.name !== undefined}
-              aria-describedby={fieldErrors.name ? 'wf-name-error' : undefined}
+              aria-describedby={fieldErrors.name ? "wf-name-error" : undefined}
             />
             {fieldErrors.name && (
               <div id="wf-name-error">
@@ -220,7 +233,11 @@ export function WorkflowBuilder({
           title="WHEN — trigger"
           hint="The event that wakes this workflow. Filter inputs narrow it further (matched with equals semantics against the event)."
         />
-        <TriggerPicker value={trigger} onChange={setTrigger} error={fieldErrors.trigger} />
+        <TriggerPicker
+          value={trigger}
+          onChange={setTrigger}
+          error={fieldErrors.trigger}
+        />
       </section>
 
       {/* 2 — IF */}
@@ -264,11 +281,16 @@ export function WorkflowBuilder({
 
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled={pending}>
-          {pending ? 'Saving…' : submitLabel}
+          {pending ? "Saving…" : submitLabel}
         </Button>
-        {initial?.id && initial.status === 'ACTIVE' && (
-          <Button type="button" variant="outline" disabled={testing} onClick={handleTestRun}>
-            {testing ? 'Running…' : 'Test run'}
+        {initial?.id && initial.status === "ACTIVE" && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testing}
+            onClick={handleTestRun}
+          >
+            {testing ? "Running…" : "Test run"}
           </Button>
         )}
         <LinkButton href="/workflows" variant="outline" size="sm">
