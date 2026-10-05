@@ -4,6 +4,7 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
 import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { assertDealReferences } from './refs';
+import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
 import {
   CreateDealSchema,
   ListDealsQuerySchema,
@@ -202,7 +203,23 @@ export async function createDeal(auth: Authorization, input: unknown): Promise<D
     },
     auth.meta,
   );
-  return getDeal(auth, created.id);
+  // Phase 5: post-commit workflow event. Awaited inline (D1); never throws (D3).
+  const deal = await getDeal(auth, created.id);
+  await dispatchWorkflowEvent(auth, {
+    type: 'deal.created',
+    entityType: 'deal',
+    entityId: deal.id,
+    dedupKey: buildDedupKey('deal', deal.id),
+    payload: {
+      dealId: deal.id,
+      dealTitle: deal.title,
+      dealValue: deal.value,
+      stage: deal.stage,
+      isWon: deal.stage === 'WON',
+      isLost: deal.stage === 'LOST',
+    },
+  });
+  return deal;
 }
 
 const UPDATE_COLUMNS: Record<Exclude<keyof UpdateDealInput, 'stage'>, string> = {
@@ -245,7 +262,7 @@ async function resolvePipelineStageForLegacyName(
 
 export async function updateDeal(auth: Authorization, id: string, input: unknown): Promise<Deal> {
   const data = UpdateDealSchema.parse(input);
-  const affected = await withAuthorizedDb(auth.ctx, async (tx) => {
+  const txResult = await withAuthorizedDb(auth.ctx, async (tx) => {
     // A1: probe the effective post-update references. Untouched references keep
     // their current values so the contact↔company pairing stays verifiable.
     let companyId: string | null | undefined = 'companyId' in data ? data.companyId : undefined;
@@ -264,6 +281,25 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
       if (companyId === undefined) companyId = row?.company_id ?? null;
       if (contactId === undefined) contactId = row?.contact_id ?? null;
       await assertDealReferences(tx, auth, companyId, contactId);
+    }
+    // Phase 5 (P1-1): capture the pre-update stage so a legacy `stage` write
+    // can emit deal.stage_changed below. Read-only and in-tx; a caller
+    // without deals.view sees zero rows and the emission is skipped
+    // fail-closed (same posture as the history read in moveDealToStage).
+    let prevStage: string | null = null;
+    let prevPipelineStageId: string | null = null;
+    if (data.stage !== undefined) {
+      const prev = await tx.execute<{ stage: string; pipeline_stage_id: string | null }>(
+        sql`
+          select d.stage, d.pipeline_stage_id
+          from public.deals d
+          where d.id = ${id}::uuid
+            and d.org_id = ${auth.ctx.orgId}::uuid
+            and d.deleted_at is null
+        `,
+      );
+      prevStage = prev.rows[0]?.stage ?? null;
+      prevPipelineStageId = prev.rows[0]?.pipeline_stage_id ?? null;
     }
     // Phase 3 exit fix: a PATCH of the legacy `stage` dual-writes
     // pipeline_stage_id, resolved in the deal's own pipeline through the
@@ -302,9 +338,32 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
         and ${BASE_WHERE(auth)}
       returning d.id
     `);
-    return res.rowCount ?? 0;
+    // Phase 5 (P1-1): when the legacy stage actually changed, read the
+    // history row the DB recorder trigger just wrote (in-tx, like
+    // moveDealToStage) for a stable per-occurrence dedup key. Same-value
+    // writes and RLS-invisible rows yield no history row → null.
+    let historyId: string | null = null;
+    const stageChanged = data.stage !== undefined && prevStage !== null && prevStage !== data.stage;
+    if (stageChanged) {
+      const historyRes = await tx.execute<{ id: string }>(sql`
+        select h.id
+        from public.deal_stage_history h
+        where h.deal_id = ${id}::uuid
+        order by h.changed_at desc
+        limit 1
+      `);
+      historyId = historyRes.rows[0]?.id ?? null;
+    }
+    return {
+      affected: res.rowCount ?? 0,
+      stageChanged,
+      historyId,
+      prevPipelineStageId,
+      stageTarget,
+      nextStage: data.stage ?? null,
+    };
   });
-  await assertTargetAffected(auth, affected);
+  await assertTargetAffected(auth, txResult.affected);
   await writeAuditEntry(
     auth.ctx,
     {
@@ -317,7 +376,85 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
     },
     auth.meta,
   );
-  return getDeal(auth, id);
+  // Phase 5: post-commit workflow event. Awaited inline (D1); never throws (D3).
+  // changedFields is trivially the parsed input's keys. The dedup key uses
+  // the post-update updatedAt so each distinct update is its own occurrence
+  // (a plain 'deal:<id>' key would suppress every update after the first).
+  const deal = await getDeal(auth, id);
+  await dispatchWorkflowEvent(auth, {
+    type: 'deal.updated',
+    entityType: 'deal',
+    entityId: deal.id,
+    dedupKey: buildDedupKey('deal_updated', deal.id, deal.updatedAt),
+    payload: {
+      dealId: deal.id,
+      dealTitle: deal.title,
+      dealValue: deal.value,
+      stage: deal.stage,
+      isWon: deal.stage === 'WON',
+      isLost: deal.stage === 'LOST',
+      changedFields: Object.keys(data),
+    },
+  });
+  // Phase 5 (P1-1): a stage change via PATCH also emits deal.stage_changed
+  // (the move endpoint is not the only stage writer). The from/to pipeline
+  // stage names and won/lost flags resolve through the SECURITY DEFINER
+  // public.crm_resolve_pipeline_stage() so callers without pipelines.view
+  // still get a complete payload; on the legacy-only path (no pipeline) the
+  // legacy stage name and enum derivation are the source of truth.
+  if (txResult.stageChanged) {
+    const toStageId = txResult.stageTarget;
+    const fromStageId = txResult.prevPipelineStageId;
+    const [fromStage, toStage] = await Promise.all([
+      resolvePipelineStageNameFlags(auth, fromStageId),
+      resolvePipelineStageNameFlags(auth, toStageId),
+    ]);
+    const nextStage = txResult.nextStage ?? deal.stage;
+    await dispatchWorkflowEvent(auth, {
+      type: 'deal.stage_changed',
+      entityType: 'deal',
+      entityId: deal.id,
+      dedupKey:
+        txResult.historyId !== null
+          ? buildDedupKey('deal_stage_history', txResult.historyId)
+          : buildDedupKey('deal_stage', deal.id, toStageId ?? nextStage, deal.updatedAt),
+      payload: {
+        dealId: deal.id,
+        fromStageId,
+        toStageId,
+        fromStageName: fromStage.name,
+        toStageName: toStage.name ?? nextStage,
+        isWon: toStageId !== null ? toStage.isWon : nextStage === 'WON',
+        isLost: toStageId !== null ? toStage.isLost : nextStage === 'LOST',
+        dealTitle: deal.title,
+        dealValue: deal.value,
+      },
+    });
+  }
+  return deal;
+}
+
+/**
+ * Resolves a pipeline stage id to its name + won/lost flags through the
+ * SECURITY DEFINER public.crm_resolve_pipeline_stage() (org-isolated inside
+ * the function; zero rows for nonexistent/cross-org stages). Used for the
+ * deal.stage_changed payload on the PATCH path (P1-1/P1-2).
+ */
+async function resolvePipelineStageNameFlags(
+  auth: Authorization,
+  stageId: string | null,
+): Promise<{ name: string | null; isWon: boolean; isLost: boolean }> {
+  if (stageId === null) return { name: null, isWon: false, isLost: false };
+  const res = await withAuthorizedDb(auth.ctx, (tx) =>
+    tx.execute<{ stage_name: string; is_won: boolean; is_lost: boolean }>(sql`
+      select r.stage_name, r.is_won, r.is_lost
+      from public.crm_resolve_pipeline_stage(${stageId}::uuid) r
+    `),
+  );
+  const row = res.rows[0];
+  return row
+    ? { name: row.stage_name, isWon: row.is_won, isLost: row.is_lost }
+    : { name: null, isWon: false, isLost: false };
 }
 
 /** Soft delete only: sets deleted_at. There is no hard DELETE path. */

@@ -420,14 +420,16 @@ describe('the authorization boundary is unmoved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 51: the CRM migration (0033) adds nine app_user policies — select, insert,
+    // 71: the CRM migration (0033) adds nine app_user policies — select, insert,
     // and update on each of companies, contacts, and deals — the Track B
     // migrations add twelve more — select/insert/update on activities (0034) and
     // on company_contacts, company_links and contact_links (0035) — and the Phase 3
     // sales-pipeline migration (0037) adds eight more — select/insert/update on
-    // pipelines and pipeline_stages, select/insert on deal_stage_history.
+    // pipelines and pipeline_stages, select/insert on deal_stage_history — and the
+    // Phase 5 workflow-engine migration (0044) adds five more — select/insert/update
+    // on workflows, select on workflow_executions, select on workflow_execution_steps.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(66);
+    expect(Number(policies.rows[0]!.n)).toBe(71);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
