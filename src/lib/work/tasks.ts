@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
+import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
 import { isPgCode, parseRequest } from './errors';
 import {
   CreateTaskSchema,
@@ -334,6 +335,40 @@ export async function createTask(auth: Authorization, input: unknown): Promise<T
   } catch (error) {
     invalidTaskWrite(error, false);
   }
+  // Phase 5 trigger emission (D3): the insert committed when
+  // withAuthorizedDb resolved above — never inside the tx.
+  await dispatchWorkflowEvent(auth, {
+    type: 'task.created',
+    entityType: 'task',
+    entityId: id,
+    dedupKey: buildDedupKey('task', id),
+    payload: {
+      taskId: id,
+      taskTitle: data.title,
+      projectId: data.projectId ?? null,
+      status: data.status,
+      priority: data.priority,
+      assigneePersonId: data.assigneePersonId ?? null,
+    },
+  });
+  // Nit-8: assignment-at-creation is a real assignment — emit task.assigned
+  // too, so it is visible to task.assigned workflows (updateTask already
+  // emits both on its path).
+  if (data.assigneePersonId !== undefined && data.assigneePersonId !== null) {
+    const created = await getTask(auth, id);
+    await dispatchWorkflowEvent(auth, {
+      type: 'task.assigned',
+      entityType: 'task',
+      entityId: id,
+      dedupKey: buildDedupKey('task_assign', id, data.assigneePersonId, created.updatedAt),
+      payload: {
+        taskId: id,
+        taskTitle: created.title,
+        assigneePersonId: data.assigneePersonId,
+        projectId: created.projectId,
+      },
+    });
+  }
   await writeAuditEntry(
     auth.ctx,
     {
@@ -424,7 +459,48 @@ export async function updateTask(auth: Authorization, id: string, input: unknown
     },
     auth.meta,
   );
-  return getTask(auth, id);
+  // Phase 5 trigger emission (D3): post-commit. updateTask() never reads the
+  // row before the UPDATE, so before/after comparison would require a
+  // structural change — instead emission is input-based: a present `status`
+  // key means the caller wrote the status column, a present
+  // `assigneePersonId` key (including explicit null = unassign) means the
+  // caller wrote the assignee column. (In practice every update bumps
+  // updated_at, so a same-value write is still a real write.) fromStatus is
+  // not knowable on this path and is carried as null.
+  const task = await getTask(auth, id);
+  if (data.status !== undefined) {
+    await dispatchWorkflowEvent(auth, {
+      type: 'task.status_changed',
+      entityType: 'task',
+      entityId: id,
+      dedupKey: buildDedupKey('task_status', id, data.status, task.updatedAt),
+      payload: {
+        taskId: id,
+        taskTitle: task.title,
+        fromStatus: null,
+        toStatus: data.status,
+        projectId: task.projectId,
+      },
+    });
+  }
+  if (data.assigneePersonId !== undefined) {
+    await dispatchWorkflowEvent(auth, {
+      type: 'task.assigned',
+      entityType: 'task',
+      entityId: id,
+      // P1-4: the post-update updatedAt is the per-occurrence component —
+      // re-assigning the same person after an unassign is a distinct
+      // occurrence, not a re-delivery (mirrors the task_status key shape).
+      dedupKey: buildDedupKey('task_assign', id, data.assigneePersonId ?? '', task.updatedAt),
+      payload: {
+        taskId: id,
+        taskTitle: task.title,
+        assigneePersonId: data.assigneePersonId,
+        projectId: task.projectId,
+      },
+    });
+  }
+  return task;
 }
 
 /**
@@ -481,6 +557,23 @@ export async function moveTask(
       },
       auth.meta,
     );
+    // Phase 5 trigger emission (D3): post-commit, and only on a real move —
+    // the noop branch above is skipped. Reads the committed row for the
+    // payload snapshot (title/projectId) and updated_at for the dedup key.
+    const moved = await getTask(auth, id);
+    await dispatchWorkflowEvent(auth, {
+      type: 'task.status_changed',
+      entityType: 'task',
+      entityId: id,
+      dedupKey: buildDedupKey('task_status', id, result.toStatus, moved.updatedAt),
+      payload: {
+        taskId: id,
+        taskTitle: moved.title,
+        fromStatus: result.fromStatus,
+        toStatus: result.toStatus,
+        projectId: moved.projectId,
+      },
+    });
   }
   return { ok: true, taskId: id, fromStatus: result.fromStatus, toStatus: result.toStatus };
 }

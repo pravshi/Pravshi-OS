@@ -27,6 +27,7 @@ const NAV_PERMISSIONS = [
   'pipelines.view',
   'projects.view',
   'tasks.view',
+  'workflows.view', // Phase 5 (Workflow Engine): Automations sidebar section / /workflows
 ] as const;
 
 export type NavPermission = (typeof NAV_PERMISSIONS)[number];

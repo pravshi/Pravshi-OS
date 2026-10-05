@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
+import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
 import { isPgCode, parseRequest } from './errors';
 import {
   AddProjectMemberSchema,
@@ -170,6 +171,15 @@ export async function createProject(auth: Authorization, input: unknown): Promis
   } catch (error) {
     invalidProjectConflict(error);
   }
+  // Phase 5 trigger emission (D3): the insert committed when
+  // withAuthorizedDb resolved above — never inside the tx.
+  await dispatchWorkflowEvent(auth, {
+    type: 'project.created',
+    entityType: 'project',
+    entityId: id,
+    dedupKey: buildDedupKey('project', id),
+    payload: { projectId: id, projectName: data.name },
+  });
   await writeAuditEntry(
     auth.ctx,
     {
