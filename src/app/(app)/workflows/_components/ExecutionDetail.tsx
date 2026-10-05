@@ -160,9 +160,9 @@ export function ExecutionDetail({ executionId }: { executionId: string }) {
         </p>
       )}
       <div>
-        <h4 className="mb-2 text-xs font-semibold tracking-widest text-ink-muted uppercase">
+        <h3 className="mb-2 text-xs font-semibold tracking-widest text-ink-muted uppercase">
           Steps ({execution.steps.length})
-        </h4>
+        </h3>
         {execution.steps.length === 0 ? (
           <p className="text-sm text-ink-muted">
             No steps recorded — the run ended before any action executed.
