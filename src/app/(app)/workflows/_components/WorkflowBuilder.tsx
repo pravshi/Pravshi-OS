@@ -193,9 +193,9 @@ export function WorkflowBuilder({
               aria-describedby={fieldErrors.name ? 'wf-name-error' : undefined}
             />
             {fieldErrors.name && (
-              <span id="wf-name-error">
+              <div id="wf-name-error">
                 <FieldError message={fieldErrors.name} />
-              </span>
+              </div>
             )}
           </div>
           <div>
