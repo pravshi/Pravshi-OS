@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 
 /**
  * DeleteWorkflowButton — danger-zone soft delete for a workflow definition.
@@ -39,23 +39,20 @@ export function DeleteWorkflowButton({
     setPending(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/workflows/${encodeURIComponent(workflowId)}`,
-        {
-          method: "DELETE",
-        },
-      );
+      const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}`, {
+        method: 'DELETE',
+      });
       if (!res.ok) {
         if (res.status === 403 || res.status === 404)
-          setError("Access changed — you can no longer delete this workflow.");
+          setError('Access changed — you can no longer delete this workflow.');
         else setError(`Delete failed (HTTP ${res.status}). Please try again.`);
         return;
       }
       setOpen(false);
-      router.push("/workflows");
+      router.push('/workflows');
       router.refresh();
     } catch {
-      setError("The delete request failed. Please try again.");
+      setError('The delete request failed. Please try again.');
     } finally {
       setPending(false);
     }
@@ -71,9 +68,9 @@ export function DeleteWorkflowButton({
           <DialogHeader>
             <DialogTitle>Delete workflow?</DialogTitle>
             <DialogDescription>
-              “{workflowName}” will be soft-deleted: it disappears from lists
-              and stops matching events, but stays in the audit trail and can be
-              recovered by an administrator. This cannot be undone from here.
+              “{workflowName}” will be soft-deleted: it disappears from lists and stops matching
+              events, but stays in the audit trail and can be recovered by an administrator. This
+              cannot be undone from here.
             </DialogDescription>
           </DialogHeader>
           {error && (
@@ -82,15 +79,11 @@ export function DeleteWorkflowButton({
             </p>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={pending}
-            >
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={confirm} disabled={pending}>
-              {pending ? "Deleting…" : "Delete"}
+              {pending ? 'Deleting…' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
