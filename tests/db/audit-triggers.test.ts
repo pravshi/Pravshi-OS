@@ -50,12 +50,17 @@ const AUDITED_PHASE4 = [
   'project_members',
   'task_reminders',
 ] as const;
+// Phase 5 (migration 0044): the workflow-engine tables. workflow_execution_steps
+// carry no audit trigger by design (they inherit execution visibility —
+// 0044 header comment) — only workflows (HIGH) and workflow_executions (MEDIUM).
+const AUDITED_PHASE5 = ['workflows', 'workflow_executions'] as const;
 const AUDITED_ALL = [
   ...AUDITED,
   ...AUDITED_CRM,
   ...AUDITED_TRACKB,
   ...AUDITED_PHASE3,
   ...AUDITED_PHASE4,
+  ...AUDITED_PHASE5,
 ] as const;
 
 let orgA = '';
@@ -220,7 +225,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the twenty-one approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the twenty-three approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -280,7 +285,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(21);
+    expect(rows.length).toBe(23);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -747,13 +752,11 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 51: the 22 pre-existing policies plus the 9 CRM policies (select/insert/update
-    // × companies, contacts, deals) from the CRM core migration (0033), plus the
-    // 12 Track B policies (select/insert/update × activities, company_contacts,
-    // company_links, contact_links) from migrations 0034/0035, plus the 8 Phase 3
-    // policies (select/insert/update × pipelines, pipeline_stages; select/insert ×
-    // deal_stage_history) from migration 0037.
-    expect(Number(policies.rows[0]!.n)).toBe(66);
+    // 71: the 66 pre-existing policies (22 base + 9 CRM core (0033) + 12 Track B
+    // (0034/0035) + 8 Phase 3 (0037) + 15 Phase 4 (0042/0043)), plus the 5 Phase 5
+    // policies (select/insert/update × workflows; select × workflow_executions;
+    // select × workflow_execution_steps) from migration 0044.
+    expect(Number(policies.rows[0]!.n)).toBe(71);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
