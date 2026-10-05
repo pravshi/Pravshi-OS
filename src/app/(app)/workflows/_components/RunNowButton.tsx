@@ -65,8 +65,7 @@ export function RunNowButton({
       </Button>
       {lastRunId && (
         <Button size="sm" variant="ghost" onClick={() => setDialogOpen(true)}>
-          View run {lastRunId.slice(0, 8)}…
-        </Button>
+          View run details</Button>
       )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
