@@ -15,5 +15,5 @@ overrides:
   # brace-expansion carries high-severity DoS advisories (GHSA-6j4f-fj2g-mc7p et al)
   # and reaches us transitively through minimatch (via @sentry/nextjs glob and
   # ts-morph). Both major lines are pinned to their patched releases.
-  'minimatch>brace-expansion@1': 1.1.20
-  'minimatch>brace-expansion@5': 5.0.11
+  'minimatch>brace-expansion@1': 1.1.21
+  'minimatch>brace-expansion@5': 5.0.12
