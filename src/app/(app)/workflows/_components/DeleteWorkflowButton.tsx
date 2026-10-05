@@ -73,7 +73,7 @@ export function DeleteWorkflowButton({
               cannot be undone from here.
             </DialogDescription>
           </DialogHeader>
-          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
