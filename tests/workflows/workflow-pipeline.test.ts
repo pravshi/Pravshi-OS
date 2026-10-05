@@ -547,6 +547,11 @@ describe.skipIf(!ready)('workflow engine: D4 chaining bound (real engine)', () =
     const wf = await mkWorkflow(owner, orgA, {
       name: `chain-${CODE}`,
       trigger: { type: 'task.created' },
+      // CODE-scoped condition: isolates this test from leftover ACTIVE
+      // workflows (e.g., from vitest retries or other tests) that also match
+      // task.created. Without this, multiple workflows firing on each task
+      // causes a query explosion (~95k queries observed in CI).
+      conditions: [{ field: 'task.title', operator: 'contains', value: CODE }],
       actions: [{ type: 'create_task', params: { title: chainedTitle, projectId: projectA } }],
       createdBy: alice,
     });
