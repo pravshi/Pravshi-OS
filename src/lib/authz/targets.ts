@@ -26,7 +26,7 @@ import type { Tx } from '@/lib/db/authorized';
  * (src/lib/authz is CODEOWNERS-protected), never a call someone can make from elsewhere.
  */
 
-export type TargetEntity = 'person' | 'engagement';
+export type TargetEntity = 'person' | 'engagement' | 'workflow';
 
 type Probe = (tx: Tx, id: string) => Promise<boolean>;
 
@@ -42,6 +42,16 @@ const PROBES: Readonly<Record<TargetEntity, Probe>> = Object.freeze({
     (
       await tx.execute<{ visible: boolean }>(
         sql`select exists (select 1 from public.engagements e where e.id = ${id}::uuid) as visible`,
+      )
+    ).rows[0]?.visible === true,
+
+  // Phase 5 (Workflow Engine, reviewed change): probe the workflows table under the
+  // caller's own RLS. The table arrives with migration 0044; until then no workflow
+  // id can probe true. Per-record workflow routes pair this with `workflows.view`.
+  workflow: async (tx, id) =>
+    (
+      await tx.execute<{ visible: boolean }>(
+        sql`select exists (select 1 from public.workflows w where w.id = ${id}::uuid) as visible`,
       )
     ).rows[0]?.visible === true,
 });
