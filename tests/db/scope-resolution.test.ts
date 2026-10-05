@@ -179,7 +179,9 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  expect(rows.length, `${label}: catalogue size`).toBe(109);
+  // 115: the 109 counted before, plus the six Phase 5 workflow permissions
+  // (workflows.view/create/edit/delete/activate/execute) from migration 0044.
+  expect(rows.length, `${label}: catalogue size`).toBe(115);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -908,7 +910,9 @@ describe('RLS', () => {
     // activities, company_contacts, company_links and contact_links.
     // The Phase 3 migration (0037) adds eight more: select/insert/update on
     // pipelines and pipeline_stages, select/insert on deal_stage_history.
-    expect(Number(rows[0]!.n)).toBe(66);
+    // The Phase 5 migration (0044) adds five more: select/insert/update on
+    // workflows, select on workflow_executions, select on workflow_execution_steps.
+    expect(Number(rows[0]!.n)).toBe(71);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
