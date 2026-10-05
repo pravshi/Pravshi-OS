@@ -1,18 +1,13 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { executeWorkflowViaApi } from "../_test-run";
-import { ExecutionDetail } from "./ExecutionDetail";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { Toaster } from '@/components/ui/sonner';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { executeWorkflowViaApi } from '../_test-run';
+import { ExecutionDetail } from './ExecutionDetail';
 
 /**
  * RunNowButton — manual "Run now" for a workflow definition.
@@ -42,14 +37,14 @@ export function RunNowButton({
       const outcome = await executeWorkflowViaApi(workflowId);
       if (!outcome.ok) {
         if (outcome.status === 400)
-          toast.error(outcome.error ?? "This workflow cannot run right now.");
+          toast.error(outcome.error ?? 'This workflow cannot run right now.');
         else if (outcome.status === 403 || outcome.status === 404)
-          toast.error("Access changed — you can no longer run this workflow.");
-        else toast.error(outcome.error ?? "The run request failed.");
+          toast.error('Access changed — you can no longer run this workflow.');
+        else toast.error(outcome.error ?? 'The run request failed.');
         return;
       }
       setLastRunId(outcome.executionId);
-      toast.success("Run started.");
+      toast.success('Run started.');
       router.refresh();
     } finally {
       setPending(false);
@@ -62,15 +57,11 @@ export function RunNowButton({
       <Button
         size="sm"
         variant="outline"
-        disabled={pending || status !== "ACTIVE"}
+        disabled={pending || status !== 'ACTIVE'}
         onClick={runNow}
-        title={
-          status !== "ACTIVE"
-            ? "Only active workflows can run"
-            : "Run this workflow now"
-        }
+        title={status !== 'ACTIVE' ? 'Only active workflows can run' : 'Run this workflow now'}
       >
-        {pending ? "Running…" : "Run now"}
+        {pending ? 'Running…' : 'Run now'}
       </Button>
       {lastRunId && (
         <Button size="sm" variant="ghost" onClick={() => setDialogOpen(true)}>
