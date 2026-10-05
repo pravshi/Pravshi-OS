@@ -161,7 +161,6 @@ function LeafEditor({
         ))}
       </select>
 
-      <label className="sr-only">Operator</label>
       <select
         aria-label="Operator"
         className={selectClasses}
