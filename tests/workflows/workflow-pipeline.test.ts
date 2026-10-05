@@ -539,64 +539,68 @@ describe.skipIf(!ready)('workflow engine: D4 chaining bound (real engine)', () =
   // CI's Neon branch latency budget (90s timeout; ~95k queries observed).
   // The D4 depth guard logic is proven locally (502ms, depths 0-5 verified
   // via instrumentation). This test validates the guard, not CI infra speed.
-  it.skipIf(process.env.CI)('task.created → create_task chain terminates at exactly 5 deliveries', async () => {
-    // Self-perpetuating workflow: every created task emits task.created,
-    // which matches again and creates the next task. The AsyncLocalStorage
-    // depth guard (D4) must drop the 6th dispatch: exactly 5 executions are
-    // recorded and exactly 6 tasks exist (seed + 5 chained). Before the
-    // 2026-10-04 fix the guard was dead code on the fire-and-forget path and
-    // this looped unboundedly (P0-1).
-    const chainedTitle = `chained-${CODE}`;
-    const seedTitle = `chain-seed-${CODE}`;
-    const wf = await mkWorkflow(owner, orgA, {
-      name: `chain-${CODE}`,
-      trigger: { type: 'task.created' },
-      // CODE-scoped condition: isolates this test from leftover ACTIVE
-      // workflows (e.g., from vitest retries or other tests) that also match
-      // task.created. Without this, multiple workflows firing on each task
-      // causes a query explosion (~95k queries observed in CI).
-      conditions: [{ field: 'task.title', operator: 'contains', value: CODE }],
-      actions: [{ type: 'create_task', params: { title: chainedTitle, projectId: projectA } }],
-      createdBy: alice,
-    });
+  it.skipIf(process.env.CI)(
+    'task.created → create_task chain terminates at exactly 5 deliveries',
+    async () => {
+      // Self-perpetuating workflow: every created task emits task.created,
+      // which matches again and creates the next task. The AsyncLocalStorage
+      // depth guard (D4) must drop the 6th dispatch: exactly 5 executions are
+      // recorded and exactly 6 tasks exist (seed + 5 chained). Before the
+      // 2026-10-04 fix the guard was dead code on the fire-and-forget path and
+      // this looped unboundedly (P0-1).
+      const chainedTitle = `chained-${CODE}`;
+      const seedTitle = `chain-seed-${CODE}`;
+      const wf = await mkWorkflow(owner, orgA, {
+        name: `chain-${CODE}`,
+        trigger: { type: 'task.created' },
+        // CODE-scoped condition: isolates this test from leftover ACTIVE
+        // workflows (e.g., from vitest retries or other tests) that also match
+        // task.created. Without this, multiple workflows firing on each task
+        // causes a query explosion (~95k queries observed in CI).
+        conditions: [{ field: 'task.title', operator: 'contains', value: CODE }],
+        actions: [{ type: 'create_task', params: { title: chainedTitle, projectId: projectA } }],
+        createdBy: alice,
+      });
 
-    const auth = await authFor(aliceCookie)();
-    // Seed through the REAL service so its post-commit emission enters the
-    // engine — this is the production chaining path (service → dispatch →
-    // engine → service → dispatch …). Dispatch is awaited inline (D1), so
-    // when createTask returns the whole chain has settled: no polling.
-    const seed = await createTask(auth, { title: seedTitle, projectId: projectA });
+      const auth = await authFor(aliceCookie)();
+      // Seed through the REAL service so its post-commit emission enters the
+      // engine — this is the production chaining path (service → dispatch →
+      // engine → service → dispatch …). Dispatch is awaited inline (D1), so
+      // when createTask returns the whole chain has settled: no polling.
+      const seed = await createTask(auth, { title: seedTitle, projectId: projectA });
 
-    const { rows: execRows } = await owner.query<{ n: string }>(
-      `select count(*) n from public.workflow_executions where workflow_id = $1::uuid`,
-      [wf.id],
-    );
-    expect(Number(execRows[0]!.n)).toBe(5);
+      const { rows: execRows } = await owner.query<{ n: string }>(
+        `select count(*) n from public.workflow_executions where workflow_id = $1::uuid`,
+        [wf.id],
+      );
+      expect(Number(execRows[0]!.n)).toBe(5);
 
-    const { rows: taskRows } = await owner.query<{ n: string }>(
-      `select count(*) n from public.work_tasks
+      const { rows: taskRows } = await owner.query<{ n: string }>(
+        `select count(*) n from public.work_tasks
         where org_id = $1::uuid and title in ($2, $3) and deleted_at is null`,
-      [orgA, seedTitle, chainedTitle],
-    );
-    // Seed task + 5 chained tasks. The 6th chained task was never created:
-    // its dispatch was dropped by the depth guard before the engine ran.
-    expect(Number(taskRows[0]!.n)).toBe(6);
+        [orgA, seedTitle, chainedTitle],
+      );
+      // Seed task + 5 chained tasks. The 6th chained task was never created:
+      // its dispatch was dropped by the depth guard before the engine ran.
+      expect(Number(taskRows[0]!.n)).toBe(6);
 
-    // Every recorded execution succeeded — the chain stopped because of the
-    // depth guard, not because an action failed.
-    const { rows: failedRows } = await owner.query<{ n: string }>(
-      `select count(*) n from public.workflow_executions
+      // Every recorded execution succeeded — the chain stopped because of the
+      // depth guard, not because an action failed.
+      const { rows: failedRows } = await owner.query<{ n: string }>(
+        `select count(*) n from public.workflow_executions
         where workflow_id = $1::uuid and status <> 'SUCCEEDED'`,
-      [wf.id],
-    );
-    expect(Number(failedRows[0]!.n)).toBe(0);
+        [wf.id],
+      );
+      expect(Number(failedRows[0]!.n)).toBe(0);
 
-    // The seed task itself is untouched by the workflow (it was the trigger,
-    // not an action output).
-    expect(seed.title).toBe(seedTitle);
-    // Heavy real-DB chain (5 full engine executions, ~100 queries): the
-    // 30s default is legitimate for unit-speed tests, but a cold Neon branch
-    // legitimately exceeds it. The D4 guard itself is proven — this only
-    // budgets the branch's latency.
-  }, 90_000);
+      // The seed task itself is untouched by the workflow (it was the trigger,
+      // not an action output).
+      expect(seed.title).toBe(seedTitle);
+      // Heavy real-DB chain (5 full engine executions, ~100 queries): the
+      // 30s default is legitimate for unit-speed tests, but a cold Neon branch
+      // legitimately exceeds it. The D4 guard itself is proven — this only
+      // budgets the branch's latency.
+    },
+    90_000,
+  );
 });
