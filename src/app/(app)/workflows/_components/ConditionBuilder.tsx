@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   CONDITION_FIELD_GROUPS,
@@ -7,7 +7,7 @@ import {
   OPERATOR_LABELS,
   conditionFieldKind,
   enumOptionsForField,
-} from "./schemas";
+} from './schemas';
 import {
   countConditionLeaves,
   maxConditionDepth,
@@ -15,32 +15,28 @@ import {
   type ConditionLeaf,
   type ConditionNode,
   type ConditionOperator,
-} from "@/lib/workflows/schema";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { FieldError } from "@/components/crm/pickers";
+} from '@/lib/workflows/schema';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { FieldError } from '@/components/crm/pickers';
 
 const selectClasses =
-  "rounded-md border border-line bg-white px-2 py-1.5 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30";
+  'rounded-md border border-line bg-white px-2 py-1.5 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
 
 const checkboxClasses =
-  "h-4 w-4 rounded border-line accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
+  'h-4 w-4 rounded border-line accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40';
 
 // ── Tree editing helpers (immutable, path = index list) ──────────────────────
 
 type Path = readonly number[];
 
-function replaceAt(
-  nodes: ConditionNode[],
-  path: Path,
-  node: ConditionNode,
-): ConditionNode[] {
+function replaceAt(nodes: ConditionNode[], path: Path, node: ConditionNode): ConditionNode[] {
   const [head, ...rest] = path;
   if (head === undefined) return nodes;
   return nodes.map((child, i) => {
     if (i !== head) return child;
     if (rest.length === 0) return node;
-    if (!("conditions" in child)) return child;
+    if (!('conditions' in child)) return child;
     return {
       ...child,
       conditions: replaceAt([...child.conditions], rest, node),
@@ -53,38 +49,38 @@ function removeAt(nodes: ConditionNode[], path: Path): ConditionNode[] {
   if (head === undefined) return nodes;
   if (rest.length === 0) return nodes.filter((_, i) => i !== head);
   return nodes.map((child, i) => {
-    if (i !== head || !("conditions" in child)) return child;
+    if (i !== head || !('conditions' in child)) return child;
     return { ...child, conditions: removeAt([...child.conditions], rest) };
   });
 }
 
 function defaultLeaf(): ConditionLeaf {
-  return { field: "deal.value", operator: "greater_than", value: 0 };
+  return { field: 'deal.value', operator: 'greater_than', value: 0 };
 }
 
 // ── Value coercion per field kind ─────────────────────────────────────────────
 
 function coerceValue(kind: ConditionFieldKind, raw: string): unknown {
   switch (kind) {
-    case "numeric": {
+    case 'numeric': {
       const trimmed = raw.trim();
-      return trimmed === "" ? trimmed : Number(trimmed);
+      return trimmed === '' ? trimmed : Number(trimmed);
     }
-    case "boolean":
-      return raw === "true";
+    case 'boolean':
+      return raw === 'true';
     default:
       return raw;
   }
 }
 
 function valueToInput(kind: ConditionFieldKind, value: unknown): string {
-  if (value === undefined || value === null) return "";
-  if (kind === "boolean") return value === true ? "true" : "false";
+  if (value === undefined || value === null) return '';
+  if (kind === 'boolean') return value === true ? 'true' : 'false';
   return String(value);
 }
 
-const NO_VALUE_OPERATORS: ConditionOperator[] = ["exists", "not_exists"];
-const LIST_OPERATORS: ConditionOperator[] = ["in", "not_in"];
+const NO_VALUE_OPERATORS: ConditionOperator[] = ['exists', 'not_exists'];
+const LIST_OPERATORS: ConditionOperator[] = ['in', 'not_in'];
 
 // ── Leaf editor ──────────────────────────────────────────────────────────────
 
@@ -100,17 +96,16 @@ function LeafEditor({
   onChange: (leaf: ConditionLeaf) => void;
   onRemove: () => void;
 }) {
-  const kind = conditionFieldKind(leaf.field) ?? "text";
+  const kind = conditionFieldKind(leaf.field) ?? 'text';
   const enumOptions = enumOptionsForField(leaf.field);
   const noValue = NO_VALUE_OPERATORS.includes(leaf.operator);
   const isList = LIST_OPERATORS.includes(leaf.operator);
   const isEnumList = isList && enumOptions !== null;
 
   function setField(field: string) {
-    const nextKind = conditionFieldKind(field) ?? "text";
-    const nextOperator: ConditionOperator = "equals";
-    const raw =
-      nextKind === "boolean" ? "false" : nextKind === "numeric" ? "0" : "";
+    const nextKind = conditionFieldKind(field) ?? 'text';
+    const nextOperator: ConditionOperator = 'equals';
+    const raw = nextKind === 'boolean' ? 'false' : nextKind === 'numeric' ? '0' : '';
     onChange({
       field,
       operator: nextOperator,
@@ -133,9 +128,9 @@ function LeafEditor({
       onChange({
         ...leaf,
         value: raw
-          .split(",")
+          .split(',')
           .map((part) => coerceValue(kind, part.trim()))
-          .filter((part) => part !== ""),
+          .filter((part) => part !== ''),
       });
       return;
     }
@@ -146,7 +141,7 @@ function LeafEditor({
   function setListValue(values: string[]) {
     onChange({
       ...leaf,
-      value: values.map((v) => coerceValue(kind, v)).filter((v) => v !== ""),
+      value: values.map((v) => coerceValue(kind, v)).filter((v) => v !== ''),
     });
   }
 
@@ -188,14 +183,14 @@ function LeafEditor({
 
       {!noValue && (
         <>
-          {kind === "boolean" ? (
+          {kind === 'boolean' ? (
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 aria-label="Value true"
                 className={checkboxClasses}
                 checked={leaf.value === true}
-                onChange={(e) => setValue(e.target.checked ? "true" : "false")}
+                onChange={(e) => setValue(e.target.checked ? 'true' : 'false')}
               />
               true
             </label>
@@ -207,9 +202,7 @@ function LeafEditor({
               size={Math.min((enumOptions ?? []).length, 4)}
               value={Array.isArray(leaf.value) ? leaf.value.map(String) : []}
               onChange={(e) =>
-                setListValue(
-                  Array.from(e.target.selectedOptions, (opt) => opt.value),
-                )
+                setListValue(Array.from(e.target.selectedOptions, (opt) => opt.value))
               }
             >
               {(enumOptions ?? []).map((opt) => (
@@ -232,7 +225,7 @@ function LeafEditor({
                 </option>
               ))}
             </select>
-          ) : kind === "date" ? (
+          ) : kind === 'date' ? (
             <Input
               type="date"
               aria-label="Value date"
@@ -240,7 +233,7 @@ function LeafEditor({
               value={valueToInput(kind, leaf.value)}
               onChange={(e) => setValue(e.target.value)}
             />
-          ) : kind === "numeric" ? (
+          ) : kind === 'numeric' ? (
             <Input
               type="number"
               aria-label="Value number"
@@ -251,20 +244,14 @@ function LeafEditor({
           ) : (
             <Input
               type="text"
-              aria-label={isList ? "Values (comma separated)" : "Value"}
+              aria-label={isList ? 'Values (comma separated)' : 'Value'}
               className="w-56"
-              placeholder={
-                kind === "uuid"
-                  ? "uuid"
-                  : isList
-                    ? "comma, separated, values"
-                    : "value"
-              }
+              placeholder={kind === 'uuid' ? 'uuid' : isList ? 'comma, separated, values' : 'value'}
               value={
                 isList
                   ? Array.isArray(leaf.value)
-                    ? leaf.value.join(", ")
-                    : ""
+                    ? leaf.value.join(', ')
+                    : ''
                   : valueToInput(kind, leaf.value)
               }
               onChange={(e) => setValue(e.target.value)}
@@ -303,14 +290,14 @@ function NodeEditor({
   leafCount: number;
   boundNotice: string | null;
 }) {
-  const isGroup = "conditions" in node;
+  const isGroup = 'conditions' in node;
   const depth = path.length; // root array = 0; group at path length p sits at depth p+1
 
   if (!isGroup) {
     return (
       <LeafEditor
         leaf={node}
-        fieldId={`wf-cond-${path.join("-")}`}
+        fieldId={`wf-cond-${path.join('-')}`}
         onChange={(leaf) => onChangeTree(replaceAt(nodes, path, leaf))}
         onRemove={() => onChangeTree(removeAt(nodes, path))}
       />
@@ -330,28 +317,24 @@ function NodeEditor({
           aria-label="Group logic"
           className="inline-flex overflow-hidden rounded-md border border-line"
         >
-          {(["AND", "OR"] as const).map((op) => (
+          {(['AND', 'OR'] as const).map((op) => (
             <button
               key={op}
               type="button"
               aria-pressed={node.operator === op}
-              onClick={() =>
-                onChangeTree(replaceAt(nodes, path, { ...node, operator: op }))
-              }
+              onClick={() => onChangeTree(replaceAt(nodes, path, { ...node, operator: op }))}
               className={`px-3 py-1 text-xs font-medium transition-colors ${
                 node.operator === op
-                  ? "bg-foreground text-background"
-                  : "bg-transparent text-ink-muted hover:text-foreground"
+                  ? 'bg-foreground text-background'
+                  : 'bg-transparent text-ink-muted hover:text-foreground'
               }`}
             >
-              {op === "AND" ? "All of" : "Any of"}
+              {op === 'AND' ? 'All of' : 'Any of'}
             </button>
           ))}
         </div>
         <span className="text-xs text-ink-muted">
-          {node.operator === "AND"
-            ? "every condition must hold"
-            : "at least one must hold"}
+          {node.operator === 'AND' ? 'every condition must hold' : 'at least one must hold'}
         </span>
         <Button
           type="button"
@@ -410,10 +393,7 @@ function NodeEditor({
             onChangeTree(
               replaceAt(nodes, path, {
                 ...node,
-                conditions: [
-                  ...node.conditions,
-                  { operator: "AND", conditions: [defaultLeaf()] },
-                ],
+                conditions: [...node.conditions, { operator: 'AND', conditions: [defaultLeaf()] }],
               }),
             )
           }
@@ -451,7 +431,7 @@ export function ConditionBuilder({
   function addGroup() {
     if (leafBoundHit) return;
     // Root-level group adds depth 2 — always within the depth-5 bound.
-    onChange([...nodes, { operator: "AND", conditions: [defaultLeaf()] }]);
+    onChange([...nodes, { operator: 'AND', conditions: [defaultLeaf()] }]);
   }
 
   return (
@@ -459,14 +439,11 @@ export function ConditionBuilder({
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-ink-muted" aria-live="polite">
           {nodes.length === 0
-            ? "No conditions — the workflow runs for every matching event."
-            : `${leafCount} condition${leafCount === 1 ? "" : "s"} · depth ${depth}/${MAX_CONDITION_DEPTH}`}
+            ? 'No conditions — the workflow runs for every matching event.'
+            : `${leafCount} condition${leafCount === 1 ? '' : 's'} · depth ${depth}/${MAX_CONDITION_DEPTH}`}
         </p>
         {boundNotice && (
-          <p
-            role="status"
-            className="text-xs font-medium text-amber-700 dark:text-amber-300"
-          >
+          <p role="status" className="text-xs font-medium text-amber-700 dark:text-amber-300">
             {boundNotice}
           </p>
         )}
@@ -489,13 +466,7 @@ export function ConditionBuilder({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={leafBoundHit}
-          onClick={addLeaf}
-        >
+        <Button type="button" variant="outline" size="sm" disabled={leafBoundHit} onClick={addLeaf}>
           + Add condition
         </Button>
         <Button
