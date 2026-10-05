@@ -1,8 +1,13 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -10,15 +15,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { EmptyState } from '@/components/crm/empty-state';
-import { formatDateTime } from '@/components/crm/format';
-import { listWorkflowExecutionsAction } from '../_detail-actions';
-import { isErrorEnvelope, toRows } from '../_types';
-import { ExecutionStatusBadge } from './WorkflowStatusBadge';
-import { ExecutionDetail } from './ExecutionDetail';
-import { errorExcerpt, formatDurationMs } from './execution-format';
-import type { ExecutionPage, WorkflowExecution } from '@/lib/workflows/service';
+} from "@/components/ui/table";
+import { EmptyState } from "@/components/crm/empty-state";
+import { formatDateTime } from "@/components/crm/format";
+import { listWorkflowExecutionsAction } from "../_detail-actions";
+import { isErrorEnvelope, toRows } from "../_types";
+import { ExecutionStatusBadge } from "./WorkflowStatusBadge";
+import { ExecutionDetail } from "./ExecutionDetail";
+import { errorExcerpt, formatDurationMs } from "./execution-format";
+import type { ExecutionPage, WorkflowExecution } from "@/lib/workflows/service";
 
 const PAGE_SIZE = 10;
 
@@ -74,7 +79,9 @@ export function ExecutionList({
 
   return (
     <div className="space-y-3">
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && (
+        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+      )}
       <div className="overflow-x-auto rounded-lg border border-line">
         <Table>
           <TableHeader>
@@ -94,14 +101,18 @@ export function ExecutionList({
                 onClick={() => setSelected(run)}
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     setSelected(run);
                   }
                 }}
               >
-                <TableCell className="whitespace-nowrap">{formatDateTime(run.startedAt)}</TableCell>
-                <TableCell className="font-mono text-xs">{run.triggerType}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {formatDateTime(run.startedAt)}
+                </TableCell>
+                <TableCell className="font-mono text-xs">
+                  {run.triggerType}
+                </TableCell>
                 <TableCell>
                   <ExecutionStatusBadge status={run.status} />
                 </TableCell>
@@ -110,7 +121,9 @@ export function ExecutionList({
                 </TableCell>
                 <TableCell className="max-w-xs truncate text-xs text-ink-muted">
                   {errorExcerpt(
-                    run.errorCode ? `${run.errorCode}: ${run.errorMessage ?? ''}` : null,
+                    run.errorCode
+                      ? `${run.errorCode}: ${run.errorMessage ?? ""}`
+                      : null,
                   )}
                 </TableCell>
               </TableRow>
@@ -142,7 +155,10 @@ export function ExecutionList({
         </div>
       </div>
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog
+        open={selected !== null}
+        onOpenChange={(open) => !open && setSelected(null)}
+      >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Run detail</DialogTitle>
