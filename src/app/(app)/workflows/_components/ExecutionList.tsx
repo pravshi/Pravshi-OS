@@ -90,7 +90,7 @@ export function ExecutionList({
             {rows.map((run) => (
               <TableRow
                 key={run.id}
-                className="cursor-pointer"
+                className="cursor-pointer focus-visible:bg-muted/70 focus-visible:outline-none"
                 onClick={() => setSelected(run)}
                 tabIndex={0}
                 onKeyDown={(e) => {
