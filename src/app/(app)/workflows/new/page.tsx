@@ -9,7 +9,7 @@ export default async function NewWorkflowPage() {
   await requirePagePermission(WORKFLOW_PERMISSIONS.workflows.create);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <Link href="/workflows" className="text-sm text-ink-muted hover:text-foreground">
           ← All automations
