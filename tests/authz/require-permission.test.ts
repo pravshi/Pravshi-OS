@@ -659,10 +659,12 @@ describe('the rest of the authorization model is unchanged', () => {
     // the CRM migration (0033) adds nine more (select/insert/update on each of
     // companies, contacts, deals), the Track B migrations (0034/0035) add twelve
     // more (select/insert/update on activities, company_contacts, company_links and
-    // contact_links), and the Phase 3 sales-pipeline migration (0037) adds eight
+    // contact_links), the Phase 3 sales-pipeline migration (0037) adds eight
     // more (select/insert/update on pipelines and pipeline_stages, select/insert on
-    // deal_stage_history).
-    expect(policies.rows[0]!.n).toBe(66);
+    // deal_stage_history), and the Phase 5 workflow-engine migration (0044) adds
+    // five more (select/insert/update on workflows, select on workflow_executions,
+    // select on workflow_execution_steps).
+    expect(policies.rows[0]!.n).toBe(71);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

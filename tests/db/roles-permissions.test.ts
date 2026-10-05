@@ -293,8 +293,10 @@ describe('permission catalogue', () => {
     // 14 CRM permissions (companies/contacts/deals) from the Phase 2 CRM migration (0033),
     // plus the 8 Track B permissions (activities/relationships × view/create/edit/delete)
     // from migration 0034, plus the 5 Phase 3 pipeline permissions
-    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037.
-    expect(Number(rows[0]!.count)).toBe(109);
+    // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037,
+    // plus the 6 Phase 5 workflow permissions
+    // (workflows.view/create/edit/delete/activate/execute) from migration 0044.
+    expect(Number(rows[0]!.count)).toBe(115);
   });
 
   it('holds every named key from each module', async () => {
@@ -414,6 +416,13 @@ describe('permission catalogue', () => {
       'pipelines.edit',
       'pipelines.delete',
       'pipeline_stages.manage',
+      // Phase 5 (migration 0044): the workflow-engine permissions.
+      'workflows.view',
+      'workflows.create',
+      'workflows.edit',
+      'workflows.delete',
+      'workflows.activate',
+      'workflows.execute',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -553,10 +562,11 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 109 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline),
-    // minus users.impersonate which is listed but granted to no role.
-    expect(Number(rows[0]!.total)).toBe(108);
-    expect(Number(rows[0]!.global)).toBe(108);
+    // 115 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow), minus users.impersonate which is listed but granted
+    // to no role.
+    expect(Number(rows[0]!.total)).toBe(114);
+    expect(Number(rows[0]!.global)).toBe(114);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants', async () => {

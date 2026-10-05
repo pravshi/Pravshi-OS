@@ -184,7 +184,7 @@ afterAll(async () => {
 });
 
 describe('the matrix as written', () => {
-  it('has 67 permissions for 13 roles', () => {
+  it('has 73 permissions for 13 roles', () => {
     expect(matrix.roles).toEqual([
       'SUPER_ADMIN',
       'ADMIN',
@@ -200,8 +200,8 @@ describe('the matrix as written', () => {
       'FINANCE',
       'EMPLOYEE',
     ]);
-    expect(matrix.rows).toHaveLength(67);
-    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(67);
+    expect(matrix.rows).toHaveLength(73);
+    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(73);
   });
 
   it('names only permissions in the catalogue', () => {
