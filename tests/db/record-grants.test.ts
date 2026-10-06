@@ -1005,7 +1005,10 @@ describe('the rest of the authorization model is untouched', () => {
     // update on workflows, select on workflow_executions, select on
     // workflow_execution_steps — none of them scope-driven, so with_scope stays
     // at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(71);
+    // The Phase 6 automation migrations (0045/0047) add nine more app_user policies —
+    // select/insert/update on each of jobs, schedules, and notifications — none of
+    // them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(policies.rows[0]!.n)).toBe(80);
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 
@@ -1129,9 +1132,11 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    // 115: the 109 counted before, plus the six Phase 5 workflow permissions
-    // (workflows.view/create/edit/delete/activate/execute) from migration 0044.
-    expect(Number(rows[0]!.total)).toBe(115);
+    // 120: the 109 counted before, plus the six Phase 5 workflow permissions
+    // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
+    // plus the five Phase 6 jobs permissions
+    // (jobs.view/create/retry/cancel/delete) from migration 0045.
+    expect(Number(rows[0]!.total)).toBe(120);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,

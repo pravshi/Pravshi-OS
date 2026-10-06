@@ -752,11 +752,13 @@ describe('nothing already approved has moved', () => {
        where schemaname='public' and 'app_user' = any(roles)
          and tablename not like '\\_%'`,
     );
-    // 71: the 66 pre-existing policies (22 base + 9 CRM core (0033) + 12 Track B
+    // 80: the 66 pre-existing policies (22 base + 9 CRM core (0033) + 12 Track B
     // (0034/0035) + 8 Phase 3 (0037) + 15 Phase 4 (0042/0043)), plus the 5 Phase 5
     // policies (select/insert/update × workflows; select × workflow_executions;
-    // select × workflow_execution_steps) from migration 0044.
-    expect(Number(policies.rows[0]!.n)).toBe(71);
+    // select × workflow_execution_steps) from migration 0044, plus the 9 Phase 6
+    // policies (select/insert/update × jobs, schedules, notifications) from
+    // migrations 0045/0047.
+    expect(Number(policies.rows[0]!.n)).toBe(80);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

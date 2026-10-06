@@ -50,6 +50,8 @@ describe.skipIf(!dbReady)('retry sweeper (live DB)', () => {
 
   afterAll(async () => {
     if (!dbReady) return;
+    // Delete in FK order: roles references organizations.
+    await owner.query(`delete from public.roles where org_id = $1::uuid`, [orgId]);
     await owner.query(`delete from public.organizations where id = $1::uuid`, [orgId]);
     await owner.end();
   });

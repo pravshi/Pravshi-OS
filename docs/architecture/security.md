@@ -26,6 +26,7 @@ Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-m
 | Projects | `projects.view` `projects.create` `projects.edit` `projects.delete` `projects.manage_members` |
 | Tasks | `tasks.view` `tasks.create` `tasks.edit` `tasks.assign` `tasks.delete` `tasks.comment` |
 | Workflows | `workflows.view` `workflows.create` `workflows.edit` `workflows.delete` `workflows.activate` `workflows.execute` |
+| Automation | `jobs.view` `jobs.create` `jobs.retry` `jobs.cancel` `jobs.delete` |
 | Documents | `documents.view` `documents.upload` `documents.download` `documents.verify` `documents.delete` |
 | Policies | `policies.view` `policies.manage` `policies.acknowledge` `policies.view_compliance` |
 | Reports | `reports.view` `reports.export` |
@@ -94,6 +95,11 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `workflows.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `workflows.activate` | G | G | — | — | — | — | — | D | — | — | — | — | — |
 | `workflows.execute` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `jobs.view` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `jobs.create` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `jobs.retry` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `jobs.cancel` | G | G | — | — | — | — | — | D | — | — | — | — | — |
+| `jobs.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `clients.view` | G | — | — | — | — | — | — | D | P | P | P | G⁴ | — |
 | `clients.edit` | G | — | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | D | S | D | P | P | P | G⁴ | — |

@@ -295,8 +295,10 @@ describe('permission catalogue', () => {
     // from migration 0034, plus the 5 Phase 3 pipeline permissions
     // (pipelines.view/create/edit/delete, pipeline_stages.manage) from migration 0037,
     // plus the 6 Phase 5 workflow permissions
-    // (workflows.view/create/edit/delete/activate/execute) from migration 0044.
-    expect(Number(rows[0]!.count)).toBe(115);
+    // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
+    // plus the 5 Phase 6 jobs permissions
+    // (jobs.view/create/retry/cancel/delete) from migration 0045.
+    expect(Number(rows[0]!.count)).toBe(120);
   });
 
   it('holds every named key from each module', async () => {
@@ -423,6 +425,12 @@ describe('permission catalogue', () => {
       'workflows.delete',
       'workflows.activate',
       'workflows.execute',
+      // Phase 6 (migration 0045): the automation/jobs permissions.
+      'jobs.view',
+      'jobs.create',
+      'jobs.retry',
+      'jobs.cancel',
+      'jobs.delete',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -562,11 +570,11 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 115 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
-    // 6 Phase 5 workflow), minus users.impersonate which is listed but granted
+    // 120 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow + 5 Phase 6 jobs), minus users.impersonate which is listed but granted
     // to no role.
-    expect(Number(rows[0]!.total)).toBe(114);
-    expect(Number(rows[0]!.global)).toBe(114);
+    expect(Number(rows[0]!.total)).toBe(119);
+    expect(Number(rows[0]!.global)).toBe(119);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants', async () => {
