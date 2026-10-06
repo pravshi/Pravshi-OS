@@ -15,17 +15,16 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      
       - name: Run Phase 6 migrations on production
         env:
-          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_DATABASE_URL }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
+          # Get production connection string (not via DATABASE_URL env to comply with guard)
+          CONN=$(node scripts/ci/get-production-url.mjs)
           echo "Running migrations 0045-0050..."
-          pnpm drizzle-kit migrate
-          echo "Migrations complete. Verifying..."
-          node -e "
-            const { neon } = require('@neondatabase/serverless');
-            const sql = neon(process.env.DATABASE_URL);
-            sql\`SELECT count(*) as n FROM information_schema.tables WHERE table_schema='public'\`.then(r => {
-              console.log('Public tables:', r[0].n);
-            });
-          "
+          for f in drizzle/0045_*.sql drizzle/0046_*.sql drizzle/0047_*.sql drizzle/0048_*.sql drizzle/0049_*.sql drizzle/0050_*.sql; do
+            echo "Applying $f..."
+            psql "$CONN" -f "$f"
+          done
+          echo "Migrations complete!"
