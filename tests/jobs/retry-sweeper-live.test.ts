@@ -50,9 +50,14 @@ describe.skipIf(!dbReady)('retry sweeper (live DB)', () => {
 
   afterAll(async () => {
     if (!dbReady) return;
-    // Delete in FK order: roles references organizations.
-    await owner.query(`delete from public.roles where org_id = $1::uuid`, [orgId]);
-    await owner.query(`delete from public.organizations where id = $1::uuid`, [orgId]);
+    // NOTE: org/role cleanup is intentionally omitted. Inserting an
+    // organization auto-seeds undeletable system roles
+    // (organizations_seed_system_roles + database.md rule enforced by
+    // roles_enforce_protection: "a system role cannot be deleted"), and the
+    // org cannot be deleted while those system roles reference it. The
+    // established pattern (tests/jobs/jobs-rls.test.ts) is to leave the org
+    // behind — the CI ephemeral branch is dropped after the run anyway.
+    // The afterEach above already removes this file's jobs rows.
     await owner.end();
   });
 
