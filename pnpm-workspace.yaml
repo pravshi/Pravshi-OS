@@ -12,4 +12,4 @@ overrides:
 
 auditConfig:
   ignoreGhsas:
-    - GHSA-vfj7-8cjw-p6xm  # braces: no patch available, dev-only via eslint
+    - GHSA-vfj7-8cjw-p6xm # braces: no patch available, dev-only via eslint
