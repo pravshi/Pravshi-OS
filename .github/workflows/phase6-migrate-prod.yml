@@ -1,0 +1,31 @@
+name: One-time Phase 6 Production Migration
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run Phase 6 migrations on production
+        env:
+          DATABASE_URL: ${{ secrets.NEON_PRODUCTION_DATABASE_URL }}
+        run: |
+          echo "Running migrations 0045-0050..."
+          pnpm drizzle-kit migrate
+          echo "Migrations complete. Verifying..."
+          node -e "
+            const { neon } = require('@neondatabase/serverless');
+            const sql = neon(process.env.DATABASE_URL);
+            sql\`SELECT count(*) as n FROM information_schema.tables WHERE table_schema='public'\`.then(r => {
+              console.log('Public tables:', r[0].n);
+            });
+          "
