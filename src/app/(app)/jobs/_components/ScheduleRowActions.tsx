@@ -97,9 +97,7 @@ export function ScheduleRowActions({
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Edit schedule</DialogTitle>
-                <DialogDescription>
-                  Changes apply from the next scheduled run.
-                </DialogDescription>
+                <DialogDescription>Changes apply from the next scheduled run.</DialogDescription>
               </DialogHeader>
               <ScheduleForm
                 workflows={workflows}
@@ -120,8 +118,8 @@ export function ScheduleRowActions({
               <DialogHeader>
                 <DialogTitle>Delete schedule?</DialogTitle>
                 <DialogDescription>
-                  “{schedule.name}” will stop firing. Jobs it already enqueued keep running.
-                  This cannot be undone.
+                  “{schedule.name}” will stop firing. Jobs it already enqueued keep running. This
+                  cannot be undone.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

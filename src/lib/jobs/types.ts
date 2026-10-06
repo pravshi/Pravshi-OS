@@ -122,16 +122,18 @@ export const WebhookPayloadSchema = z.strictObject({
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 
 /** `email` — provider send with retry; dedup by dedupKey. */
-export const EmailPayloadSchema = z.strictObject({
-  to: z.union([z.string().email(), z.array(z.string().email()).min(1).max(50)]),
-  subject: z.string().min(1).max(300),
-  text: z.string().max(200_000).optional(),
-  html: z.string().max(500_000).optional(),
-  templateId: z.string().max(128).optional(),
-  templateVars: z.record(z.string(), z.unknown()).optional(),
-}).refine((p) => p.text !== undefined || p.html !== undefined || p.templateId !== undefined, {
-  message: 'email payload needs text, html, or templateId',
-});
+export const EmailPayloadSchema = z
+  .strictObject({
+    to: z.union([z.string().email(), z.array(z.string().email()).min(1).max(50)]),
+    subject: z.string().min(1).max(300),
+    text: z.string().max(200_000).optional(),
+    html: z.string().max(500_000).optional(),
+    templateId: z.string().max(128).optional(),
+    templateVars: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((p) => p.text !== undefined || p.html !== undefined || p.templateId !== undefined, {
+    message: 'email payload needs text, html, or templateId',
+  });
 export type EmailPayload = z.infer<typeof EmailPayloadSchema>;
 
 /** `notification` — writes to the notifications table (existing system, §6). */

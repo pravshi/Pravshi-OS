@@ -118,7 +118,16 @@ const hoisted = vi.hoisted(() => {
 
   const executed: Array<{ sql: string; params: unknown[] }> = [];
 
-  return { jobs, seedJob, renderSql, interpret, reset, armFailure, executed, releaseClient: vi.fn() };
+  return {
+    jobs,
+    seedJob,
+    renderSql,
+    interpret,
+    reset,
+    armFailure,
+    executed,
+    releaseClient: vi.fn(),
+  };
 });
 
 vi.mock('@/lib/db/pool', () => ({
@@ -273,4 +282,3 @@ describe('sweepRetryableJobs', () => {
     expect(canTransitionJob('dead_letter', 'pending')).toBe(true); // manual path only
   });
 });
-

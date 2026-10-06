@@ -55,8 +55,8 @@ export default async function DeadLetterPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">Dead letter</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Jobs that exhausted their retries or failed non-retryably. Fix the cause, then retry —
-          or discard the ones you no longer need.
+          Jobs that exhausted their retries or failed non-retryably. Fix the cause, then retry — or
+          discard the ones you no longer need.
         </p>
       </div>
 

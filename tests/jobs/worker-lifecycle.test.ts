@@ -121,9 +121,9 @@ describe('registerHandler', () => {
   });
 
   it('throws on unknown job type', () => {
-    expect(() =>
-      registerHandler('not_a_type' as 'email', async () => {}),
-    ).toThrow(/unknown job type/);
+    expect(() => registerHandler('not_a_type' as 'email', async () => {})).toThrow(
+      /unknown job type/,
+    );
   });
 
   it('resetHandlerRegistry allows re-registration', () => {
@@ -259,7 +259,9 @@ describe('runWorker', () => {
 
   it('unregistered job type → CONFIG_ERROR dead-letter, worker keeps running', async () => {
     registerHandler('webhook', async () => {});
-    vi.mocked(claimJob).mockResolvedValueOnce(fakeJob({ type: 'email' })).mockResolvedValue(null);
+    vi.mocked(claimJob)
+      .mockResolvedValueOnce(fakeJob({ type: 'email' }))
+      .mockResolvedValue(null);
 
     const runPromise = runWorker({ workerId: 'w-4', pollIntervalMs: 10 });
     await sleep(80);

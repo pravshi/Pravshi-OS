@@ -46,8 +46,7 @@ export const PATCH = withPermission<{ id: string }>(
       const schedule = await updateSchedule(authorization, id, body);
       return Response.json(schedule, { headers: noStoreHeaders });
     } catch (error) {
-      const invalid =
-        invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
+      const invalid = invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
       if (invalid) return invalid;
       throw error;
     }

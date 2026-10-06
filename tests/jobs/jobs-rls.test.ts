@@ -190,7 +190,11 @@ describe.skipIf(!ready)('jobs RLS: catalogue and grant matrix', () => {
 
 describe.skipIf(!ready)('jobs RLS: jobs table matrix', () => {
   it('select: each tenant sees only its own jobs', async () => {
-    const a = await inContext<{ id: string }>(asUser, ctxFor(alice, orgA), `select id from public.jobs`);
+    const a = await inContext<{ id: string }>(
+      asUser,
+      ctxFor(alice, orgA),
+      `select id from public.jobs`,
+    );
     expect(a.map((r) => r.id)).toContain(jobA);
     expect(a.map((r) => r.id)).not.toContain(jobB);
 
@@ -244,10 +248,9 @@ describe.skipIf(!ready)('jobs RLS: jobs table matrix', () => {
 
   it('insert: job whose org_id is not a real organization → 42501 (jobs_org_guard)', async () => {
     const code = await sqlstateOf(
-      owner.query(
-        `insert into public.jobs (org_id, type) values ($1::uuid, 'email')`,
-        ['99999999-9999-4999-8999-999999999999'],
-      ),
+      owner.query(`insert into public.jobs (org_id, type) values ($1::uuid, 'email')`, [
+        '99999999-9999-4999-8999-999999999999',
+      ]),
     );
     expect(code).toBe('42501');
   });

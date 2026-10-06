@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { withPermission } from '@/lib/authz/http';
 import { cancelJob } from '@/lib/jobs/queue';
-import {
-  invalidRequestResponse,
-  noStoreHeaders,
-  serviceInvalidRequestResponse,
-} from '../../http';
+import { invalidRequestResponse, noStoreHeaders, serviceInvalidRequestResponse } from '../../http';
 
 /**
  * POST /api/jobs/[id]/cancel — cancel a live job (Phase 6).
@@ -29,8 +25,7 @@ export const POST = withPermission<{ id: string }>(
       await cancelJob(authorization, id);
       return Response.json({ ok: true }, { headers: noStoreHeaders });
     } catch (error) {
-      const invalid =
-        invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
+      const invalid = invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
       if (invalid) return invalid;
       throw error;
     }

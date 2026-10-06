@@ -83,15 +83,15 @@ export function ScheduleForm({
     if (!trimmedName) return setFormError('Give the schedule a name.');
     if (!UUID.test(workflowId)) return setFormError('Pick a workflow (or enter its id).');
     if (!isValidCron(cron.trim()))
-      return setFormError('Cron must be a 5-field expression like “0 9 * * 1-5” (minute hour day month weekday).');
+      return setFormError(
+        'Cron must be a 5-field expression like “0 9 * * 1-5” (minute hour day month weekday).',
+      );
     if (!isValidTimezone(timezone))
       return setFormError('That timezone is not a valid IANA timezone name.');
 
     setPending(true);
     try {
-      const url = editing
-        ? `/api/schedules/${encodeURIComponent(schedule!.id)}`
-        : '/api/schedules';
+      const url = editing ? `/api/schedules/${encodeURIComponent(schedule!.id)}` : '/api/schedules';
       // PATCH accepts only { name, cron, timezone, isActive } (strict schema)
       // — the workflow is immutable once a schedule is created.
       const body = editing
@@ -233,7 +233,13 @@ export function ScheduleForm({
       )}
 
       <Button type="submit" size="sm" disabled={pending}>
-        {pending ? (editing ? 'Saving…' : 'Creating…') : editing ? 'Save changes' : 'Create schedule'}
+        {pending
+          ? editing
+            ? 'Saving…'
+            : 'Creating…'
+          : editing
+            ? 'Save changes'
+            : 'Create schedule'}
       </Button>
     </form>
   );

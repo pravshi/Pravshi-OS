@@ -14,7 +14,14 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import type { Authorization } from '@/lib/authz/require-permission';
-import { JOB_STATUSES, JOB_STATUS_SET, JOB_TYPES, JOB_TYPE_SET, type JobStatus, type JobType } from '@/lib/jobs/types';
+import {
+  JOB_STATUSES,
+  JOB_STATUS_SET,
+  JOB_TYPES,
+  JOB_TYPE_SET,
+  type JobStatus,
+  type JobType,
+} from '@/lib/jobs/types';
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
 
@@ -155,10 +162,7 @@ export function parseJobsFilter(params: { status?: string; type?: string }): Lis
   return { status, type, limit: 50, offset: 0 };
 }
 
-export async function listJobs(
-  auth: Authorization,
-  opts: ListJobsOptions,
-): Promise<JobRow[]> {
+export async function listJobs(auth: Authorization, opts: ListJobsOptions): Promise<JobRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const offset = Math.max(opts.offset ?? 0, 0);
   return withAuthorizedDb(auth.ctx, async (tx) => {
@@ -231,7 +235,9 @@ export function sanitizePayload(value: unknown): unknown {
   }
   if (Array.isArray(value)) {
     const items = value.slice(0, MAX_ARRAY_ITEMS).map(sanitizePayload);
-    return value.length > MAX_ARRAY_ITEMS ? [...items, `…(${value.length - MAX_ARRAY_ITEMS} more)`] : items;
+    return value.length > MAX_ARRAY_ITEMS
+      ? [...items, `…(${value.length - MAX_ARRAY_ITEMS} more)`]
+      : items;
   }
   if (value !== null && typeof value === 'object') {
     const out: Record<string, unknown> = {};

@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { withPermission } from '@/lib/authz/http';
 import { retryJob } from '@/lib/jobs/queue';
-import {
-  invalidRequestResponse,
-  noStoreHeaders,
-  serviceInvalidRequestResponse,
-} from '../../http';
+import { invalidRequestResponse, noStoreHeaders, serviceInvalidRequestResponse } from '../../http';
 
 /**
  * POST /api/jobs/[id]/retry — manual replay (Phase 6).
@@ -27,8 +23,7 @@ export const POST = withPermission<{ id: string }>(
       const job = await retryJob(authorization, id);
       return Response.json(job, { headers: noStoreHeaders });
     } catch (error) {
-      const invalid =
-        invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
+      const invalid = invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
       if (invalid) return invalid;
       throw error;
     }

@@ -178,10 +178,7 @@ const BaseTriggerConfigSchema = z.strictObject({
  * DRAFT-save behavior, unchanged); the cron/timezone shape matches the
  * scheduled branch.
  */
-export const TriggerConfigSchema = z.union([
-  ScheduledTriggerConfigSchema,
-  BaseTriggerConfigSchema,
-]);
+export const TriggerConfigSchema = z.union([ScheduledTriggerConfigSchema, BaseTriggerConfigSchema]);
 export type TriggerConfig = z.infer<typeof TriggerConfigSchema>;
 
 // ── Conditions (§11) ───────────────────────────────────────────────────────────

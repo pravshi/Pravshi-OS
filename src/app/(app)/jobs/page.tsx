@@ -14,13 +14,7 @@ import { ErrorMessage } from '@/components/crm/error-message';
 import { LinkButton } from '@/components/crm/link-button';
 import { formatDateTime } from '@/components/crm/format';
 import { JOB_PERMISSIONS, getJobPermissions } from './_permissions';
-import {
-  JOB_TYPE_LABELS,
-  errorExcerpt,
-  getJobsStats,
-  listJobs,
-  parseJobsFilter,
-} from './_jobs';
+import { JOB_TYPE_LABELS, errorExcerpt, getJobsStats, listJobs, parseJobsFilter } from './_jobs';
 import { JobStatusBadge } from './_components/JobStatusBadge';
 import { JobFilterForm } from './_components/JobFilterForm';
 
@@ -113,10 +107,7 @@ export default async function JobsPage({
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle>Queue</CardTitle>
-          <JobFilterForm
-            initialStatus={filter.status ?? ''}
-            initialType={filter.type ?? ''}
-          />
+          <JobFilterForm initialStatus={filter.status ?? ''} initialType={filter.type ?? ''} />
         </CardHeader>
         <CardContent>
           {jobs.length === 0 ? (
@@ -158,7 +149,9 @@ export default async function JobsPage({
                         </Link>
                         {job.dedupKey && (
                           <p className="mt-0.5 font-mono text-[11px] text-ink-muted">
-                            {job.dedupKey.length > 28 ? job.dedupKey.slice(0, 28) + '…' : job.dedupKey}
+                            {job.dedupKey.length > 28
+                              ? job.dedupKey.slice(0, 28) + '…'
+                              : job.dedupKey}
                           </p>
                         )}
                       </TableCell>
@@ -188,7 +181,9 @@ export default async function JobsPage({
 
       <div className="flex flex-wrap gap-4">
         <FilteredJobsLink label="All jobs →" href="/jobs" />
-        {canCreate && <FilteredJobsLink label="Schedules are created from workflows →" href="/jobs/schedules" />}
+        {canCreate && (
+          <FilteredJobsLink label="Schedules are created from workflows →" href="/jobs/schedules" />
+        )}
       </div>
     </div>
   );

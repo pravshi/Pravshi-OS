@@ -183,12 +183,12 @@ const hoisted = vi.hoisted(() => {
     const now = Date.now();
     const candidates = [...jobs.values()]
       .filter(
-        (j) =>
-          j.status === 'pending' &&
-          j.nextRunAtMs <= now &&
-          (!types || types.includes(j.type)),
+        (j) => j.status === 'pending' && j.nextRunAtMs <= now && (!types || types.includes(j.type)),
       )
-      .sort((a, b) => b.priority - a.priority || a.nextRunAtMs - b.nextRunAtMs || a.createdSeq - b.createdSeq);
+      .sort(
+        (a, b) =>
+          b.priority - a.priority || a.nextRunAtMs - b.nextRunAtMs || a.createdSeq - b.createdSeq,
+      );
     const winner = candidates[0];
     if (!winner) return null;
     // Atomic in JS's single thread — the production equivalent is
@@ -220,7 +220,8 @@ const hoisted = vi.hoisted(() => {
     workerId?: string,
   ): Promise<void> {
     const j = owned(jobs.get(jobId), workerId);
-    if (j.status !== 'running') throw new Error(`INVALID_REQUEST: cannot complete from '${j.status}'`);
+    if (j.status !== 'running')
+      throw new Error(`INVALID_REQUEST: cannot complete from '${j.status}'`);
     j.status = 'succeeded';
     j.errorCode = null;
     j.errorMessage = null;
@@ -441,7 +442,9 @@ vi.mock('@/lib/db/pool', () => ({
 
 vi.mock('drizzle-orm/neon-serverless', () => ({
   drizzle: () => ({
-    transaction: async (fn: (tx: { execute: (q: unknown) => Promise<unknown> }) => Promise<unknown>) =>
+    transaction: async (
+      fn: (tx: { execute: (q: unknown) => Promise<unknown> }) => Promise<unknown>,
+    ) =>
       fn({
         execute: async (q: unknown) => {
           const rendered = hoisted.renderSql(q);
@@ -789,8 +792,14 @@ describe('crash after side effect', () => {
 
 describe('stale heartbeat', () => {
   it('claimed job with old heartbeat → reaped to pending with attempts + 1; fresh claims untouched', async () => {
-    const stale = (await hoisted.enqueueJob(AUTH, { type: 'cleanup', payload: {} })) as unknown as Job;
-    const fresh = (await hoisted.enqueueJob(AUTH, { type: 'cleanup', payload: {} })) as unknown as Job;
+    const stale = (await hoisted.enqueueJob(AUTH, {
+      type: 'cleanup',
+      payload: {},
+    })) as unknown as Job;
+    const fresh = (await hoisted.enqueueJob(AUTH, {
+      type: 'cleanup',
+      payload: {},
+    })) as unknown as Job;
 
     await hoisted.claimJob('worker-old');
     await hoisted.startJob(AUTH, stale.id, 'worker-old');

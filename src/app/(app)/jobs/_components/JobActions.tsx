@@ -146,11 +146,17 @@ export function JobActions({
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setConfirmCancel(false)} disabled={pending !== null}>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmCancel(false)}
+                  disabled={pending !== null}
+                >
                   Keep job
                 </Button>
                 <Button variant="destructive" onClick={doCancel} disabled={pending !== null}>
-                  {pending === 'cancel' ? `${cancelLabel === 'Discard' ? 'Discarding' : 'Cancelling'}…` : cancelLabel}
+                  {pending === 'cancel'
+                    ? `${cancelLabel === 'Discard' ? 'Discarding' : 'Cancelling'}…`
+                    : cancelLabel}
                 </Button>
               </DialogFooter>
             </DialogContent>

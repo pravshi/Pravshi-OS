@@ -17,24 +17,21 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-export const GET = withPermission(
-  { permission: 'jobs.view' },
-  async (request, authorization) => {
-    try {
-      const url = new URL(request.url);
-      const query = listQuery.parse({
-        page: url.searchParams.get('page') ?? undefined,
-        limit: url.searchParams.get('limit') ?? undefined,
-      });
-      const page = await listJobs(authorization, {
-        ...query,
-        status: 'dead_letter',
-      });
-      return Response.json(page, { headers: noStoreHeaders });
-    } catch (error) {
-      const invalid = invalidRequestResponse(error);
-      if (invalid) return invalid;
-      throw error;
-    }
-  },
-);
+export const GET = withPermission({ permission: 'jobs.view' }, async (request, authorization) => {
+  try {
+    const url = new URL(request.url);
+    const query = listQuery.parse({
+      page: url.searchParams.get('page') ?? undefined,
+      limit: url.searchParams.get('limit') ?? undefined,
+    });
+    const page = await listJobs(authorization, {
+      ...query,
+      status: 'dead_letter',
+    });
+    return Response.json(page, { headers: noStoreHeaders });
+  } catch (error) {
+    const invalid = invalidRequestResponse(error);
+    if (invalid) return invalid;
+    throw error;
+  }
+});

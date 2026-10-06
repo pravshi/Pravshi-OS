@@ -6,12 +6,7 @@ import { ErrorMessage } from '@/components/crm/error-message';
 import { DetailField } from '@/components/crm/detail-fields';
 import { formatDateTime } from '@/components/crm/format';
 import { JOB_PERMISSIONS, getJobPermissions } from '../_permissions';
-import {
-  JOB_TYPE_LABELS,
-  getJob,
-  sanitizedPayloadJson,
-  type JobRow,
-} from '../_jobs';
+import { JOB_TYPE_LABELS, getJob, sanitizedPayloadJson, type JobRow } from '../_jobs';
 import { JobStatusBadge } from '../_components/JobStatusBadge';
 import { JobActions } from '../_components/JobActions';
 
@@ -20,7 +15,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function JobTimeline({ job }: { job: JobRow }) {
   const events: { at: string; label: string }[] = [
     { at: job.createdAt, label: 'Enqueued' },
-    ...(job.claimedAt ? [{ at: job.claimedAt, label: `Claimed${job.claimedBy ? ` by ${job.claimedBy}` : ''}` }] : []),
+    ...(job.claimedAt
+      ? [{ at: job.claimedAt, label: `Claimed${job.claimedBy ? ` by ${job.claimedBy}` : ''}` }]
+      : []),
     ...(job.heartbeatAt ? [{ at: job.heartbeatAt, label: 'Last worker heartbeat' }] : []),
     ...(job.status === 'pending' ? [{ at: job.nextRunAt, label: 'Next run (due)' }] : []),
     ...(job.status === 'failed' || job.status === 'dead_letter'
@@ -58,7 +55,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         </Link>
         <ErrorMessage
           error={{
-            error: { code: 'NOT_FOUND', message: 'This job does not exist or is not visible to you.' },
+            error: {
+              code: 'NOT_FOUND',
+              message: 'This job does not exist or is not visible to you.',
+            },
           }}
           title="Job not found"
         />
@@ -68,9 +68,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const canRetry = held.has(JOB_PERMISSIONS.jobs.retry);
   const canCancel = held.has(JOB_PERMISSIONS.jobs.cancel);
-  const workflowId = job.type === 'workflow_run' && typeof job.payload.workflowId === 'string'
-    ? (job.payload.workflowId as string)
-    : null;
+  const workflowId =
+    job.type === 'workflow_run' && typeof job.payload.workflowId === 'string'
+      ? (job.payload.workflowId as string)
+      : null;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -127,12 +128,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <CardTitle>Last error</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {job.errorCode && (
-              <p className="font-mono text-xs text-ink-muted">{job.errorCode}</p>
-            )}
-            {job.errorMessage && (
-              <p className="whitespace-pre-wrap text-sm">{job.errorMessage}</p>
-            )}
+            {job.errorCode && <p className="font-mono text-xs text-ink-muted">{job.errorCode}</p>}
+            {job.errorMessage && <p className="whitespace-pre-wrap text-sm">{job.errorMessage}</p>}
           </CardContent>
         </Card>
       )}

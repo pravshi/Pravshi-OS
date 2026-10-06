@@ -28,25 +28,22 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-export const GET = withPermission(
-  { permission: 'jobs.view' },
-  async (request, authorization) => {
-    try {
-      const url = new URL(request.url);
-      const query = listQuery.parse({
-        isActive: url.searchParams.get('isActive') ?? undefined,
-        page: url.searchParams.get('page') ?? undefined,
-        limit: url.searchParams.get('limit') ?? undefined,
-      });
-      const page = await listSchedules(authorization, query);
-      return Response.json(page, { headers: noStoreHeaders });
-    } catch (error) {
-      const invalid = invalidRequestResponse(error);
-      if (invalid) return invalid;
-      throw error;
-    }
-  },
-);
+export const GET = withPermission({ permission: 'jobs.view' }, async (request, authorization) => {
+  try {
+    const url = new URL(request.url);
+    const query = listQuery.parse({
+      isActive: url.searchParams.get('isActive') ?? undefined,
+      page: url.searchParams.get('page') ?? undefined,
+      limit: url.searchParams.get('limit') ?? undefined,
+    });
+    const page = await listSchedules(authorization, query);
+    return Response.json(page, { headers: noStoreHeaders });
+  } catch (error) {
+    const invalid = invalidRequestResponse(error);
+    if (invalid) return invalid;
+    throw error;
+  }
+});
 
 export const POST = withPermission(
   { permission: 'jobs.create' },
@@ -56,8 +53,7 @@ export const POST = withPermission(
       const schedule = await createSchedule(authorization, body);
       return Response.json(schedule, { status: 201, headers: noStoreHeaders });
     } catch (error) {
-      const invalid =
-        invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
+      const invalid = invalidRequestResponse(error) ?? serviceInvalidRequestResponse(error);
       if (invalid) return invalid;
       throw error;
     }
