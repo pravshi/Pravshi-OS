@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PRAVSHI OS — ephemeral CI database branch (Task 11).
 //
-// Creates a throwaway Neon branch from the NON-PRODUCTION parent, gives it
+// Creates a throwaway Neon branch from the production parent, gives it
 // branch-only credentials, and hands CI two connection strings:
 //
 //   app_user  @ pooled host  -> DATABASE_URL / DATABASE_URL_TEST  (runtime + tests)
@@ -53,12 +53,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * The ONLY Neon branch CI may cut ephemeral branches from.
  *
- * Finding #4: the previous check refused only the project DEFAULT branch, which is a
- * proxy, not a rule — if production ever stopped being the default, the refusal would
- * silently stop protecting it. This is an explicit allowlist and it fails closed for
- * production, main, an unknown name, or an empty value.
+ * As of 2026-10-06 the project runs a single persistent branch (`production`).
+ * Nani ordered the `staging` branch removed to stay within Neon's free storage
+ * allowance. Branching is copy-on-write: creating a child never modifies the
+ * parent, the script resets passwords on the child only (branch-only credentials
+ * that die with the branch), and the child is deleted after CI. The script never
+ * opens a connection to the parent itself, so this remains safe.
+ *
+ * This is an explicit allowlist and it fails closed for any other name or an
+ * empty value.
  */
-export const ALLOWED_PARENT = 'staging';
+export const ALLOWED_PARENT = 'production';
 
 export function assertParentAllowed(name) {
   const value = typeof name === 'string' ? name.trim() : '';

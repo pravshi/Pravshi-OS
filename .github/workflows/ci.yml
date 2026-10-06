@@ -51,10 +51,6 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     needs: guards
-    # Dependabot PRs cannot provision ephemeral Neon branches: GitHub withholds
-    # NEON_API_KEY from Dependabot builds. Guards (format, audit, secret-scan,
-    # typecheck via tsc) already validate dependency bumps; skip DB tests.
-    if: github.actor != 'dependabot[bot]' && !startsWith(github.head_ref, 'dependabot/')
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -70,7 +66,7 @@ jobs:
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-          NEON_PARENT_BRANCH: staging
+          NEON_PARENT_BRANCH: production
         run: node scripts/ci/provision-branch-role.mjs create
 
       # Task 1.12 made BETTER_AUTH_SECRET a required runtime variable, and src/env.ts
@@ -100,20 +96,9 @@ jobs:
           DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
         run: pnpm exec drizzle-kit migrate
 
-      - name: Diagnose migration state
-        env:
-          DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
-        run: |
-          set +e
-          echo "=== Policy count (app_user) ==="
-          psql "$DATABASE_URL_MIGRATE" -t -c "select count(*) from pg_policies where schemaname='public' and 'app_user' = any(roles) and tablename not like '\_%';"
-          echo "=== Workflow policies ==="
-          psql "$DATABASE_URL_MIGRATE" -c "select policyname, tablename from pg_policies where schemaname='public' and tablename like 'workflow%';"
-          echo "=== Workflow permissions ==="
-          psql "$DATABASE_URL_MIGRATE" -c "select key from public.permissions where key like 'workflows.%';"
-          echo "=== Workflow tables ==="
-          psql "$DATABASE_URL_MIGRATE" -c "select tablename from pg_tables where schemaname='public' and tablename like 'workflow%';"
-          true
+      # Tests run as app_user on the POOLED host — the role that cannot bypass RLS.
+      # APP_URL is required because src/env.ts validates the runtime environment at
+      # import time, and CI has no .env file.
       - name: Test
         env:
           DATABASE_URL: ${{ steps.neon.outputs.db_url_app }}
@@ -129,11 +114,10 @@ jobs:
         run: pnpm build
 
   # always(): the branch must die even when ci is cancelled or fails, on every event.
-  # Skipped for Dependabot PRs: no branch was created (no secret to create one).
   cleanup:
     runs-on: ubuntu-latest
     needs: [ci]
-    if: always() && github.actor != 'dependabot[bot]' && !startsWith(github.head_ref, 'dependabot/')
+    if: always()
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
