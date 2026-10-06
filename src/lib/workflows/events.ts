@@ -29,10 +29,37 @@
  * `Authorization` (D2) — a workflow can never do what its actor cannot.
  * Recursion is bounded at depth 5 per request (D4) by the AsyncLocalStorage
  * depth guard below.
+ *
+ * Transport: inline by default, queue opt-in (Phase 6 wiring).
+ *
+ *   Inline (default): the engine runs awaited inside the requesting HTTP
+ *   call (D1). Rationale: on the serverless target the function may freeze
+ *   once the response is sent, so a fire-and-forget kickoff is not
+ *   guaranteed to run — and inline needs zero new infrastructure. This is
+ *   the safe default; the queue flag changes nothing unless it is set.
+ *
+ *   Queue (opt-in): set WORKFLOWS_USE_QUEUE=true (src/env.ts) ONLY when a
+ *   dedicated Phase 6 worker is running to claim and execute `workflow_run`
+ *   jobs. Top-level dispatches (depth 0) are then enqueued instead of
+ *   running inline, so the HTTP request returns immediately. Chained
+ *   re-dispatches (depth > 0) ALWAYS stay inline — D4's per-request depth
+ *   bound is preserved, and the queue never becomes a recursion mechanism.
+ *
+ *   Fallbacks (D3 — the event is never dropped, the caller never breaks):
+ *   if enqueueing throws for any reason — the queue module fails to load,
+ *   the caller lacks `jobs.create`, payload validation fails, or the DB
+ *   errors — the dispatcher logs a warning and runs the engine inline.
+ *
+ *   Known follow-up (RESOLVED 2026-10-06): the worker's handleWorkflowRun
+ *   (jobs/workflow-jobs.ts) now bypasses this dispatcher and calls
+ *   runWorkflowsForEvent directly with a fully-stamped event, so the queue
+ *   branch can never re-enter from the worker path. The flag is safe to
+ *   enable wherever a Phase 6 worker is running.
  */
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as Sentry from '@sentry/nextjs';
+import { env } from '@/env';
 import type { Authorization } from '../authz/require-permission';
 // Implemented by A8 (Execution Orchestrator): the real pipeline
 // (match → evaluate → execute) per §13 of the architecture audit.
@@ -115,6 +142,54 @@ function setFallbackDepth(auth: Authorization, depth: number): void {
 }
 
 /**
+ * Phase 6 queue transport for `dispatchWorkflowEvent` (opt-in via
+ * WORKFLOWS_USE_QUEUE=true). Enqueues a `workflow_run` job carrying the raw
+ * event input; the worker's handleWorkflowRun re-dispatches it, and the
+ * Phase 5 engine re-selects the matching workflows at execution time.
+ *
+ * Returns true when the job was accepted, false on ANY failure — the caller
+ * then falls back to inline execution (D3: the originating mutation must
+ * never break because the queue is unavailable, and a caller without
+ * `jobs.create` must not silently drop the event).
+ *
+ * Dynamic import, not static: this module is imported BY jobs/workflow-jobs.ts
+ * (the handler calls dispatchWorkflowEvent), so a static import of the queue
+ * would risk an import cycle and would pull the drizzle queue module into
+ * every request path. The queue module loads lazily, only when the flag is on.
+ */
+async function tryEnqueueWorkflowEvent(
+  auth: Authorization,
+  event: WorkflowEventInput,
+): Promise<boolean> {
+  try {
+    const { enqueueJob } = await import('@/lib/jobs/queue');
+    await enqueueJob(auth, {
+      type: 'workflow_run',
+      payload: {
+        // WorkflowRunPayloadSchema requires workflowId, but at dispatch time
+        // the engine has not selected any workflow yet — matching happens at
+        // execution. The placeholder satisfies the schema; handleWorkflowRun
+        // ignores it on the eventInput path (it is only read for manualInput).
+        workflowId: randomUUID(),
+        eventInput: event,
+        depth: 0,
+      },
+      // Idempotent enqueue: a redelivered source event reuses its dedup key,
+      // so the queue returns the existing job instead of duplicating it.
+      dedupKey: event.dedupKey,
+    });
+    return true;
+  } catch (error) {
+    console.warn('[workflows] queue enqueue failed — falling back to inline execution', {
+      type: event.type,
+      dedupKey: event.dedupKey,
+      error,
+    });
+    return false;
+  }
+}
+
+/**
  * Dispatches a workflow event to the Phase 5 engine and awaits the pipeline
  * inline in the request (D1: in-request execution; no queue in Phase 5).
  *
@@ -144,6 +219,19 @@ export async function dispatchWorkflowEvent(
         data: { type: event.type, depth },
       });
       return;
+    }
+
+    // Phase 6 opt-in queue transport: a TOP-LEVEL dispatch (depth 0) is
+    // enqueued as a `workflow_run` job instead of running inline, so the HTTP
+    // request returns without executing workflows. Chained re-dispatches
+    // (depth > 0) always stay inline — the D4 depth guard is per originating
+    // request, and the queue is a transport, never a recursion mechanism.
+    // Enqueue failure (missing jobs.create, validation/DB error) falls back
+    // to inline — D3, the event is never dropped.
+    if (depth === 0 && env.WORKFLOWS_USE_QUEUE === 'true') {
+      if (await tryEnqueueWorkflowEvent(auth, event)) {
+        return;
+      }
     }
 
     const fullEvent: WorkflowEvent = {

@@ -48,10 +48,10 @@ export const TRIGGER_TYPE_LABELS: Record<ImplementedTriggerType, string> = {
   'task.assigned': 'Task assigned',
   'project.created': 'Project created',
   manual: 'Manual run',
+  scheduled: 'Scheduled',
 };
 
 export const DEFERRED_TRIGGER_LABELS: Record<(typeof DEFERRED_TRIGGER_TYPES)[number], string> = {
-  scheduled: 'Scheduled',
   webhook: 'Webhook',
   'task.overdue': 'Task overdue',
 };
@@ -269,6 +269,18 @@ export const TRIGGER_TEMPLATE_PATHS: Record<ImplementedTriggerType, string[]> = 
     '{{event.occurredAt}}',
     '{{event.actorPersonId}}',
     '{{event.payload.input}}',
+  ],
+  // Phase 6 §3.7: scheduled events carry no entity — only the schedule facts
+  // the job synthesized into the event payload (workflow-jobs.ts).
+  scheduled: [
+    '{{event.type}}',
+    '{{event.occurredAt}}',
+    '{{event.actorPersonId}}',
+    '{{event.payload.scheduleId}}',
+    '{{event.payload.workflowId}}',
+    '{{event.payload.cron}}',
+    '{{event.payload.timezone}}',
+    '{{event.payload.windowStart}}',
   ],
 };
 
