@@ -348,17 +348,29 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
   });
 
   it('refuses to activate a deferred-trigger workflow (400: trigger type not yet supported)', async () => {
+    const webhook = await S().createWorkflow(await authA('workflows.create'), {
+      name: `Webhook sink ${RUN}`,
+      trigger: { type: 'webhook' },
+      conditions: [],
+      actions: [],
+    });
+    expect(webhook.status).toBe('DRAFT');
+    const message = await messageOf(
+      S().activateWorkflow(await authA('workflows.activate'), webhook.id),
+    );
+    expect(message).toMatch(/^INVALID_REQUEST: trigger type not yet supported/);
+  });
+
+  it('activates a scheduled-trigger workflow (Phase 6 §3.7: scheduled is now IMPLEMENTED)', async () => {
     const scheduled = await S().createWorkflow(await authA('workflows.create'), {
       name: `Daily digest ${RUN}`,
-      trigger: { type: 'scheduled' },
+      trigger: { type: 'scheduled', cron: '0 9 * * *', timezone: 'UTC' },
       conditions: [],
       actions: [],
     });
     expect(scheduled.status).toBe('DRAFT');
-    const message = await messageOf(
-      S().activateWorkflow(await authA('workflows.activate'), scheduled.id),
-    );
-    expect(message).toMatch(/^INVALID_REQUEST: trigger type not yet supported/);
+    const active = await S().activateWorkflow(await authA('workflows.activate'), scheduled.id);
+    expect(active.status).toBe('ACTIVE');
   });
 
   it('executes an ACTIVE workflow manually → { executionId, status } and records the step', async () => {

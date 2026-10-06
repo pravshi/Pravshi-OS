@@ -428,8 +428,10 @@ describe('the authorization boundary is unmoved', () => {
     // pipelines and pipeline_stages, select/insert on deal_stage_history — and the
     // Phase 5 workflow-engine migration (0044) adds five more — select/insert/update
     // on workflows, select on workflow_executions, select on workflow_execution_steps.
+    // The Phase 6 automation migrations (0045/0047) add nine more — select/insert/
+    // update on each of jobs, schedules, and notifications.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(71);
+    expect(Number(policies.rows[0]!.n)).toBe(80);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

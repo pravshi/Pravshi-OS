@@ -1,0 +1,391 @@
+/**
+ * Phase 6 — job handler unit tests (Job Handler Engineer).
+ *
+ * Pure-function and validation-path tests: no database, no network, no real
+ * provider. Handlers are expected to throw BEFORE any I/O on invalid input,
+ * which is what these tests pin down. classifyError() (retry.ts) is used to
+ * assert the retryability contract: validation/config errors must be
+ * NON-retryable so bad jobs dead-letter instead of retry-looping.
+ */
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../../src/lib/jobs/worker', () => ({
+  registerHandler: vi.fn(),
+}));
+
+import type { JobExecutionContext } from '../../src/lib/jobs/worker';
+import {
+  assertValidEmailAddress,
+  buildEmailIdempotencyKey,
+  classifyWebhookStatus,
+  handleCleanup,
+  handleEmail,
+  handleNotification,
+  normalizeCleanupPayload,
+  normalizeEmailPayload,
+  normalizeNotificationPayload,
+  normalizeWebhookPayload,
+  signWebhookBody,
+} from '../../src/lib/jobs/handlers';
+import { classifyError } from '../../src/lib/jobs/retry';
+import { env } from '../../src/env';
+import type { Job } from '../../src/lib/jobs/types';
+
+const ORG_ID = '11111111-1111-4111-8111-111111111111';
+const PERSON_ID = '22222222-2222-4222-8222-222222222222';
+
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return {
+    id: '33333333-3333-4333-8333-333333333333',
+    orgId: ORG_ID,
+    type: 'notification',
+    status: 'running',
+    priority: 0,
+    payload: {},
+    attempts: 1,
+    maxAttempts: 5,
+    nextRunAt: new Date().toISOString(),
+    claimedBy: 'worker-1',
+    claimedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+    dedupKey: 'dedup-1',
+    errorCode: null,
+    errorMessage: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function makeCtx(job: Job): JobExecutionContext {
+  return {
+    job,
+    auth: {
+      ctx: { personId: 'system', orgId: job.orgId, aal: 'aal1' },
+      permission: 'jobs.create',
+      scope: 'ORGANIZATION',
+      aal: 'aal1',
+      requestId: 'test-request',
+      meta: {},
+    } as unknown as JobExecutionContext['auth'],
+    signal: new AbortController().signal,
+  };
+}
+
+/** Assert a thrown handler error classifies as non-retryable. */
+async function expectNonRetryable(fn: () => Promise<unknown> | unknown): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    const classified = classifyError(err);
+    expect(classified.retryable).toBe(false);
+    return;
+  }
+  throw new Error('expected handler to throw');
+}
+
+describe('normalizeNotificationPayload', () => {
+  it('accepts the canonical types.ts shape', () => {
+    const n = normalizeNotificationPayload({
+      personId: PERSON_ID,
+      title: 'Deal moved',
+      message: 'Acme deal moved to Negotiation',
+      data: { dealId: 'x' },
+    });
+    expect(n).toEqual({
+      personId: PERSON_ID,
+      title: 'Deal moved',
+      message: 'Acme deal moved to Negotiation',
+      data: { dealId: 'x' },
+    });
+  });
+
+  it('accepts the task-contract alias shape (recipientPersonId/body/entityType/entityId)', () => {
+    const n = normalizeNotificationPayload({
+      recipientPersonId: PERSON_ID,
+      title: 'Hi',
+      body: 'Hello there',
+      entityType: 'deal',
+      entityId: 'deal-1',
+    });
+    expect(n).toEqual({
+      personId: PERSON_ID,
+      title: 'Hi',
+      message: 'Hello there',
+      data: { entityType: 'deal', entityId: 'deal-1' },
+    });
+  });
+
+  it('allows org-broadcast notifications (no recipient)', () => {
+    const n = normalizeNotificationPayload({ title: 'T', message: 'M' });
+    expect(n.personId).toBeNull();
+  });
+
+  it('rejects empty title / message (non-retryable)', async () => {
+    await expectNonRetryable(() => normalizeNotificationPayload({ title: '', message: 'M' }));
+    await expectNonRetryable(() => normalizeNotificationPayload({ title: 'T', message: '' }));
+  });
+
+  it('rejects malformed personId (non-retryable)', async () => {
+    await expectNonRetryable(() =>
+      normalizeNotificationPayload({ personId: 'not-a-uuid', title: 'T', message: 'M' }),
+    );
+  });
+});
+
+describe('handleNotification validation', () => {
+  it('throws non-retryable on invalid payload without touching the DB', async () => {
+    const ctx = makeCtx(makeJob({ type: 'notification', payload: { title: '', message: 'x' } }));
+    await expectNonRetryable(() => handleNotification(ctx));
+  });
+});
+
+describe('assertValidEmailAddress', () => {
+  it('accepts normal addresses', () => {
+    expect(() => assertValidEmailAddress('ops@example.com')).not.toThrow();
+    expect(() => assertValidEmailAddress('first.last+tag@sub.example.co')).not.toThrow();
+  });
+
+  it('rejects malformed addresses as non-retryable', async () => {
+    for (const bad of ['nope', 'a@b', '@example.com', 'a b@example.com', 'x'.repeat(400)]) {
+      await expectNonRetryable(() => assertValidEmailAddress(bad));
+    }
+  });
+});
+
+describe('normalizeEmailPayload', () => {
+  it('accepts the canonical shape with text', () => {
+    const e = normalizeEmailPayload({
+      to: 'ops@example.com',
+      subject: 'S',
+      text: 'hello',
+    });
+    expect(e).toEqual({ to: ['ops@example.com'], subject: 'S', text: 'hello', html: undefined });
+  });
+
+  it('accepts multiple recipients', () => {
+    const e = normalizeEmailPayload({
+      to: ['a@example.com', 'b@example.com'],
+      subject: 'S',
+      html: '<p>hi</p>',
+    });
+    expect(e.to).toHaveLength(2);
+  });
+
+  it('accepts the task-contract alias shape (bodyText/bodyHtml)', () => {
+    const e = normalizeEmailPayload({
+      to: 'ops@example.com',
+      subject: 'S',
+      bodyText: 'plain',
+      bodyHtml: '<p>rich</p>',
+    });
+    expect(e.text).toBe('plain');
+    expect(e.html).toBe('<p>rich</p>');
+  });
+
+  it('rejects payloads with no body at all (non-retryable)', async () => {
+    await expectNonRetryable(() => normalizeEmailPayload({ to: 'a@example.com', subject: 'S' }));
+  });
+
+  it('rejects invalid recipient addresses (non-retryable)', async () => {
+    await expectNonRetryable(() =>
+      normalizeEmailPayload({ to: 'not-an-email', subject: 'S', text: 'x' }),
+    );
+  });
+});
+
+describe('handleEmail', () => {
+  const OLD_ENV = process.env;
+
+  beforeEach(() => {
+    process.env = { ...OLD_ENV };
+    delete process.env.EMAIL_PROVIDER;
+    delete process.env.EMAIL_PROVIDER_API_KEY;
+  });
+
+  afterEach(() => {
+    process.env = OLD_ENV;
+  });
+
+  it('throws non-retryable on invalid payload before provider check', async () => {
+    const ctx = makeCtx(
+      makeJob({ type: 'email', payload: { to: 'bad', subject: 'S', text: 'x' } }),
+    );
+    await expectNonRetryable(() => handleEmail(ctx));
+  });
+
+  it('throws EMAIL_PROVIDER_UNCONFIGURED (non-retryable) when no provider is configured', async () => {
+    const ctx = makeCtx(
+      makeJob({
+        type: 'email',
+        payload: { to: 'ops@example.com', subject: 'S', text: 'hello' },
+      }),
+    );
+    try {
+      await handleEmail(ctx);
+      throw new Error('expected throw');
+    } catch (err) {
+      expect((err as Error).message).toContain('EMAIL_PROVIDER_UNCONFIGURED');
+      expect((err as { code?: string }).code).toBe('CONFIG_ERROR');
+      expect(classifyError(err).retryable).toBe(false);
+    }
+  });
+
+  it('throws EMAIL_PROVIDER_NOT_IMPLEMENTED (non-retryable) when a provider is configured but not wired', async () => {
+    // The email stub must fail closed: a configured provider with no real
+    // transmission must never let the job report success.
+    const prevProvider = env.EMAIL_PROVIDER;
+    const prevKey = env.EMAIL_PROVIDER_API_KEY;
+    env.EMAIL_PROVIDER = 'resend';
+    env.EMAIL_PROVIDER_API_KEY = 'test-api-key';
+    try {
+      const ctx = makeCtx(
+        makeJob({
+          type: 'email',
+          payload: { to: 'ops@example.com', subject: 'S', text: 'hello' },
+        }),
+      );
+      try {
+        await handleEmail(ctx);
+        throw new Error('expected throw');
+      } catch (err) {
+        expect((err as Error).message).toContain('EMAIL_PROVIDER_NOT_IMPLEMENTED');
+        expect((err as { code?: string }).code).toBe('CONFIG_ERROR');
+        expect(classifyError(err).retryable).toBe(false);
+      }
+    } finally {
+      env.EMAIL_PROVIDER = prevProvider;
+      env.EMAIL_PROVIDER_API_KEY = prevKey;
+    }
+  });
+});
+
+describe('buildEmailIdempotencyKey', () => {
+  it('is deterministic per job and incorporates the dedup key', () => {
+    const job = makeJob({ dedupKey: 'k1' });
+    expect(buildEmailIdempotencyKey(job)).toBe(buildEmailIdempotencyKey(job));
+    expect(buildEmailIdempotencyKey(job)).toContain(job.id);
+    expect(buildEmailIdempotencyKey(job)).toContain('k1');
+    expect(buildEmailIdempotencyKey(makeJob({ dedupKey: null }))).toContain('no-dedup');
+  });
+});
+
+describe('normalizeWebhookPayload', () => {
+  it('accepts a minimal webhook payload with defaults', () => {
+    const w = normalizeWebhookPayload({ url: 'https://example.com/hook' });
+    expect(w.url).toBe('https://example.com/hook');
+    expect(w.method).toBe('POST');
+    expect(w.timeoutMs).toBe(10000);
+    expect(w.signatureSecret).toBeUndefined();
+  });
+
+  it('rejects non-http(s) schemes (non-retryable)', async () => {
+    await expectNonRetryable(() => normalizeWebhookPayload({ url: 'ftp://example.com/hook' }));
+  });
+
+  it('rejects out-of-range timeouts (non-retryable)', async () => {
+    await expectNonRetryable(() =>
+      normalizeWebhookPayload({ url: 'https://example.com/', timeoutMs: 999999 }),
+    );
+  });
+
+  it('accepts the task-contract inline signatureSecret (takes precedence over ref)', () => {
+    process.env.WEBHOOK_SIGNING_SECRET_ACME = 'from-ref';
+    const w = normalizeWebhookPayload({
+      url: 'https://example.com/hook',
+      signatureSecret: 'inline-secret',
+      signatureSecretRef: 'acme',
+    });
+    expect(w.signatureSecret).toBe('inline-secret');
+    delete process.env.WEBHOOK_SIGNING_SECRET_ACME;
+  });
+
+  it('resolves signatureSecretRef from the environment (value never in output)', () => {
+    process.env.WEBHOOK_SIGNING_SECRET_ACME = 's3cr3t';
+    const w = normalizeWebhookPayload({
+      url: 'https://example.com/hook',
+      signatureSecretRef: 'acme',
+    });
+    expect(w.signatureSecret).toBe('s3cr3t');
+    delete process.env.WEBHOOK_SIGNING_SECRET_ACME;
+  });
+
+  it('throws CONFIG_ERROR (non-retryable) when a secret ref is unconfigured', async () => {
+    delete process.env.WEBHOOK_SIGNING_SECRET_MISSING;
+    await expectNonRetryable(() =>
+      normalizeWebhookPayload({
+        url: 'https://example.com/hook',
+        signatureSecretRef: 'missing',
+      }),
+    );
+  });
+
+  it('strips caller-supplied signature headers (anti-spoofing)', () => {
+    const w = normalizeWebhookPayload({
+      url: 'https://example.com/hook',
+      headers: { 'X-Pravshi-Signature': 'sha256=fake', 'X-Other': 'ok' },
+    });
+    expect(w.headers['X-Pravshi-Signature']).toBeUndefined();
+    expect(w.headers['X-Other']).toBe('ok');
+  });
+});
+
+describe('signWebhookBody', () => {
+  it('produces a deterministic sha256= HMAC', () => {
+    const body = Buffer.from('{"a":1}', 'utf8');
+    const a = signWebhookBody(body, 'secret');
+    const b = signWebhookBody(body, 'secret');
+    expect(a).toBe(b);
+    expect(a).toMatch(/^sha256=[0-9a-f]{64}$/);
+    expect(signWebhookBody(body, 'other')).not.toBe(a);
+  });
+});
+
+describe('classifyWebhookStatus', () => {
+  it('maps 2xx → ok, 4xx → client-error, 5xx/3xx → server-error', () => {
+    expect(classifyWebhookStatus(200)).toBe('ok');
+    expect(classifyWebhookStatus(201)).toBe('ok');
+    expect(classifyWebhookStatus(204)).toBe('ok');
+    expect(classifyWebhookStatus(400)).toBe('client-error');
+    expect(classifyWebhookStatus(404)).toBe('client-error');
+    expect(classifyWebhookStatus(429)).toBe('client-error');
+    expect(classifyWebhookStatus(500)).toBe('server-error');
+    expect(classifyWebhookStatus(503)).toBe('server-error');
+  });
+});
+
+describe('normalizeCleanupPayload', () => {
+  it('accepts stale_jobs with 90-day default retention', () => {
+    const c = normalizeCleanupPayload({ target: 'stale_jobs' });
+    expect(c.target).toBe('stale_jobs');
+    expect(c.olderThanDays).toBe(90);
+    expect(c.dryRun).toBe(false);
+  });
+
+  it('accepts expired_leases with default 5-minute staleness', () => {
+    const c = normalizeCleanupPayload({ target: 'expired_leases' });
+    expect(c.target).toBe('expired_leases');
+    expect(c.staleThresholdMs).toBe(5 * 60 * 1000);
+  });
+
+  it('honors dryRun and params.staleThresholdMs', () => {
+    const c = normalizeCleanupPayload({
+      target: 'expired_leases',
+      dryRun: true,
+      params: { staleThresholdMs: 60_000 },
+    });
+    expect(c.dryRun).toBe(true);
+    expect(c.staleThresholdMs).toBe(60_000);
+  });
+
+  it('rejects unknown targets (non-retryable)', async () => {
+    await expectNonRetryable(() => normalizeCleanupPayload({ target: 'everything' }));
+  });
+});
+
+describe('handleCleanup validation', () => {
+  it('throws non-retryable on unknown target without touching the DB', async () => {
+    const ctx = makeCtx(makeJob({ type: 'cleanup', payload: { target: 'nuke' } }));
+    await expectNonRetryable(() => handleCleanup(ctx));
+  });
+});

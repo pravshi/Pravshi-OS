@@ -329,6 +329,54 @@
       "tag": "0044_workflow_engine",
       "breakpoints": true,
       "hash": "44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4"
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791248285590,
+      "tag": "0045_automation_jobs",
+      "breakpoints": true,
+      "hash": "925045e968732f0956abda1c263e92c598133f400c405be61be1dd119407baec"
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791248285591,
+      "tag": "0046_scheduler_tick",
+      "breakpoints": true,
+      "hash": "9116be1d2891e19037449878b9b8270758ac13e46e4f0c11baa67363bf39b1ae"
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791248326409,
+      "tag": "0047_notifications",
+      "breakpoints": true,
+      "hash": "1093d54bde28335c4991ea4e3c638b67b34e4a4b2cb7e308fa7662353c13039a"
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791249691113,
+      "tag": "0048_workflow_job_execution",
+      "breakpoints": true,
+      "hash": "9eb57a9360acd3e2b3f42298403d203da9fb64119509c2a7050140f2ccf590fa"
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791252339662,
+      "tag": "0049_worker_plane_sweep",
+      "breakpoints": true,
+      "hash": "f9f6fe6ab698143997565b0c95ae41db147bfbf4a4b9835acc2c8abb098fe9fa"
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791252763750,
+      "tag": "0050_worker_plane_release",
+      "breakpoints": true,
+      "hash": "3ef846714a55a140b8f2310b8056181a75d821d47920eef93d7083db30feb99e"
     }
   ]
 }

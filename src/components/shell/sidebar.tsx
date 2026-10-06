@@ -48,6 +48,11 @@ const SECTIONS = [
   // (§15), so this entry never surfaces on mobile. /workflows is still
   // deep-linkable.
   { label: 'Workflows', href: '/workflows', permission: 'workflows.view', section: 'Automations' },
+  // Phase 6 (Automation & Background Jobs): the /jobs queue dashboard joins
+  // the Automations section. Desktop-primary like Workflows — the mobile tab
+  // bar keeps its 4 hardcoded tabs (§15), so this entry never surfaces on
+  // mobile, but /jobs is still deep-linkable.
+  { label: 'Jobs', href: '/jobs', permission: 'jobs.view', section: 'Automations' },
 ] as const;
 
 export async function Sidebar() {

@@ -940,7 +940,10 @@ describe('the rest of the model is untouched', () => {
     // update on workflows, select on workflow_executions, select on
     // workflow_execution_steps — none of them scope-driven (they branch on
     // authz.has, not scope_for), so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(71);
+    // The Phase 6 automation migrations (0045/0047) add nine more app_user policies —
+    // select/insert/update on each of jobs, schedules, and notifications — none of
+    // them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(80);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 

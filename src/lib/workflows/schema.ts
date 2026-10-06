@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { TaskPrioritySchema, TaskStatusSchema } from '../work/schema';
+// Phase 6 §3.7: cron/timezone validation for ScheduledTriggerConfigSchema.
+// jobs/cron.ts is a pure module (no imports), so this cannot create an
+// import cycle with the workflow engine graph.
+import { CRON_REGEX, isValidCron, isValidTimezone } from '../jobs/cron';
 
 /**
  * Workflow definition input validation (Phase 5). Every untrusted value — REST
@@ -81,9 +85,10 @@ const optionalText = (max: number) =>
 // ── Trigger types (§9) ─────────────────────────────────────────────────────
 
 /**
- * Phase-5 trigger types (plus Phase 6+ contracts with no runtime: `scheduled`,
- * `webhook`, `task.overdue` — a workflow using one can be saved as DRAFT but
- * can never be ACTIVATEd).
+ * Phase-5 trigger types (plus Phase 6+ contracts with no runtime: `webhook`,
+ * `task.overdue` — a workflow using one can be saved as DRAFT but can never
+ * be ACTIVATEd). `scheduled` moved to IMPLEMENTED in Phase 6 (§3.7) once the
+ * scheduler exists.
  *
  * Canonical home (cycle-free): defined here, re-exported by events.ts.
  * Previously this lived in events.ts, which created the
@@ -106,7 +111,8 @@ export const WORKFLOW_TRIGGER_TYPES = [
 
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];
 
-/** The 8 trigger types with Phase-5 runtime (the engine matches them). */
+/** The 9 trigger types with runtime (the Phase-5 engine matches 8; the
+ *  Phase-6 scheduler fires `scheduled`). */
 export const IMPLEMENTED_TRIGGER_TYPES = [
   'deal.created',
   'deal.updated',
@@ -116,24 +122,63 @@ export const IMPLEMENTED_TRIGGER_TYPES = [
   'task.assigned',
   'project.created',
   'manual',
+  // Phase 6 §3.7: cron-triggered schedules now have runtime (the scheduler).
+  'scheduled',
 ] as const;
 export type ImplementedTriggerType = (typeof IMPLEMENTED_TRIGGER_TYPES)[number];
 
-/** Phase 6+ contracts: schema-accepted, registry-documented, no Phase-5 runtime. */
-export const DEFERRED_TRIGGER_TYPES = ['scheduled', 'webhook', 'task.overdue'] as const;
+/** Phase 6+ contracts: schema-accepted, registry-documented, no Phase-5/6 runtime. */
+export const DEFERRED_TRIGGER_TYPES = ['webhook', 'task.overdue'] as const;
 export type DeferredTriggerType = (typeof DEFERRED_TRIGGER_TYPES)[number];
 
 /** All 9 trigger types. Accepts every type in the canonical enum (§10):
  *  activation blocking for deferred types is engine/API logic, not schema. */
 export const TriggerTypeSchema = z.enum(WORKFLOW_TRIGGER_TYPES);
 
+/**
+ * Phase 6 §3.7: cron-triggered workflow schedules. `cron` is a strict 5-field
+ * expression (structural shape + semantic field-range checks via the jobs
+ * cron module); `timezone` is a validated IANA name. strictObject, like the
+ * base config: unknown keys are rejected.
+ *
+ * entityType/filters are accepted but inert — a scheduled event carries
+ * entityType null, so a set entityType would simply never match. They are
+ * kept so TriggerConfig stays a structurally compatible union for every
+ * existing consumer (doesTriggerMatch, service.ts, the builder UI).
+ */
+export const ScheduledTriggerConfigSchema = z.strictObject({
+  type: z.literal('scheduled'),
+  cron: z
+    .string()
+    .regex(CRON_REGEX, 'must be a 5-field cron expression')
+    .refine(isValidCron, 'cron expression is not a valid schedule'),
+  timezone: z.string().refine(isValidTimezone, 'must be a valid IANA timezone'),
+  // Optional alternative to cron (contract §3.7): run every N minutes.
+  // Mutual exclusivity with cron is enforced at the schedule-creation
+  // boundary (schedules API), not here.
+  intervalMinutes: z.number().int().min(1).max(525600).optional(),
+  entityType: z.enum(['deal', 'task', 'project']).optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+});
+export type ScheduledTriggerConfig = z.infer<typeof ScheduledTriggerConfigSchema>;
+
 /** Stored in workflows.trigger (jsonb). trigger_type is a STORED generated
  *  column (trigger ->> 'type'), so `type` must always be present. */
-export const TriggerConfigSchema = z.strictObject({
+const BaseTriggerConfigSchema = z.strictObject({
   type: TriggerTypeSchema,
   entityType: z.enum(['deal', 'task', 'project']).optional(),
   filters: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * Trigger config = the generic config OR the scheduled config. Union (not an
+ * in-place change) so every existing trigger type validates exactly as before:
+ * each branch is strict, so unknown keys are still rejected per branch.
+ * `{ type: 'scheduled' }` alone still matches the base branch (Phase-5
+ * DRAFT-save behavior, unchanged); the cron/timezone shape matches the
+ * scheduled branch.
+ */
+export const TriggerConfigSchema = z.union([ScheduledTriggerConfigSchema, BaseTriggerConfigSchema]);
 export type TriggerConfig = z.infer<typeof TriggerConfigSchema>;
 
 // ── Conditions (§11) ───────────────────────────────────────────────────────────

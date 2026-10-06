@@ -33,6 +33,25 @@ const runtimeSchema = z.object({
    */
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().email().optional(),
+  /**
+   * Phase 6 job email handler (src/lib/jobs/handlers.ts). Both optional: when
+   * either is unset the email job dead-letters with EMAIL_PROVIDER_UNCONFIGURED
+   * (non-retryable) instead of sending.
+   */
+  EMAIL_PROVIDER: z.string().min(1).optional(),
+  EMAIL_PROVIDER_API_KEY: z.string().min(1).optional(),
+  /**
+   * Phase 6 dispatcher transport (src/lib/workflows/events.ts). Optional:
+   * when set to the exact string 'true', top-level workflow event dispatches
+   * are enqueued as `workflow_run` jobs instead of running inline in the HTTP
+   * request. Enable ONLY when a dedicated Phase 6 worker is running to claim
+   * and execute those jobs — otherwise events sit in the queue unexecuted.
+   * Default (unset, blank, or any other value): inline execution, zero new
+   * infrastructure. Chained re-dispatches (depth > 0) always stay inline to
+   * preserve the D4 depth guard, and any enqueue failure falls back to inline
+   * (the event is never dropped, the caller never breaks).
+   */
+  WORKFLOWS_USE_QUEUE: z.string().optional(),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */
@@ -109,3 +128,15 @@ export function parseToolingEnv(raw: Record<string, unknown>): ToolingEnv {
 }
 
 export const env: RuntimeEnv = parseRuntimeEnv(process.env);
+
+/**
+ * Phase 6 webhook signing secrets are dynamic (`WEBHOOK_SIGNING_SECRET_<REF>`
+ * per signatureSecretRef) so they cannot be static schema keys. This helper —
+ * in the one file allowed to read process.env — is the sanctioned read path
+ * for them. Returns undefined when the ref is unset or blank.
+ */
+export function webhookSigningSecret(ref: string): string | undefined {
+  const key = `WEBHOOK_SIGNING_SECRET_${ref.replace(/[^A-Za-z0-9_]/g, '_').toUpperCase()}`;
+  const value = process.env[key];
+  return value && value.length > 0 ? value : undefined;
+}

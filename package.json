@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "guards": "node scripts/guards/secret-scan.mjs && node scripts/guards/workflow-secret-flow.mjs",
-    "ci:branch": "node scripts/ci/provision-branch-role.mjs"
+    "ci:branch": "node scripts/ci/provision-branch-role.mjs",
+    "worker": "node --experimental-transform-types --import ./scripts/worker-loader.mjs src/lib/jobs/runner.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
