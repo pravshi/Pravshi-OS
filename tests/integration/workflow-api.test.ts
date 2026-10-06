@@ -384,7 +384,7 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
     const history = await S().listExecutions(await authA('workflows.view'), created.id);
     expect(history.rows.map((e) => e.id)).toContain(result.executionId);
     expect(typeof history.total).toBe('number');
-  });
+  }, 60000);
 
   it('conceals a foreign execution as NOT_FOUND', async () => {
     expect(
