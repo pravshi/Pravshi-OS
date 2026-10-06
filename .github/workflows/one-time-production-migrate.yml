@@ -1,0 +1,43 @@
+name: one-time-production-migrate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Get production connection URI
+        id: conn
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          URI=$(curl -s -H "Authorization: Bearer $NEON_API_KEY" \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/connection_uri?branch_id=br-billowing-grass-b3e7ckaz&database_name=neondb&role_name=app_owner&pooled=false" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['uri'])")
+          echo "::add-mask::$URI"
+          echo "uri=$URI" >> $GITHUB_OUTPUT
+
+      - name: Run migrations on production
+        env:
+          DATABASE_URL_MIGRATE: ${{ steps.conn.outputs.uri }}
+        run: pnpm exec drizzle-kit migrate
+
+      - name: Verify tables
+        env:
+          DATABASE_URL_MIGRATE: ${{ steps.conn.outputs.uri }}
+        run: |
+          psql "$DATABASE_URL_MIGRATE" -t -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';"
