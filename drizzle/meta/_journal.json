@@ -377,6 +377,13 @@
       "tag": "0050_worker_plane_release",
       "breakpoints": true,
       "hash": "3ef846714a55a140b8f2310b8056181a75d821d47920eef93d7083db30feb99e"
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791313200000,
+      "tag": "0051_reports_view_permission",
+      "breakpoints": true
     }
   ]
 }
