@@ -100,6 +100,9 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `jobs.retry` | G | G | — | — | — | — | — | D | — | — | — | — | — |
 | `jobs.cancel` | G | G | — | — | — | — | — | D | — | — | — | — | — |
 | `jobs.delete` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `notifications.view` | G | G | S | S | S | S | S | S | S | S | S | S | S |
+| `notifications.preferences.manage` | S | S | S | S | S | S | S | S | S | S | S | S | S |
+| `notifications.send` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `clients.view` | G | — | — | — | — | — | — | D | P | P | P | G⁴ | — |
 | `clients.edit` | G | — | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | D | S | D | P | P | P | G⁴ | — |

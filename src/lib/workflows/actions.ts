@@ -61,12 +61,14 @@
  * own-property lookups only: `__proto__` / `constructor` / `prototype` are
  * rejected, so template resolution can never reach Object.prototype.
  */
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { assignTask, createTask, updateTask } from '../work/tasks';
 import { createProject, linkProjectToDeal } from '../work/projects';
 import { updateDeal } from '../crm/deals';
+import { enqueueJob } from '../jobs/queue';
+import { NOTIFICATION_EVENT_TYPES } from '../notifications/types';
 import {
   AssignTaskParamsSchema,
   CreateProjectParamsSchema,
@@ -84,6 +86,7 @@ import {
   type LinkDealProjectParams,
   type UpdateDealParams,
   type UpdateTaskParams,
+  templateOr,
 } from './schema';
 import type { WorkflowEvent } from './events';
 
@@ -93,17 +96,30 @@ import type { WorkflowEvent } from './events';
  * The deferred action types carried by the Phase-5 registry: exactly the
  * §12 four. (Nit-3: 'scheduled' used to leak into the action-type union via
  * DEFERRED_ACTION_TYPES — it is a trigger type and no longer does.)
+ *
+ * Phase 8 (Workstream C): send_notification and send_email are IMPLEMENTED
+ * (see the executors below) and no longer deferred — only webhook and
+ * run_ai_action remain registry-documented stubs.
  */
 export const REGISTRY_DEFERRED_ACTION_TYPES = [
-  'send_notification',
-  'send_email',
   'webhook',
   'run_ai_action',
 ] as const satisfies readonly DeferredActionType[];
 export type RegistryDeferredActionType = (typeof REGISTRY_DEFERRED_ACTION_TYPES)[number];
 
-/** The 10 action types the Phase-5 registry documents: 6 implemented + 4 deferred. */
-export type RegistryActionType = ImplementedActionType | RegistryDeferredActionType;
+/**
+ * Phase 8 (Workstream C) implemented send_notification and send_email at
+ * runtime; Workstream F then enabled them at save time in schema.ts's
+ * ActionConfigSchema (they remain outside schema.ts's IMPLEMENTED_ACTION_TYPES
+ * for UI-label compatibility). Builder-UI enablement is the remaining
+ * follow-up.
+ */
+export const NEWLY_IMPLEMENTED_ACTION_TYPES = ['send_notification', 'send_email'] as const;
+export type NewlyImplementedActionType = (typeof NEWLY_IMPLEMENTED_ACTION_TYPES)[number];
+
+/** The action types the registry documents: 6 Phase-5 + 2 Phase-8 implemented + 2 deferred. */
+export type RegistryActionType =
+  ImplementedActionType | NewlyImplementedActionType | RegistryDeferredActionType;
 
 /** Compile-time pin: every deferred action type is documented in the registry. */
 type _MissingRegistryEntry = Exclude<DeferredActionType, RegistryDeferredActionType>;
@@ -143,13 +159,18 @@ export const ACTION_REGISTRY: Record<RegistryActionType, ActionRegistryEntry> = 
     description: 'Link an existing project to a CRM deal (one live project per deal).',
   },
   send_notification: {
-    implemented: false,
+    implemented: true,
     description:
-      'Phase 6+: in-app notification. Registry contract only — not implemented in Phase 5.',
+      'Phase 8: enqueue an in-app notification job (recipientPersonId, title, body; ' +
+      'optional eventType/entityType/entityId/link). Runs under the trigger actor\u2019s ' +
+      'authority — the actor needs jobs.create.',
   },
   send_email: {
-    implemented: false,
-    description: 'Phase 6+: outbound email. Registry contract only — not implemented in Phase 5.',
+    implemented: true,
+    description:
+      'Phase 8: enqueue an outbound email job (to, subject, body, optional bodyHtml). ' +
+      'Runs under the trigger actor\u2019s authority — the actor needs jobs.create. ' +
+      'Delivery requires a wired email provider; otherwise the job dead-letters.',
   },
   webhook: {
     implemented: false,
@@ -162,6 +183,32 @@ export const ACTION_REGISTRY: Record<RegistryActionType, ActionRegistryEntry> = 
       'Phase 6+: AI-powered action. Registry contract only — not implemented in Phase 5.',
   },
 };
+
+// ── Phase 8: send_notification / send_email param contracts ───────────────────
+// Defined here (before PARAM_SCHEMAS in the Execution section below).
+// The executors live with the other executors further down.
+export const SendNotificationParamsSchema = z.strictObject({
+  recipientPersonId: templateOr(z.string().uuid()),
+  title: z.string().trim().min(1, 'title is required').max(200),
+  body: z.string().trim().min(1, 'body is required').max(2000),
+  /** Defaults to SYSTEM_ALERT: workflow-authored content has no domain type of its own. */
+  eventType: z.enum(NOTIFICATION_EVENT_TYPES).optional(),
+  entityType: z.string().trim().min(1).max(128).optional(),
+  entityId: z.string().trim().min(1).max(256).optional(),
+  link: z.string().trim().min(1).max(2048).optional(),
+});
+export type SendNotificationParams = z.infer<typeof SendNotificationParamsSchema>;
+
+export const SendEmailParamsSchema = z.strictObject({
+  to: z.union([
+    templateOr(z.string().email()),
+    z.array(templateOr(z.string().email())).min(1).max(50),
+  ]),
+  subject: z.string().trim().min(1, 'subject is required').max(300),
+  body: z.string().trim().min(1, 'body is required').max(200_000),
+  bodyHtml: z.string().trim().min(1).max(500_000).optional(),
+});
+export type SendEmailParams = z.infer<typeof SendEmailParamsSchema>;
 
 // ── Template resolution ───────────────────────────────────────────────────────
 
@@ -280,14 +327,18 @@ export function resolveTemplates(
 const IMPLEMENTED_TYPE_SET = new Set<string>(IMPLEMENTED_ACTION_TYPES);
 const REGISTRY_DEFERRED_TYPE_SET = new Set<string>(REGISTRY_DEFERRED_ACTION_TYPES);
 
-const PARAM_SCHEMAS = {
+const PARAM_SCHEMAS: Record<string, z.ZodTypeAny> = {
   create_task: CreateTaskParamsSchema,
   create_project: CreateProjectParamsSchema,
   update_deal: UpdateDealParamsSchema,
   update_task: UpdateTaskParamsSchema,
   assign_task: AssignTaskParamsSchema,
   link_deal_project: LinkDealProjectParamsSchema,
-} satisfies Record<ImplementedActionType, z.ZodTypeAny>;
+  // Phase 8: executable at runtime (see NEWLY_IMPLEMENTED_ACTION_TYPES);
+  // schema.ts's save-time contract is unchanged (owned elsewhere).
+  send_notification: SendNotificationParamsSchema,
+  send_email: SendEmailParamsSchema,
+};
 
 /**
  * Maps a thrown service error to a sanitized ActionResult. AuthorizationError
@@ -403,6 +454,118 @@ async function executeLinkDealProject(
   return { ok: true, output: { projectId: params.projectId, dealId: params.dealId } };
 }
 
+// ── Phase 8: send_notification / send_email executors ─────────────────────────
+
+/**
+ * Phase 8 (Workstream C) implements the two notification actions. Both
+ * enqueue Phase 6 jobs under the TRIGGER ACTOR's authority (D2 — no
+ * synthetic actor): enqueueJob requires `jobs.create`, so an actor without
+ * it gets a FORBIDDEN step — consistent with "a workflow can never do what
+ * its trigger actor cannot do".
+ *
+ * NOTE: these types are executable here but are NOT in schema.ts's
+ * IMPLEMENTED_ACTION_TYPES — the save-time ActionConfigSchema still rejects
+ * them in workflow definitions (schema.ts is owned outside this workstream).
+ * Enabling them at save time + in the builder UI is follow-up work.
+ *
+ * NOTE (V1, intentional — see types.ts INTENTIONAL V1 BEHAVIOR): WORKFLOW_FAILED
+ * and the other workflow/automation event types are NOT auto-emitted by the
+ * engine. They are delivered only via an explicit send_notification action.
+ */
+
+/** The still-deferred registry entries plus the Phase-8 runtime set, for the guard. */
+const NEWLY_IMPLEMENTED_TYPE_SET = new Set<string>(NEWLY_IMPLEMENTED_ACTION_TYPES);
+
+/**
+ * Stable, content-addressed dedup key for workflow-emitted jobs: the same
+ * workflow event re-executing the same action with the same content maps to
+ * the same key, so step retries don't double-send (the queue's dedup
+ * returns the existing job).
+ */
+function workflowJobDedupKey(
+  event: WorkflowEvent,
+  actionType: string,
+  fingerprint: string,
+): string {
+  return `wf:${event.id}:${actionType}:${fingerprint}`;
+}
+
+/** FNV-1a hex fingerprint over a canonical JSON encoding. */
+function fingerprintParams(value: Record<string, unknown>): string {
+  const json = JSON.stringify(value, Object.keys(value).sort());
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < json.length; i++) {
+    hash ^= json.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+async function executeSendNotification(
+  auth: Authorization,
+  event: WorkflowEvent,
+  params: SendNotificationParams,
+): Promise<ActionResult> {
+  const eventType = params.eventType ?? 'SYSTEM_ALERT';
+  const dedupKey = workflowJobDedupKey(
+    event,
+    'send_notification',
+    fingerprintParams({
+      to: params.recipientPersonId,
+      title: params.title,
+      body: params.body,
+    }),
+  );
+  const data: Record<string, unknown> = {
+    type: eventType,
+    eventId: dedupKey,
+    source: 'workflow',
+    workflowEventId: event.id,
+  };
+  if (params.entityType !== undefined) data['entityType'] = params.entityType;
+  if (params.entityId !== undefined) data['entityId'] = params.entityId;
+  if (params.link !== undefined) data['link'] = params.link;
+  const job = await enqueueJob(auth, {
+    type: 'notification',
+    payload: {
+      personId: params.recipientPersonId,
+      title: params.title,
+      message: params.body,
+      data,
+    },
+    dedupKey,
+  });
+  return { ok: true, output: { jobId: job.id, eventId: dedupKey } };
+}
+
+async function executeSendEmail(
+  auth: Authorization,
+  event: WorkflowEvent,
+  params: SendEmailParams,
+): Promise<ActionResult> {
+  const to = Array.isArray(params.to) ? params.to : [params.to];
+  const dedupKey = workflowJobDedupKey(
+    event,
+    'send_email',
+    fingerprintParams({ to, subject: params.subject, body: params.body }),
+  );
+  const job = await enqueueJob(auth, {
+    type: 'email',
+    payload: {
+      to,
+      subject: params.subject,
+      text: params.body,
+      ...(params.bodyHtml !== undefined ? { html: params.bodyHtml } : {}),
+    },
+    dedupKey,
+  });
+  // NOTE: delivery itself needs a wired email provider (EMAIL_PROVIDER /
+  // EMAIL_PROVIDER_API_KEY); until then the job dead-letters loudly with
+  // EMAIL_PROVIDER_UNCONFIGURED (Phase 6 fail-closed) instead of silently
+  // dropping. The enqueue — this step — still succeeds.
+  return { ok: true, output: { jobId: job.id } };
+}
+
 /**
  * Executes one workflow action under the trigger actor's Authorization (D2).
  * Never throws: every failure mode returns an ActionResult the engine records
@@ -423,7 +586,7 @@ export async function executeAction(
   } catch (error) {
     return toActionResult(error, action.type);
   }
-  return runResolvedAction(auth, action.type, resolved);
+  return runResolvedAction(auth, event, action.type, resolved);
 }
 
 /**
@@ -442,12 +605,13 @@ export async function executeActionResolved(
 ): Promise<ActionResult> {
   const guard = guardActionType(action.type, action.params);
   if (guard) return guard;
-  return runResolvedAction(auth, action.type, resolvedParams);
+  return runResolvedAction(auth, event, action.type, resolvedParams);
 }
 
 /** Registry + stage guards shared by executeAction/executeActionResolved. */
 function guardActionType(type: string, rawParams: unknown): ActionResult | null {
   // Deferred registry entries (Phase 6+) are rejected, never executed.
+  // (Phase 8: send_notification/send_email left this set — they execute now.)
   if (REGISTRY_DEFERRED_TYPE_SET.has(type)) {
     return {
       ok: false,
@@ -455,7 +619,7 @@ function guardActionType(type: string, rawParams: unknown): ActionResult | null 
       errorMessage: `action '${type}' is not implemented in Phase 5`,
     };
   }
-  if (!IMPLEMENTED_TYPE_SET.has(type)) {
+  if (!IMPLEMENTED_TYPE_SET.has(type) && !NEWLY_IMPLEMENTED_TYPE_SET.has(type)) {
     return {
       ok: false,
       errorCode: 'INTERNAL',
@@ -485,10 +649,20 @@ function guardActionType(type: string, rawParams: unknown): ActionResult | null 
 
 async function runResolvedAction(
   auth: Authorization,
+  event: WorkflowEvent,
   type: string,
   resolved: Record<string, unknown>,
 ): Promise<ActionResult> {
-  const parsed = PARAM_SCHEMAS[type as ImplementedActionType].safeParse(resolved);
+  const schema = PARAM_SCHEMAS[type];
+  if (schema === undefined) {
+    // Unreachable: guardActionType pins `type` to a known schema above.
+    return {
+      ok: false,
+      errorCode: 'INTERNAL',
+      errorMessage: `internal error while executing action '${type}'`,
+    };
+  }
+  const parsed = schema.safeParse(resolved);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
     return {
@@ -514,6 +688,10 @@ async function runResolvedAction(
         return await executeAssignTask(auth, parsed.data as AssignTaskParams);
       case 'link_deal_project':
         return await executeLinkDealProject(auth, parsed.data as LinkDealProjectParams);
+      case 'send_notification':
+        return await executeSendNotification(auth, event, parsed.data as SendNotificationParams);
+      case 'send_email':
+        return await executeSendEmail(auth, event, parsed.data as SendEmailParams);
       default:
         // Unreachable: the implemented/deferred checks above pin `type`.
         return {

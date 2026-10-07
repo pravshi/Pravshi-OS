@@ -43,6 +43,16 @@ const SECTIONS = [
   },
   { label: 'Work', href: '/work', permission: 'projects.view', section: null },
   { label: 'My tasks', href: '/work/my-tasks', permission: 'tasks.view', section: null },
+  // Phase 8 (Search & Notifications): the notification center. Desktop-primary
+  // like the other deep entries — the mobile tab bar keeps its 4 hardcoded
+  // tabs (§15), so this entry never surfaces on mobile, but /notifications is
+  // still deep-linkable. The bell in the header is the mobile surface.
+  {
+    label: 'Notifications',
+    href: '/notifications',
+    permission: 'notifications.view',
+    section: null,
+  },
   // Phase 5 (Workflow Engine): the Automations section (future-proof for
   // Phase 6). Desktop-primary: the mobile tab bar keeps its 4 hardcoded tabs
   // (§15), so this entry never surfaces on mobile. /workflows is still

@@ -665,8 +665,9 @@ describe('the rest of the authorization model is unchanged', () => {
     // five more (select/insert/update on workflows, select on workflow_executions,
     // select on workflow_execution_steps), and the Phase 6 automation migrations
     // (0045/0047) add nine more (select/insert/update on each of jobs, schedules,
-    // and notifications).
-    expect(policies.rows[0]!.n).toBe(80);
+    // and notifications), and the Phase 8 migration (0052) adds three more
+    // (select/insert/update on notification_preferences).
+    expect(policies.rows[0]!.n).toBe(83);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

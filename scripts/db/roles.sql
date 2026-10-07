@@ -81,6 +81,10 @@ end $$;
 -- setup tokens): the plaintext token never reaches the database. citext is created
 -- in migration 0002 where the first citext column appears.
 create extension if not exists pgcrypto;
+-- pg_trgm provides the gin_trgm_ops opclass for the Phase 8 trigram search
+-- indexes (migration 0053). Installed here, once per branch by the branch
+-- owner — not in the Drizzle migrations (app_owner must not need superuser).
+create extension if not exists pg_trgm;
 
 create schema if not exists authz authorization app_owner;
 alter schema public owner to app_owner;

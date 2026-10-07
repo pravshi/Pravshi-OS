@@ -377,6 +377,22 @@
       "tag": "0050_worker_plane_release",
       "breakpoints": true,
       "hash": "3ef846714a55a140b8f2310b8056181a75d821d47920eef93d7083db30feb99e"
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791343891087,
+      "tag": "0052_notifications_phase8",
+      "breakpoints": true,
+      "hash": "792a699389dfacf4df9cd0f793f1e5123846035c128f0935e5ff7cdf68ed28c9"
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791343891087,
+      "tag": "0053_search_indexes",
+      "breakpoints": true,
+      "hash": "d094788e8bc43ce964765b993bbb1b53dfb79ed7b49977cf205fa1be3e4f1468"
     }
   ]
 }

@@ -430,8 +430,10 @@ describe('the authorization boundary is unmoved', () => {
     // on workflows, select on workflow_executions, select on workflow_execution_steps.
     // The Phase 6 automation migrations (0045/0047) add nine more — select/insert/
     // update on each of jobs, schedules, and notifications.
+    // The Phase 8 migration (0052) adds three more — select/insert/update on
+    // notification_preferences.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(80);
+    expect(Number(policies.rows[0]!.n)).toBe(83);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

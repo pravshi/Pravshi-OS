@@ -60,6 +60,9 @@ const SEED_DECISIONS: Readonly<Record<string, Cell>> = {
   // 0008 gives SUPER_ADMIN the whole catalogue at GLOBAL, users.impersonate excepted. The printed
   // S in this row is the one cell of the matrix where that differs.
   'SUPER_ADMIN policies.acknowledge': 'GLOBAL',
+  // 0052 prints notifications.preferences.manage as S for every role, but SUPER_ADMIN keeps the
+  // GLOBAL from the whole-catalogue cross join (the explicit SELF row hits on-conflict-do-nothing).
+  'SUPER_ADMIN notifications.preferences.manage': 'GLOBAL',
 };
 
 /** Blueprint 6.1 roles with no matrix column; 0008 seeds them with no grants at all.
@@ -184,7 +187,7 @@ afterAll(async () => {
 });
 
 describe('the matrix as written', () => {
-  it('has 79 permissions for 13 roles', () => {
+  it('has 82 permissions for 13 roles', () => {
     expect(matrix.roles).toEqual([
       'SUPER_ADMIN',
       'ADMIN',
@@ -200,8 +203,8 @@ describe('the matrix as written', () => {
       'FINANCE',
       'EMPLOYEE',
     ]);
-    expect(matrix.rows).toHaveLength(78);
-    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(78);
+    expect(matrix.rows).toHaveLength(81);
+    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(81);
   });
 
   it('names only permissions in the catalogue', () => {

@@ -297,9 +297,12 @@ describe('permission catalogue', () => {
     // plus the 6 Phase 5 workflow permissions
     // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
     // plus the 5 Phase 6 jobs permissions
-    // (jobs.view/create/retry/cancel/delete) from migration 0045.
+    // (jobs.view/create/retry/cancel/delete) from migration 0045,
+    // plus the 3 Phase 8 notification permissions
+    // (notifications.view, notifications.preferences.manage, notifications.send)
+    // from migration 0052.
     // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
-    expect(Number(rows[0]!.count)).toBe(120);
+    expect(Number(rows[0]!.count)).toBe(123);
   });
 
   it('holds every named key from each module', async () => {
@@ -432,6 +435,10 @@ describe('permission catalogue', () => {
       'jobs.retry',
       'jobs.cancel',
       'jobs.delete',
+      // Phase 8 (migration 0052): the notification permissions.
+      'notifications.view',
+      'notifications.preferences.manage',
+      'notifications.send',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -571,18 +578,22 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 120 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
-    // 6 Phase 5 workflow + 5 Phase 6 jobs), minus users.impersonate which is listed but granted
-    // to no role. Note: reports.view already existed from migration 0008.
-    expect(Number(rows[0]!.total)).toBe(119);
-    expect(Number(rows[0]!.global)).toBe(119);
+    // 123 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow + 5 Phase 6 jobs + 3 Phase 8 notifications), minus users.impersonate
+    // which is listed but granted to no role. Note: reports.view already existed from
+    // migration 0008.
+    expect(Number(rows[0]!.total)).toBe(122);
+    expect(Number(rows[0]!.global)).toBe(122);
   });
 
-  it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants', async () => {
+  it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants plus two Phase 8 notification grants', async () => {
     // 0042 deliberately grants MANAGER projects.view/create/edit and
     // tasks.view/create/edit at DEPARTMENT (line management needs project/task
     // operations), plus policies.acknowledge at SELF (universal employee
-    // permission). MARKETING remains unmapped with no grants.
+    // permission). Migration 0052 adds notifications.view and
+    // notifications.preferences.manage at SELF (every employee role reads its
+    // own notifications and manages its own preferences). MARKETING remains
+    // unmapped with no grants.
     const { rows } = await owner.query<{ key: string; count: string }>(
       `select r.key, count(rp.permission_id) count
        from public.roles r left join public.role_permissions rp on rp.role_id=r.id
@@ -591,7 +602,7 @@ describe('system roles', () => {
       [orgA],
     );
     expect(rows.map((r) => [r.key, Number(r.count)])).toEqual([
-      ['MANAGER', 7],
+      ['MANAGER', 9],
       ['MARKETING', 0],
     ]);
   });
