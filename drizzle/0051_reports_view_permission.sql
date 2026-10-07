@@ -12,7 +12,7 @@ on conflict (key) do nothing;
 -- Grant reports.view to roles (following jobs.view pattern)
 -- SUPER_ADMIN: GLOBAL, ADMIN: GLOBAL, PROJECT_MANAGER: DEPARTMENT
 insert into public.role_permissions (role_id, permission_id, scope)
-select r.id, p.id, v.scope
+select r.id, p.id, v.scope::public.access_scope
 from (values
   ('SUPER_ADMIN', 'reports.view', 'GLOBAL'),
   ('ADMIN', 'reports.view', 'GLOBAL'),
