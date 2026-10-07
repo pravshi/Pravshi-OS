@@ -53,6 +53,19 @@ const SECTIONS = [
   // bar keeps its 4 hardcoded tabs (§15), so this entry never surfaces on
   // mobile, but /jobs is still deep-linkable.
   { label: 'Jobs', href: '/jobs', permission: 'jobs.view', section: 'Automations' },
+  // Phase 7 (Analytics & Dashboards): the Analytics section. Desktop-primary —
+  // the mobile tab bar keeps its 4 hardcoded tabs, so these entries never
+  // surface on mobile, but /analytics/* is still deep-linkable.
+  { label: 'Overview', href: '/analytics', permission: 'reports.view', section: 'Analytics' },
+  { label: 'Sales', href: '/analytics/sales', permission: 'reports.view', section: 'Analytics' },
+  { label: 'CRM', href: '/analytics/crm', permission: 'reports.view', section: 'Analytics' },
+  { label: 'Work', href: '/analytics/work', permission: 'reports.view', section: 'Analytics' },
+  {
+    label: 'Automation',
+    href: '/analytics/automation',
+    permission: 'reports.view',
+    section: 'Analytics',
+  },
 ] as const;
 
 export async function Sidebar() {

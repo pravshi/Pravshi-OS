@@ -184,7 +184,7 @@ afterAll(async () => {
 });
 
 describe('the matrix as written', () => {
-  it('has 78 permissions for 13 roles', () => {
+  it('has 79 permissions for 13 roles', () => {
     expect(matrix.roles).toEqual([
       'SUPER_ADMIN',
       'ADMIN',

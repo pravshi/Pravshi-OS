@@ -298,6 +298,7 @@ describe('permission catalogue', () => {
     // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
     // plus the 5 Phase 6 jobs permissions
     // (jobs.view/create/retry/cancel/delete) from migration 0045.
+    // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
     expect(Number(rows[0]!.count)).toBe(120);
   });
 
@@ -572,7 +573,7 @@ describe('system roles', () => {
     );
     // 120 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
     // 6 Phase 5 workflow + 5 Phase 6 jobs), minus users.impersonate which is listed but granted
-    // to no role.
+    // to no role. Note: reports.view already existed from migration 0008.
     expect(Number(rows[0]!.total)).toBe(119);
     expect(Number(rows[0]!.global)).toBe(119);
   });

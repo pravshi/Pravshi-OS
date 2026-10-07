@@ -71,7 +71,9 @@ describe.skipIf(!dbReady)('retry sweeper (live DB)', () => {
     const jobId = ins.rows[0].id as string;
 
     const swept = await sweepRetryableJobs();
-    expect(swept).toBe(1);
+    // Sweeper is global across orgs; other parallel tests may have retryable jobs.
+    // The key assertion is that OUR job was swept (verified below by jobId).
+    expect(swept).toBeGreaterThanOrEqual(1);
 
     const row = (
       await owner.query(
