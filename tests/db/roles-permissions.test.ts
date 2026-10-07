@@ -297,8 +297,9 @@ describe('permission catalogue', () => {
     // plus the 6 Phase 5 workflow permissions
     // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
     // plus the 5 Phase 6 jobs permissions
-    // (jobs.view/create/retry/cancel/delete) from migration 0045.
-    expect(Number(rows[0]!.count)).toBe(120);
+    // (jobs.view/create/retry/cancel/delete) from migration 0045,
+    // plus the 1 Phase 7 analytics permission (reports.view) from migration 0051.
+    expect(Number(rows[0]!.count)).toBe(121);
   });
 
   it('holds every named key from each module', async () => {
@@ -570,11 +571,11 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 120 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
-    // 6 Phase 5 workflow + 5 Phase 6 jobs), minus users.impersonate which is listed but granted
+    // 121 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow + 5 Phase 6 jobs + 1 Phase 7 reports.view), minus users.impersonate which is listed but granted
     // to no role.
-    expect(Number(rows[0]!.total)).toBe(119);
-    expect(Number(rows[0]!.global)).toBe(119);
+    expect(Number(rows[0]!.total)).toBe(120);
+    expect(Number(rows[0]!.global)).toBe(120);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants', async () => {
