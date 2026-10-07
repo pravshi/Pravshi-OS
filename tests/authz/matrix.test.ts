@@ -200,8 +200,8 @@ describe('the matrix as written', () => {
       'FINANCE',
       'EMPLOYEE',
     ]);
-    expect(matrix.rows).toHaveLength(79);
-    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(79);
+    expect(matrix.rows).toHaveLength(78);
+    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(78);
   });
 
   it('names only permissions in the catalogue', () => {

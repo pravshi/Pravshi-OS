@@ -144,6 +144,7 @@ export async function getDealsByStage(
        and ${dateRangeFilter(sql`d.created_at`, filters.dateRange)}
       where ${orgFilter(sql`ps.org_id`, ctx.orgId)}
       group by ps.id, ps.name, ps.pipeline_id, p.name, ps.position, ps.is_won, ps.is_lost
+      having count(d.id) > 0
       order by p.name asc, ps.position asc, ps.id asc
     `);
     return res.rows;
@@ -239,7 +240,7 @@ export async function getAvgDealValue(
 ): Promise<MoneyByCurrency> {
   return withAuthorizedDb(ctx, async (tx) => {
     const res = await tx.execute<{ currency: string; average: string | null }>(sql`
-      select d.currency as currency, avg(d.value)::text as average
+      select d.currency as currency, round(avg(d.value), 4)::text as average
       from public.deals d
       join public.pipeline_stages ps
         on ps.id = d.pipeline_stage_id
