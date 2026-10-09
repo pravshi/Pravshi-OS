@@ -3,8 +3,10 @@
 @import 'shadcn/tailwind.css';
 
 @theme {
-  --font-sans: 'Inter var', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Loaded by next/font in the root layout (Phase 12, F-12-07) — the variables
+     carry the self-hosted Inter / JetBrains Mono faces; the rest is fallback. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
   /* Neutrals carry a slight blue-green bias so they read as chosen, not default. */
   --color-ground: oklch(98.2% 0.003 195);

@@ -4,7 +4,10 @@ import { ErrorMessage } from '@/components/crm/error-message';
 import { getWorkflowAction } from '../../_detail-actions';
 import { WORKFLOW_PERMISSIONS } from '../../_permissions';
 import { isErrorEnvelope } from '../../_types';
-import { EditWorkflowClient } from '../../_components/EditWorkflowClient';
+// The editor canvas (WorkflowBuilder tree) is the heaviest rarely-first-open
+// surface in the app; the Lazy wrapper code-splits it out of First Load
+// (Phase 12, F-12-09).
+import { EditWorkflowClientLazy as EditWorkflowClient } from '../../_components/EditWorkflowClientLazy';
 
 /** /workflows/[id]/edit — edit a workflow definition in A13's WorkflowBuilder. */
 export default async function WorkflowEditPage({ params }: { params: Promise<{ id: string }> }) {

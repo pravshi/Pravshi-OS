@@ -1,4 +1,5 @@
 import { withPermission } from '@/lib/authz/http';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/analytics/tenant';
 import type { DashboardFilter } from '@/lib/analytics/types';
 import {
@@ -27,21 +28,27 @@ import {
  *
  * Money is returned as numeric strings per currency (never summed across
  * currencies). Plain JSON, no envelope, no-store.
+ *
+ * Phase 12 (F-12-01): the six metrics compose over ONE shared
+ * withAuthorizedDb transaction (each metric's trailing `tx`). Per-route
+ * transaction budget: ≤ 2 (shared metrics tx + the authz tx).
  */
 
 export const dynamic = 'force-dynamic';
 
 async function buildSalesDashboard(ctx: AuthContext, filter: DashboardFilter) {
-  const [dealsByStage, pipelineValue, wonRevenue, winRate, avgDealValue, dealsByOwner] =
-    await Promise.all([
-      getDealsByStage(ctx, filter),
-      getPipelineValue(ctx, filter),
-      getWonRevenue(ctx, filter),
-      getWinRate(ctx, filter),
-      getAvgDealValue(ctx, filter),
-      getDealsByOwner(ctx, filter),
-    ]);
-  return { dealsByStage, pipelineValue, wonRevenue, winRate, avgDealValue, dealsByOwner };
+  return withAuthorizedDb(ctx, async (tx) => {
+    const [dealsByStage, pipelineValue, wonRevenue, winRate, avgDealValue, dealsByOwner] =
+      await Promise.all([
+        getDealsByStage(ctx, filter, tx),
+        getPipelineValue(ctx, filter, tx),
+        getWonRevenue(ctx, filter, tx),
+        getWinRate(ctx, filter, tx),
+        getAvgDealValue(ctx, filter, tx),
+        getDealsByOwner(ctx, filter, tx),
+      ]);
+    return { dealsByStage, pipelineValue, wonRevenue, winRate, avgDealValue, dealsByOwner };
+  });
 }
 
 async function handleSales(request: Request, raw: unknown, authorizationOrgId: string) {

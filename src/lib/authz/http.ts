@@ -44,6 +44,43 @@ export function internalErrorResponse(requestId: string): Response {
 }
 
 /**
+ * Request timing visibility (Phase 12, F-12-12; audit section 4.5). One structured line per
+ * wrapped request — route, status, durationMs, requestId — console-transported like the [jobs]
+ * lines, so platform logs can answer latency questions (the p95 of a route) without a metrics
+ * stack. This is the single emission point: every module http helper's response is built inside
+ * a handler and returns through withPermission(), so refusals, handler responses and error
+ * envelopes are all timed here and nowhere else.
+ *
+ * The line carries no tenant data beyond the request id: the route is the request path (never
+ * the query string, which can hold search terms), and no person, organization, header or body
+ * is read. Emission is observability only — it sits in a finally, adds no awaits, and cannot
+ * throw, so it never changes a response, an error, or a status.
+ */
+function emitRequestTiming(
+  request: Request,
+  status: number,
+  startedAt: number,
+  requestId: string,
+): void {
+  try {
+    let path: string;
+    try {
+      path = new URL(request.url).pathname;
+    } catch {
+      path = '(unparseable url)';
+    }
+    console.log('[authz] request', {
+      route: `${request.method.toUpperCase()} ${path}`,
+      status,
+      durationMs: Math.round(performance.now() - startedAt),
+      requestId,
+    });
+  } catch {
+    // A logging failure must never reach the request path.
+  }
+}
+
+/**
  * Threat T-17. A browser always sends Origin on a cross-site state-changing request, so a mismatch
  * is refused before anything else happens. A request with no Origin is not a browser acting on
  * somebody's behalf, and still has to authenticate.
@@ -73,12 +110,17 @@ export function withPermission<P extends SegmentParams = SegmentParams>(
 ): (request: Request, context: { params: Promise<P> }) => Promise<Response> {
   return async (request, context) => {
     const requestId = randomUUID();
+    const startedAt = performance.now();
+    let status = 500;
     try {
       if (STATE_CHANGING.has(request.method.toUpperCase()) && !originMatches(request)) {
         console.warn('[authz] cross-origin request refused', { requestId });
-        return errorResponse(
-          new AuthorizationError('FORBIDDEN', { requestId, reason: 'ORIGIN_MISMATCH' }),
-        );
+        const refusal = new AuthorizationError('FORBIDDEN', {
+          requestId,
+          reason: 'ORIGIN_MISMATCH',
+        });
+        status = refusal.status;
+        return errorResponse(refusal);
       }
       const params = ((await context?.params) ?? {}) as P;
       const authorization = await requirePermission(request.headers, {
@@ -87,15 +129,22 @@ export function withPermission<P extends SegmentParams = SegmentParams>(
         target: spec.target?.(params),
         requestId,
       });
-      return await handler(request, authorization, params);
+      const response = await handler(request, authorization, params);
+      status = response.status;
+      return response;
     } catch (error) {
-      if (isAuthorizationError(error)) return errorResponse(error);
+      if (isAuthorizationError(error)) {
+        status = error.status;
+        return errorResponse(error);
+      }
       console.error('[authz] protected route failed', {
         requestId,
         name: error instanceof Error ? error.name : typeof error,
       });
       Sentry.captureMessage('protected route failed', { level: 'error', tags: { requestId } });
       return internalErrorResponse(requestId);
+    } finally {
+      emitRequestTiming(request, status, startedAt, requestId);
     }
   };
 }

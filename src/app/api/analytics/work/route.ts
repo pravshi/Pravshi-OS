@@ -1,4 +1,5 @@
 import { withPermission } from '@/lib/authz/http';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/analytics/tenant';
 import type { DashboardFilter } from '@/lib/analytics/types';
 import {
@@ -35,6 +36,10 @@ import {
  * malformed dates are 400s via the work module's own guards.
  *
  * Plain JSON, no envelope, no-store.
+ *
+ * Phase 12 (F-12-01): the six metrics compose over ONE shared
+ * withAuthorizedDb transaction (each metric's trailing `tx`). Per-route
+ * transaction budget: ≤ 2 (shared metrics tx + the authz tx).
  */
 
 export const dynamic = 'force-dynamic';
@@ -44,37 +49,40 @@ async function buildWorkDashboard(ctx: AuthContext, filter: DashboardFilter, raw
   const domain = workFiltersFrom(raw);
   const { status, priority, limit, assigneePersonId, ...rest } = domain;
   const scoped = { ...window, ...rest };
-  const [
-    projectStats,
-    tasksByStatus,
-    tasksByPriority,
-    overdueTasks,
-    tasksByAssignee,
-    taskCompletionTrend,
-  ] = await Promise.all([
-    getProjectStats(ctx, window),
-    getTasksByStatus(ctx, { ...scoped, priority, assigneePersonId }),
-    getTasksByPriority(ctx, { ...scoped, status, assigneePersonId }),
-    getOverdueTasks(ctx, limit === undefined ? {} : { limit }),
-    getTasksByAssignee(ctx, { ...scoped, status, priority }),
-    getTaskCompletionTrend(
-      ctx,
-      {
-        from: window.createdFrom,
-        to: window.createdTo,
-        granularity: trendGranularity(filter.grain),
-      },
-      { ...rest, priority, assigneePersonId },
-    ),
-  ]);
-  return {
-    projectStats,
-    tasksByStatus,
-    tasksByPriority,
-    overdueTasks,
-    tasksByAssignee,
-    taskCompletionTrend,
-  };
+  return withAuthorizedDb(ctx, async (tx) => {
+    const [
+      projectStats,
+      tasksByStatus,
+      tasksByPriority,
+      overdueTasks,
+      tasksByAssignee,
+      taskCompletionTrend,
+    ] = await Promise.all([
+      getProjectStats(ctx, window, tx),
+      getTasksByStatus(ctx, { ...scoped, priority, assigneePersonId }, tx),
+      getTasksByPriority(ctx, { ...scoped, status, assigneePersonId }, tx),
+      getOverdueTasks(ctx, limit === undefined ? {} : { limit }, tx),
+      getTasksByAssignee(ctx, { ...scoped, status, priority }, tx),
+      getTaskCompletionTrend(
+        ctx,
+        {
+          from: window.createdFrom,
+          to: window.createdTo,
+          granularity: trendGranularity(filter.grain),
+        },
+        { ...rest, priority, assigneePersonId },
+        tx,
+      ),
+    ]);
+    return {
+      projectStats,
+      tasksByStatus,
+      tasksByPriority,
+      overdueTasks,
+      tasksByAssignee,
+      taskCompletionTrend,
+    };
+  });
 }
 
 async function handleWork(request: Request, raw: unknown, authorizationOrgId: string) {

@@ -17,6 +17,11 @@ import {
  *    every query re-states the org predicate explicitly (defense in depth over
  *    RLS), and every query runs through withAuthorizedDb() — THE ONLY PATH TO
  *    POSTGRES — so RLS policies evaluate under the caller's identity.
+ *    Phase 12 (F-12-01): each metric also accepts an optional trailing
+ *    `tx?: Tx`; a composing route may pass ONE shared withAuthorizedDb
+ *    transaction for the whole dashboard instead of one per metric. The
+ *    transaction is always a withAuthorizedDb transaction — identity and
+ *    RLS evaluation are unchanged; only the snapshot is shared.
  *  - Routes own permission gating: call these functions only after
  *    requirePermission() has granted `tasks.view` (task metrics) or
  *    `projects.view` (project metrics). Pass `auth.ctx` in.
@@ -180,6 +185,7 @@ const ASSIGNEE_NAME = sql`coalesce(per.preferred_name, per.full_legal_name)`;
 export async function getProjectStats(
   ctx: AuthContext,
   filters: Pick<WorkFilters, 'createdFrom' | 'createdTo'> = {},
+  tx?: Tx,
 ): Promise<ProjectStats> {
   if (filters.createdFrom !== undefined) assertDateString(filters.createdFrom, 'createdFrom');
   if (filters.createdTo !== undefined) assertDateString(filters.createdTo, 'createdTo');
@@ -189,8 +195,8 @@ export async function getProjectStats(
   if (filters.createdTo !== undefined)
     extra.push(sql`p.created_at < (${filters.createdTo}::date + interval '1 day')`);
 
-  const res = await withAuthorizedDb(ctx, (tx: Tx) =>
-    tx.execute<{ active: number; archived: number; total: number }>(sql`
+  const execute = (db: Tx) =>
+    db.execute<{ active: number; archived: number; total: number }>(sql`
       select
         count(*) filter (where p.is_archived = false)::int as active,
         count(*) filter (where p.is_archived = true)::int  as archived,
@@ -199,8 +205,8 @@ export async function getProjectStats(
       where p.org_id = ${ctx.orgId}::uuid
         and p.deleted_at is null
         ${andAll(extra)}
-    `),
-  );
+    `);
+  const res = tx ? await execute(tx) : await withAuthorizedDb(ctx, execute);
   const row = res.rows[0] ?? { active: 0, archived: 0, total: 0 };
   return { active: row.active, archived: row.archived, total: row.total };
 }
@@ -217,9 +223,10 @@ export async function getProjectStats(
 export async function getTasksByStatus(
   ctx: AuthContext,
   filters: Omit<WorkFilters, 'status'> = {},
+  tx?: Tx,
 ): Promise<TaskStatusCounts> {
-  const res = await withAuthorizedDb(ctx, (tx: Tx) =>
-    tx.execute<{ todo: number; in_progress: number; done: number }>(sql`
+  const execute = (db: Tx) =>
+    db.execute<{ todo: number; in_progress: number; done: number }>(sql`
       select
         count(*) filter (where t.status = 'todo')::int        as todo,
         count(*) filter (where t.status = 'in_progress')::int  as in_progress,
@@ -228,8 +235,8 @@ export async function getTasksByStatus(
       where t.org_id = ${ctx.orgId}::uuid
         and t.deleted_at is null
         ${andAll(taskFilterSql(filters))}
-    `),
-  );
+    `);
+  const res = tx ? await execute(tx) : await withAuthorizedDb(ctx, execute);
   const row = res.rows[0] ?? { todo: 0, in_progress: 0, done: 0 };
   return { todo: row.todo, in_progress: row.in_progress, done: row.done };
 }
@@ -243,9 +250,10 @@ export async function getTasksByStatus(
 export async function getTasksByPriority(
   ctx: AuthContext,
   filters: Omit<WorkFilters, 'priority'> = {},
+  tx?: Tx,
 ): Promise<TaskPriorityCounts> {
-  const res = await withAuthorizedDb(ctx, (tx: Tx) =>
-    tx.execute<{ low: number; medium: number; high: number; urgent: number }>(sql`
+  const execute = (db: Tx) =>
+    db.execute<{ low: number; medium: number; high: number; urgent: number }>(sql`
       select
         count(*) filter (where t.priority = 'low')::int    as low,
         count(*) filter (where t.priority = 'medium')::int  as medium,
@@ -255,8 +263,8 @@ export async function getTasksByPriority(
       where t.org_id = ${ctx.orgId}::uuid
         and t.deleted_at is null
         ${andAll(taskFilterSql(filters))}
-    `),
-  );
+    `);
+  const res = tx ? await execute(tx) : await withAuthorizedDb(ctx, execute);
   const row = res.rows[0] ?? { low: 0, medium: 0, high: 0, urgent: 0 };
   return { low: row.low, medium: row.medium, high: row.high, urgent: row.urgent };
 }
@@ -276,11 +284,12 @@ export async function getTasksByPriority(
 export async function getOverdueTasks(
   ctx: AuthContext,
   opts: { limit?: number; offset?: number } = {},
+  tx?: Tx,
 ): Promise<MetricPage<OverdueTaskRow>> {
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const offset = Math.max(opts.offset ?? 0, 0);
 
-  return withAuthorizedDb(ctx, async (tx: Tx) => {
+  const run = async (db: Tx): Promise<MetricPage<OverdueTaskRow>> => {
     const base = sql`
       from public.work_tasks t
       left join public.work_projects pr
@@ -295,8 +304,8 @@ export async function getOverdueTasks(
         and t.status <> 'done'
     `;
     const [totalRes, rowsRes] = await Promise.all([
-      tx.execute<{ total: number }>(sql`select count(*)::int as total ${base}`),
-      tx.execute<OverdueTaskRow>(sql`
+      db.execute<{ total: number }>(sql`select count(*)::int as total ${base}`),
+      db.execute<OverdueTaskRow>(sql`
         select
           t.id,
           t.title,
@@ -313,7 +322,8 @@ export async function getOverdueTasks(
       `),
     ]);
     return { rows: rowsRes.rows, total: totalRes.rows[0]?.total ?? 0, limit, offset };
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 // ── Tasks by assignee ────────────────────────────────────────────────────────
@@ -328,9 +338,10 @@ export async function getOverdueTasks(
 export async function getTasksByAssignee(
   ctx: AuthContext,
   filters: Omit<WorkFilters, 'assigneePersonId'> = {},
+  tx?: Tx,
 ): Promise<AssigneeWorkloadRow[]> {
-  const res = await withAuthorizedDb(ctx, (tx: Tx) =>
-    tx.execute<AssigneeWorkloadRow>(sql`
+  const execute = (db: Tx) =>
+    db.execute<AssigneeWorkloadRow>(sql`
       select
         t.assignee_person_id as "assigneePersonId",
         ${ASSIGNEE_NAME} as "assigneeName",
@@ -346,8 +357,8 @@ export async function getTasksByAssignee(
         ${andAll(taskFilterSql(filters))}
       group by 1, 2
       order by total desc, "assigneeName" asc nulls last, 1
-    `),
-  );
+    `);
+  const res = tx ? await execute(tx) : await withAuthorizedDb(ctx, execute);
   return res.rows;
 }
 
@@ -369,6 +380,7 @@ export async function getTaskCompletionTrend(
   ctx: AuthContext,
   range: TaskCompletionTrendInput,
   filters: Omit<WorkFilters, 'status' | 'createdFrom' | 'createdTo'> = {},
+  tx?: Tx,
 ): Promise<TrendBucket[]> {
   const granularity: TrendGranularity = range.granularity ?? 'day';
   if (granularity !== 'day' && granularity !== 'week') {
@@ -387,8 +399,8 @@ export async function getTaskCompletionTrend(
   // Whitelisted interval — granularity is an enum, never caller SQL text.
   const step: SQL = granularity === 'week' ? sql`interval '7 days'` : sql`interval '1 day'`;
 
-  const res = await withAuthorizedDb(ctx, (tx: Tx) =>
-    tx.execute<TrendBucket>(sql`
+  const execute = (db: Tx) =>
+    db.execute<TrendBucket>(sql`
       with bounds as (
         select ${range.from}::date as start_d, ${range.to}::date as end_d
       ),
@@ -409,7 +421,7 @@ export async function getTaskCompletionTrend(
        ${andAll(taskFilterSql(filters, 't'))}
       group by b.day
       order by b.day
-    `),
-  );
+    `);
+  const res = tx ? await execute(tx) : await withAuthorizedDb(ctx, execute);
   return res.rows;
 }

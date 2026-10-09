@@ -1,4 +1,5 @@
 import { withPermission } from '@/lib/authz/http';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/analytics/tenant';
 import type { DashboardFilter } from '@/lib/analytics/types';
 import {
@@ -30,44 +31,50 @@ import {
  * POST { preset, timezone, customStart, customEnd, filters }  reports.view → automation metrics
  *
  * Plain JSON, no envelope, no-store.
+ *
+ * Phase 12 (F-12-01): the eight metrics compose over ONE shared
+ * withAuthorizedDb transaction (each metric's trailing `tx`). Per-route
+ * transaction budget: ≤ 2 (shared metrics tx + the authz tx).
  */
 
 export const dynamic = 'force-dynamic';
 
 async function buildAutomationDashboard(ctx: AuthContext, filter: DashboardFilter) {
-  const [
-    workflowStats,
-    workflowSuccessRate,
-    executionsOverTime,
-    topWorkflows,
-    jobStats,
-    automationSuccessRate,
-    deadLetterCount,
-    jobsOverTime,
-  ] = await Promise.all([
-    getWorkflowStats(ctx, filter),
-    getWorkflowSuccessRate(ctx, filter),
-    getExecutionsOverTime(ctx, filter),
-    getTopWorkflows(ctx, filter),
-    getJobStats(ctx, filter),
-    getAutomationSuccessRate(ctx, filter),
-    getDeadLetterCount(ctx),
-    getJobsOverTime(ctx, filter),
-  ]);
-  return {
-    workflows: {
-      stats: workflowStats,
-      successRate: workflowSuccessRate,
+  return withAuthorizedDb(ctx, async (tx) => {
+    const [
+      workflowStats,
+      workflowSuccessRate,
       executionsOverTime,
       topWorkflows,
-    },
-    automation: {
       jobStats,
-      successRate: automationSuccessRate,
+      automationSuccessRate,
       deadLetterCount,
       jobsOverTime,
-    },
-  };
+    ] = await Promise.all([
+      getWorkflowStats(ctx, filter, tx),
+      getWorkflowSuccessRate(ctx, filter, tx),
+      getExecutionsOverTime(ctx, filter, tx),
+      getTopWorkflows(ctx, filter, 10, tx),
+      getJobStats(ctx, filter, tx),
+      getAutomationSuccessRate(ctx, filter, tx),
+      getDeadLetterCount(ctx, tx),
+      getJobsOverTime(ctx, filter, tx),
+    ]);
+    return {
+      workflows: {
+        stats: workflowStats,
+        successRate: workflowSuccessRate,
+        executionsOverTime,
+        topWorkflows,
+      },
+      automation: {
+        jobStats,
+        successRate: automationSuccessRate,
+        deadLetterCount,
+        jobsOverTime,
+      },
+    };
+  });
 }
 
 async function handleAutomation(request: Request, raw: unknown, authorizationOrgId: string) {

@@ -14,6 +14,13 @@
  *     backoff, unregistered type → CONFIG_ERROR dead-letter, claim errors and
  *     handler throws never crash the loop, SIGTERM/SIGINT graceful shutdown
  *     (idle, in-flight, and uncooperative-handler timeout → claim release)
+ *   - runWorker in-loop stale reap (Phase 12, F-12-02): reapStaleJobs fires
+ *     on the reapIntervalMs cadence, 0 disables it, reap ticks never block
+ *     claiming. The runner.ts startup reap and the live-DB reap semantics
+ *     live in tests/jobs/reaper-live.test.ts
+ *   - runWorker adaptive idle poll (Phase 12, F-12-04): the sleep after an
+ *     empty claim backs off geometrically from pollIntervalMs to the
+ *     pollMaxIdleMs ceiling and resets to pollIntervalMs on any claimed job
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -68,7 +75,7 @@ import {
 } from '@/lib/jobs/worker';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from '@/lib/jobs/queue';
 import type { Job } from '@/lib/jobs/types';
-import type { JobExecutionContext } from '@/lib/jobs/worker';
+import type { JobExecutionContext, WorkerConfig } from '@/lib/jobs/worker';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -355,6 +362,72 @@ describe('runWorker', () => {
   });
 });
 
+// ── runWorker in-loop stale reap (Phase 12, F-12-02) ────────────────────────
+
+describe('runWorker in-loop stale reap', () => {
+  it('reaps on the reapIntervalMs cadence through the 0049 definer (60s default threshold)', async () => {
+    registerHandler('email', async () => {});
+    vi.mocked(claimJob).mockResolvedValue(null);
+
+    const runPromise = runWorker({ workerId: 'w-reap', pollIntervalMs: 10, reapIntervalMs: 30 });
+    await sleep(120);
+    process.emit('SIGINT');
+    await runPromise;
+
+    // The mocked drizzle records every worker-plane statement; on an idle
+    // loop the only statements are reaps. Each goes through the SECURITY
+    // DEFINER with the default 60s staleness threshold — never a raw UPDATE.
+    const reaps = hoisted.executed.filter((s) => s.sql.includes('jobs_reap_stale'));
+    expect(reaps.length).toBeGreaterThanOrEqual(1);
+    for (const reap of reaps) {
+      expect(reap.sql).not.toMatch(/update\s+public\.jobs/i);
+      expect(reap.params).toEqual([60_000]);
+    }
+    expect(startJob).not.toHaveBeenCalled();
+  });
+
+  it('reapIntervalMs 0 disables the in-loop reap', async () => {
+    registerHandler('email', async () => {});
+    vi.mocked(claimJob).mockResolvedValue(null);
+
+    const runPromise = runWorker({ workerId: 'w-noreap', pollIntervalMs: 10, reapIntervalMs: 0 });
+    await sleep(100);
+    process.emit('SIGINT');
+    await runPromise;
+
+    expect(hoisted.executed.filter((s) => s.sql.includes('jobs_reap_stale'))).toHaveLength(0);
+  });
+
+  it('the loop keeps claiming after in-loop reaps fire (reap ticks never block claims)', async () => {
+    registerHandler('email', async () => {});
+    // Claim nothing for the first few polls (reap ticks fire meanwhile),
+    // then hand over a job: it must still be claimed and completed. The
+    // reap call itself is wrapped in the same swallow-on-error posture as
+    // the retry sweep (`.catch(() => undefined)` at the call site), so a
+    // DB blip during a reap cannot kill the loop either.
+    vi.mocked(claimJob)
+      .mockResolvedValue(null)
+      .mockResolvedValue(null)
+      .mockResolvedValue(null)
+      .mockResolvedValue(null)
+      .mockResolvedValue(null)
+      .mockResolvedValueOnce(fakeJob())
+      .mockResolvedValue(null);
+
+    const runPromise = runWorker({
+      workerId: 'w-reapsurvive',
+      pollIntervalMs: 10,
+      reapIntervalMs: 25,
+    });
+    await sleep(150);
+    process.emit('SIGINT');
+    await runPromise;
+
+    expect(hoisted.executed.some((s) => s.sql.includes('jobs_reap_stale'))).toBe(true);
+    expect(completeJob).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── reapStaleJobs (mocked db) ───────────────────────────────────────────────
 
 describe('reapStaleJobs', () => {
@@ -381,5 +454,116 @@ describe('reapStaleJobs', () => {
     await expect(reapStaleJobs(-1)).rejects.toThrow(/thresholdMs/);
     await expect(reapStaleJobs(NaN)).rejects.toThrow(/thresholdMs/);
     expect(hoisted.executed).toHaveLength(0);
+  });
+});
+
+// ── runWorker adaptive idle poll (Phase 12, F-12-04) ─────────────────────────
+
+describe('runWorker adaptive idle poll', () => {
+  const gapsBetween = (stamps: number[]): number[] => stamps.slice(1).map((t, i) => t - stamps[i]!);
+
+  /** Run a worker whose claims are scripted by `claim`, recording claim times. */
+  async function observeClaims(
+    config: Partial<WorkerConfig>,
+    observeMs: number,
+    claim: () => Promise<Job | null>,
+    stamps: number[],
+  ): Promise<void> {
+    vi.mocked(claimJob).mockImplementation(async () => {
+      stamps.push(Date.now());
+      return claim();
+    });
+    const runPromise = runWorker({
+      workerId: 'w-idle-poll',
+      reapIntervalMs: 0,
+      retrySweepIntervalMs: 0,
+      ...config,
+    });
+    await sleep(observeMs);
+    process.emit('SIGINT');
+    await runPromise;
+  }
+
+  it('backs off geometrically from pollIntervalMs to the pollMaxIdleMs ceiling', async () => {
+    registerHandler('email', async () => {});
+    const stamps: number[] = [];
+    // Sleeps: 25, 50, 100, 200, 200, … — ~7 claims in the window, where
+    // fixed 25 ms polling would claim ~38 times.
+    await observeClaims({ pollIntervalMs: 25, pollMaxIdleMs: 200 }, 950, async () => null, stamps);
+
+    const gaps = gapsBetween(stamps);
+    expect(gaps.length).toBeGreaterThanOrEqual(5);
+    expect(stamps.length).toBeLessThanOrEqual(10);
+    // Starts at the base interval, then doubles (within timer tolerance).
+    expect(gaps[0]).toBeGreaterThanOrEqual(15);
+    expect(gaps[0]).toBeLessThanOrEqual(80);
+    expect(gaps[1]).toBeGreaterThanOrEqual(gaps[0]! + 8);
+    expect(gaps[2]).toBeGreaterThanOrEqual(gaps[1]! + 20);
+    // Reaches the ceiling and never sleeps past it.
+    expect(gaps[3]).toBeGreaterThanOrEqual(140);
+    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(320);
+    expect(gaps[gaps.length - 1]).toBeGreaterThanOrEqual(150);
+    expect(startJob).not.toHaveBeenCalled();
+  });
+
+  it('holds the ceiling over a long idle (no drift back, no overshoot)', async () => {
+    registerHandler('email', async () => {});
+    const stamps: number[] = [];
+    // Sleeps: 20, 40, 60, 60, 60, … — ~22 claims in the window, where
+    // fixed 20 ms polling would claim ~60 times.
+    await observeClaims({ pollIntervalMs: 20, pollMaxIdleMs: 60 }, 1200, async () => null, stamps);
+
+    const gaps = gapsBetween(stamps);
+    expect(stamps.length).toBeLessThanOrEqual(30);
+    expect(gaps.length).toBeGreaterThanOrEqual(12);
+    expect(gaps[0]).toBeLessThanOrEqual(45); // started at the base interval
+    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(110); // capped at 60 + slack
+    // Settled at the ceiling: the tail gaps are neither the base interval
+    // (backoff lost) nor above the ceiling (backoff unbounded).
+    for (const gap of gaps.slice(-5)) {
+      expect(gap).toBeGreaterThanOrEqual(45);
+      expect(gap).toBeLessThanOrEqual(110);
+    }
+  });
+
+  it('resets the idle sleep to pollIntervalMs on any claimed job', async () => {
+    registerHandler('email', async () => {});
+    const stamps: number[] = [];
+    let calls = 0;
+    // Four empty claims drive the backoff deep (sleeps 25, 50, 100, 200 —
+    // the next would be the 400 ceiling); the fifth claim returns a job.
+    await observeClaims(
+      { pollIntervalMs: 25, pollMaxIdleMs: 400 },
+      1000,
+      async () => {
+        calls += 1;
+        return calls === 5 ? fakeJob() : null;
+      },
+      stamps,
+    );
+
+    expect(completeJob).toHaveBeenCalledTimes(1);
+    const gaps = gapsBetween(stamps);
+    // Proof the worker really was deep in backoff before the claim…
+    expect(gaps[3]).toBeGreaterThanOrEqual(140);
+    // …claimed the next job immediately after executing (no sleep inserted)…
+    expect(gaps[4]).toBeLessThanOrEqual(60);
+    // …and the first idle sleep after the job is the base interval again,
+    // not the 400 ms the backoff had grown to.
+    expect(gaps[5]).toBeGreaterThanOrEqual(12);
+    expect(gaps[5]).toBeLessThanOrEqual(110);
+  });
+
+  it('a pollMaxIdleMs below pollIntervalMs never shortens the base interval', async () => {
+    registerHandler('email', async () => {});
+    const stamps: number[] = [];
+    await observeClaims({ pollIntervalMs: 40, pollMaxIdleMs: 10 }, 320, async () => null, stamps);
+
+    const gaps = gapsBetween(stamps);
+    expect(gaps.length).toBeGreaterThanOrEqual(5);
+    for (const gap of gaps) {
+      expect(gap).toBeGreaterThanOrEqual(28);
+      expect(gap).toBeLessThanOrEqual(95);
+    }
   });
 });

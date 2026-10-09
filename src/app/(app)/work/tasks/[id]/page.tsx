@@ -20,8 +20,11 @@ import {
   toRows,
   type PersonOption,
 } from '../../_types';
-import { EditTaskForm } from '../../_components/EditTaskForm';
 import { PRIORITY_BADGE_CLASSES } from '../../_components/TaskCard';
+// The task editor (TaskForm tree, with its pickers) only renders after the
+// user opens "Edit task"; the Lazy wrapper code-splits it out of First Load
+// (Phase 12, F-12-09).
+import { EditTaskFormLazy as EditTaskForm } from '../../_components/EditTaskFormLazy';
 import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
 import { canUseAi } from '@/components/ai/can-use-ai';
 

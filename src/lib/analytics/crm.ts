@@ -24,6 +24,12 @@
  * ctx.orgId (reconciled via validateDashboardFilter), never a request-supplied
  * tenant.
  *
+ * Phase 12 (F-12-01): every function also accepts an optional trailing
+ * `tx?: Tx`. When a caller (an analytics route composing a dashboard)
+ * supplies one, the metric runs on that shared authorized transaction and
+ * opens none of its own; when omitted, it opens its own via
+ * withAuthorizedDb exactly as before. Results are identical either way.
+ *
  * ── QUERY PATTERNS ───────────────────────────────────────────────────────────
  * - org_id = ${orgId} first in every WHERE (defense in depth; RLS enforces it
  *   too via withAuthorizedDb).
@@ -49,7 +55,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { withAuthorizedDb } from '@/lib/db/authorized';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import { assertValidOrgId } from './tenant';
 import type {
@@ -157,11 +163,12 @@ export async function getLeadCounts(
   orgId: string,
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<LeadCounts> {
   assertTenant(orgId, ctx);
   const { startInclusive, endExclusive } = filters.dateRange;
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{
+  const run = async (db: Tx): Promise<LeadCounts> => {
+    const res = await db.execute<{
       total_leads: number;
       new_leads: number;
       qualified_leads: number;
@@ -205,7 +212,8 @@ export async function getLeadCounts(
       newLeads: Number(r?.new_leads ?? 0),
       qualifiedLeads: Number(r?.qualified_leads ?? 0),
     };
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -225,11 +233,12 @@ export async function getLeadConversionRate(
   orgId: string,
   ctx: AuthContext,
   dateRange: DateRange,
+  tx?: Tx,
 ): Promise<MetricResult> {
   assertTenant(orgId, ctx);
   const { startInclusive, endExclusive } = dateRange;
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ numerator: number; denominator: number }>(sql`
+  const run = async (db: Tx): Promise<MetricResult> => {
+    const res = await db.execute<{ numerator: number; denominator: number }>(sql`
       with cohort as (
         select d.id, h.changed_at as created_at
         from deals d
@@ -264,7 +273,8 @@ export async function getLeadConversionRate(
     const denominator = Number(r?.denominator ?? 0);
     if (denominator === 0) return null;
     return Number(r?.numerator ?? 0) / denominator;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -276,8 +286,9 @@ export async function getContactGrowth(
   ctx: AuthContext,
   dateRange: DateRange,
   grain: TimeSeriesGrain = 'day',
+  tx?: Tx,
 ): Promise<TimeSeriesPoint[]> {
-  return getCreatedSeries(orgId, ctx, 'contacts', dateRange, grain);
+  return getCreatedSeries(orgId, ctx, 'contacts', dateRange, grain, tx);
 }
 
 /**
@@ -289,8 +300,9 @@ export async function getCompanyGrowth(
   ctx: AuthContext,
   dateRange: DateRange,
   grain: TimeSeriesGrain = 'day',
+  tx?: Tx,
 ): Promise<TimeSeriesPoint[]> {
-  return getCreatedSeries(orgId, ctx, 'companies', dateRange, grain);
+  return getCreatedSeries(orgId, ctx, 'companies', dateRange, grain, tx);
 }
 
 /**
@@ -304,10 +316,11 @@ export async function getActivityVolume(
   ctx: AuthContext,
   dateRange: DateRange,
   grain: TimeSeriesGrain = 'day',
+  tx?: Tx,
 ): Promise<ActivityVolumeBucket[]> {
   assertTenant(orgId, ctx);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{
+  const run = async (db: Tx): Promise<ActivityVolumeBucket[]> => {
+    const res = await db.execute<{
       period_start: string;
       period_end: string;
       type: string;
@@ -331,7 +344,8 @@ export async function getActivityVolume(
       type: r.type as ActivityType,
       count: Number(r.value ?? 0),
     }));
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /** Shared created_at time-series for the soft-deleted CRM entity tables. */
@@ -341,12 +355,13 @@ async function getCreatedSeries(
   table: 'contacts' | 'companies',
   dateRange: DateRange,
   grain: TimeSeriesGrain,
+  tx?: Tx,
 ): Promise<TimeSeriesPoint[]> {
   assertTenant(orgId, ctx);
   // Constant identifiers only — never caller input.
   const tableIdent = table === 'contacts' ? sql`contacts` : sql`companies`;
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<SeriesRow>(sql`
+  const run = async (db: Tx): Promise<TimeSeriesPoint[]> => {
+    const res = await db.execute<SeriesRow>(sql`
       with ${seriesBuckets(dateRange, grain)}
       select b.period_start, b.period_end, count(t.id)::int as value
       from buckets b
@@ -358,5 +373,6 @@ async function getCreatedSeries(
       order by b.period_start
     `);
     return res.rows.map(toTimeSeriesPoint);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }

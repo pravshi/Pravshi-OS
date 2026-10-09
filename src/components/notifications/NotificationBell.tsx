@@ -4,10 +4,10 @@
  * Phase 8 — Notification bell (Workstream E).
  *
  * Header right cluster, before ThemeToggle (contract §16.9). Client-component
- * leaf: polls GET /api/notifications/unread-count every 30s (no SSE exists;
- * see §16.9) and opens a dropdown preview of the 5 newest unread
- * notifications (via getBellPreviewAction — links are accessibility-verified
- * server-side; see resolve-links.ts).
+ * leaf: polls GET /api/notifications/unread-count every 60s (no SSE exists;
+ * see §16.9; interval set by Phase 12 F-12-08) and opens a dropdown preview
+ * of the 5 newest unread notifications (via getBellPreviewAction — links are
+ * accessibility-verified server-side; see resolve-links.ts).
  *
  * Renders the app's <Toaster /> once: the bell is mounted in the app header
  * on every (app) page, so all notification UI (bell, center, preferences)
@@ -38,8 +38,13 @@ import {
 } from './notifications-view';
 import { EventTypeIcon } from './EventTypeIcon';
 
-/** §16.9: 30s unread polling. No SSE/websocket exists; document if this changes. */
-const POLL_INTERVAL_MS = 30_000;
+/**
+ * §16.9 unread polling, retuned by Phase 12 (F-12-08): 60s, and no request
+ * fires while the tab is hidden — polling resumes with an immediate refresh
+ * when the tab becomes visible again. No SSE/websocket exists; document if
+ * this changes.
+ */
+const POLL_INTERVAL_MS = 60_000;
 const PREVIEW_LIMIT = 5;
 
 export function NotificationBell() {
@@ -65,10 +70,21 @@ export function NotificationBell() {
   useEffect(() => {
     mounted.current = true;
     void refreshCount();
-    const timer = setInterval(() => void refreshCount(), POLL_INTERVAL_MS);
+    const timer = setInterval(() => {
+      // Hidden tabs do not poll (Phase 12, F-12-08): ambient load should
+      // scale with visible tabs, not with every tab ever opened.
+      if (document.visibilityState === 'visible') void refreshCount();
+    }, POLL_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      // Returning to the tab refreshes immediately instead of waiting out
+      // the remainder of the interval with a stale count.
+      if (document.visibilityState === 'visible') void refreshCount();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted.current = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [refreshCount]);
 

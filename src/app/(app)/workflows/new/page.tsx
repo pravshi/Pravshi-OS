@@ -2,7 +2,10 @@ import Link from 'next/link';
 import { requirePagePermission } from '@/lib/authz/page';
 import { createWorkflowAction } from '../_actions';
 import { WORKFLOW_PERMISSIONS } from '../_permissions';
-import { WorkflowBuilder } from '../_components/WorkflowBuilder';
+// The builder canvas (trigger/condition/action editors) is the heaviest
+// rarely-first-open surface in the app; the Lazy wrapper code-splits it out
+// of First Load (Phase 12, F-12-09).
+import { WorkflowBuilderLazy as WorkflowBuilder } from '../_components/WorkflowBuilderLazy';
 
 /** /workflows/new — build a workflow definition (always starts as DRAFT). */
 export default async function NewWorkflowPage() {

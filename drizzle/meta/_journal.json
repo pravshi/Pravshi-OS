@@ -457,6 +457,14 @@
       "tag": "0061_security_hardening",
       "breakpoints": true,
       "hash": "18944fce1e413190bd48aac19143b7489cc11a1bbc6bf894c04ae479308ecb62"
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791343891097,
+      "tag": "0062_audit_partition_maintenance",
+      "breakpoints": true,
+      "hash": "401c18152b0f0eca75ff5b7b606a120b41f62964ecd32bd742c9397f9b5eb170"
     }
   ]
 }

@@ -30,13 +30,41 @@
  * 1. Imports `./handlers` and `./workflow-jobs` for their side effects: that
  *    registers the notification, webhook, email, cleanup, workflow_run and
  *    scheduled_trigger handlers with the worker runtime.
- * 2. Starts `runWorker(config)` — the claim → execute → complete/fail loop.
+ * 2. Reaps stale claims once at startup (`reapStaleJobs()`, Phase 12
+ *    F-12-02): jobs a previous, dead worker left in 'claimed'/'running' with
+ *    a stale claim lease are reset to 'pending' BEFORE the first claim, so a
+ *    crashed predecessor's work is recovered immediately instead of waiting
+ *    for the in-loop reap (reapIntervalMs, default 5 min) — and lease expiry
+ *    no longer depends on per-org cleanup jobs existing. A reap failure is
+ *    logged and swallowed; the in-loop reap retries on cadence.
+ * 3. Starts `runWorker(config)` — the claim → execute → complete/fail loop.
  *    runWorker installs its own SIGTERM/SIGINT handlers and resolves when a
  *    graceful shutdown finishes; the process then exits 0.
- * 3. Runs `tickScheduler()` on an interval in the SAME process so cron-like
+ * 4. Runs `tickScheduler()` on an interval in the SAME process so cron-like
  *    schedules are turned into jobs without a second deployment. Ticks are
  *    serialized across instances by a Postgres advisory lock, and a tick that
  *    throws is logged and swallowed — it can never kill the worker.
+ *
+ * ── CAPACITY (Phase 12, F-12-03 — a documented assumption, not a bug) ─────
+ * Execution is strictly sequential: one job at a time per worker process.
+ * Capacity per process ≈ 3600 ÷ mean job seconds (jobs/hour); scale is
+ * horizontal — add worker processes. A single long job (e.g. a 30 s webhook
+ * timeout chain) head-of-line blocks other job types on its process for
+ * its duration. A parallel-claim redesign is deliberately NOT implemented:
+ * it requires measured queue-depth evidence (Phase 12 §4.4 harness or
+ * production telemetry) before the shutdown/claim-lease reasoning is
+ * complicated.
+ *
+ * ── IDLE POLLING (Phase 12, F-12-04) ─────────────────────────────────────
+ * When a claim finds no work, the worker's idle sleep backs off
+ * geometrically from 1 s to a 10 s ceiling (pollIntervalMs →
+ * pollMaxIdleMs), resetting to 1 s on any claimed job. An idle worker
+ * therefore polls at most once per 10 s instead of once per second, so a
+ * running worker no longer holds the database awake by existence alone.
+ * Tradeoff: a job arriving during deep idle can wait up to the 10 s
+ * ceiling before it is claimed — acceptable for every current job type
+ * (none is user-blocking; user-facing work is synchronous). Scheduler
+ * tick unchanged (60 s default).
  *
  * The process stays alive until SIGTERM/SIGINT. A supervisor (systemd,
  * Docker, Render, etc.) should restart it on non-zero exit.
@@ -98,7 +126,7 @@ async function main(): Promise<void> {
   const { env } = await import('@/env');
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
-  const { runWorker } = await import('./worker');
+  const { runWorker, reapStaleJobs } = await import('./worker');
   const { tickScheduler } = await import('./scheduler');
 
   // The shared Neon pool emits 'error' for failures on idle clients (e.g. a
@@ -167,6 +195,17 @@ async function main(): Promise<void> {
       tickInFlight = false;
     }
   };
+
+  // Crash recovery before anything else claims work (Phase 12, F-12-02):
+  // reset claims orphaned by a dead predecessor to 'pending'. Logged with
+  // the reaped count; a failure here must never kill the worker — the
+  // in-loop reap (reapIntervalMs) retries on cadence.
+  try {
+    const reaped = await reapStaleJobs();
+    console.log(`[worker] startup reap: reaped ${reaped} stale job(s)`);
+  } catch (err) {
+    console.error('[worker] startup reap failed (worker continues):', err);
+  }
 
   // Fire once at startup so a fresh deploy does not wait a full interval,
   // then keep ticking. The first tick runs before the claim loop blocks.
