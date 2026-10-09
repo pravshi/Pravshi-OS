@@ -21,23 +21,28 @@
  * through the notification family's definers, honouring the recipient's
  * channel preference. These tests call the sweep directly.
  *
- * Fixture idioms mirror tests/notifications/integration.test.ts: owner
- * pool (DATABASE_URL_MIGRATE) for seeding and cross-checks, fabricated
- * Authorization objects, per-run orgs/people, NO cleanup deletes (every
- * run uses fresh orgs). Requires DATABASE_URL_MIGRATE; skipped otherwise.
- * The suite runs in CI, where the full migration chain (incl. 0064) is
- * applied to an empty Postgres.
+ * Fixture idioms mirror tests/notifications/integration.test.ts for the
+ * owner pool (DATABASE_URL_MIGRATE) seeding and cross-checks, and
+ * tests/db/project-members.test.ts for the actors: REAL accounts, logins
+ * and sessions (tests/authz/fixtures.ts), with every Authorization minted
+ * by requirePermission() — the services brand-check their Authorization
+ * (assertAuthorization), so a fabricated object is rejected by design.
+ * Per-run orgs/people, NO cleanup deletes (every run uses fresh orgs).
+ * Requires DATABASE_URL_MIGRATE; skipped otherwise. The suite runs in CI,
+ * where the full migration chain (incl. 0064) is applied to an empty
+ * Postgres.
  */
 
 import { randomUUID } from 'node:crypto';
 import { Pool } from '@neondatabase/serverless';
 import { describe, it, expect, beforeAll } from 'vitest';
+import { requirePermission, type Authorization } from '@/lib/authz/require-permission';
+import { headersFor, mkAccount, mkCustomRole, mkDept, type Account } from '../authz/fixtures';
 
 const MIGRATE_URL = process.env.DATABASE_URL_MIGRATE;
 const HAS_DB = typeof MIGRATE_URL === 'string' && MIGRATE_URL.length > 0;
 
 const RUN = randomUUID().slice(0, 8);
-const stamp = () => new Date().toISOString();
 
 type TasksSvc = typeof import('@/lib/work/tasks');
 type DealsSvc = typeof import('@/lib/crm/deals');
@@ -48,9 +53,8 @@ type WorkerMod = typeof import('@/lib/jobs/worker');
 type HandlersMod = typeof import('@/lib/jobs/handlers');
 type SweepMod = typeof import('@/lib/jobs/reminder-sweep');
 type Job = import('@/lib/jobs/types').Job;
-type Authorization = import('@/lib/authz/require-permission').Authorization;
 
-/** A permission bundle for a fabricated actor (all GLOBAL scope). */
+/** A permission bundle for a real actor (all GLOBAL scope). */
 const PERMS = {
   manager: [
     'people.view',
@@ -119,14 +123,15 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   let third: string;
   let muted: string;
   let outsiderB: string; // the only org-B person: actor AND recipient there
-  // Fabricated authorizations.
-  let managerAuth: Authorization;
-  let assigneeAuth: Authorization;
-  let creatorAuth: Authorization;
-  let ownerAuth: Authorization;
-  let noJobsAuth: Authorization;
-  let mutedAuth: Authorization;
-  let outsiderAuth: Authorization;
+  // Real accounts (tests/authz/fixtures.ts). Authorizations are minted per
+  // service call via authFor() below — never stored, never fabricated.
+  let managerAcct: Account;
+  let assigneeAcct: Account;
+  let creatorAcct: Account;
+  let ownerAcct: Account;
+  let noJobsAcct: Account;
+  let mutedAcct: Account;
+  let outsiderAcct: Account;
 
   async function owner<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -145,84 +150,67 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     return id;
   }
 
-  async function mkRoleFor(orgId: string, keys: readonly string[]): Promise<string> {
-    const { rows } = await owner<{ id: string }>(
-      `select id from public.permissions where key = any($1::text[])`,
-      [[...keys]],
+  /** mkCustomRole insert-selects grants; a mistyped key would silently grant
+   *  nothing. Assert the landed grant count so the failure is loud and local.
+   *  (Copied from tests/db/people-candidates.test.ts, mkRoleChecked.) */
+  async function mkRoleChecked(
+    orgId: string,
+    label: string,
+    keys: readonly string[],
+  ): Promise<string> {
+    const grants = keys.map((k) => [k, 'GLOBAL'] as [string, string]);
+    const roleKey = `P1B_${RUN}_${label}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    const role = await mkCustomRole(pool, orgId, roleKey, grants);
+    const { rows } = await owner<{ n: number }>(
+      `select count(*)::int as n from public.role_permissions where role_id = $1`,
+      [role],
     );
-    const found = new Set(rows.map((r) => r.id));
-    if (found.size !== keys.length) {
-      // Fail loudly rather than seed an actor missing a grant.
-      throw new Error(`permission catalogue lookup missed keys: ${keys.join(', ')}`);
-    }
-    const roleId = randomUUID();
-    // roles.key is NOT NULL with a format check (^[A-Z][A-Z0-9_]{1,39}$) and a
-    // non-partial unique index on (org_id, key) — sibling idiom
-    // (integration.test.ts:107): sanitise the RUN-suffixed label into key form.
-    const roleKey = `p1b-role-${RUN}-${randomUUID().slice(0, 6)}`
-      .toUpperCase()
-      .replace(/[^A-Z0-9_]/g, '_');
-    await owner(
-      `insert into public.roles (id, org_id, key, name, is_system) values ($1, $2, $3, $4, false)`,
-      [roleId, orgId, roleKey, `p1b-role-${RUN}-${randomUUID().slice(0, 6)}`],
-    );
-    for (const permId of found) {
-      await owner(
-        `insert into public.role_permissions (role_id, permission_id, scope)
-         values ($1, $2, 'GLOBAL'::public.access_scope)`,
-        [roleId, permId],
+    if (rows[0]!.n !== grants.length) {
+      throw new Error(
+        `role ${roleKey}: expected ${grants.length} grants, found ${rows[0]!.n} — a permission key is not in the catalogue`,
       );
     }
-    return roleId;
+    return role;
   }
 
-  function makeAuth(personId: string, orgId: string): Authorization {
-    return {
-      ctx: { personId, orgId, aal: 'aal1' },
-      meta: {
-        userAgent: 'vitest-p1b',
-        ipAddress: '127.0.0.1',
-        requestId: `p1b-${RUN}`,
-        occurredAt: stamp(),
-      },
-      permissions: new Set<string>(),
-      scopeFor: () => 'GLOBAL',
-      hasPermission: (key: string) => key.length > 0,
-      requirePermission: (key: string) => {
-        void key;
-      },
-    } as unknown as Authorization;
-  }
+  // Mint a REAL Authorization for one service call, exactly as the sibling
+  // service-level suites do (tests/db/project-members.test.ts:180-181): the
+  // actor's real session cookie goes through requirePermission(), gated on
+  // the same permission the app's route/action for that call uses.
+  const authFor = (account: Account, permission: string): Promise<Authorization> =>
+    requirePermission(headersFor(account.cookie), { permission });
 
   /** One department per org, created lazily (engagements.department_id is NOT NULL). */
   const deptByOrg = new Map<string, string>();
-  async function mkDept(orgId: string): Promise<string> {
+  async function mkDeptFor(orgId: string): Promise<string> {
     const cached = deptByOrg.get(orgId);
     if (cached) return cached;
-    const id = randomUUID();
-    await owner(`insert into public.departments (id, org_id, code, name) values ($1, $2, $3, $4)`, [
-      id,
-      orgId,
-      `P1B_${RUN}`.toUpperCase(),
-      `P1b dept ${RUN}`,
-    ]);
+    const id = await mkDept(pool, orgId, `P1B_${RUN}_${orgId === orgA ? 'A' : 'B'}`.toUpperCase());
     deptByOrg.set(orgId, id);
     return id;
   }
 
   /**
-   * Create a person + ACTIVE engagement holding `keys`; returns ids + auth.
-   * Fixture shapes mirror integration.test.ts / tests/authz/fixtures.ts: the
-   * person carries a generated identity code and no login (auth is fabricated
-   * below; nothing in this suite resolves a session), and the role attaches
-   * via person_roles — engagements has no role_id column.
+   * Create a REAL actor: a checked custom role carrying exactly `keys`, a
+   * Better Auth login, a person linked to it, an ACTIVE engagement, and a
+   * signed-in session (tests/authz/fixtures.ts mkAccount). The D2 actor is
+   * built the same way — its role genuinely lacks jobs.create in
+   * role_permissions, which is what the queue's authz.has('jobs.create')
+   * gate reads.
    */
-  async function mkPerson(
-    orgId: string,
-    label: string,
-    keys: readonly string[],
-  ): Promise<{ personId: string; auth: Authorization }> {
-    const roleId = await mkRoleFor(orgId, keys);
+  async function mkActor(orgId: string, label: string, keys: readonly string[]): Promise<Account> {
+    const roleId = await mkRoleChecked(orgId, label, keys);
+    const deptId = await mkDeptFor(orgId);
+    return mkAccount(pool, { org: orgId, dept: deptId, run: RUN, label, customRoles: [roleId] });
+  }
+
+  /**
+   * Create a recipient-only person + ACTIVE engagement: no login, no role.
+   * Recipients never act in this suite — notifications and reminder rows
+   * are keyed by person id, and delivery checks the person's liveness in
+   * the org, not a session.
+   */
+  async function mkRecipient(orgId: string, label: string): Promise<string> {
     const personId = randomUUID();
     const { rows: codeRows } = await owner<{ c: string }>(
       `select authz.next_identity_code($1::uuid, 'EMP', '2026') as c`,
@@ -233,18 +221,14 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
        values ($1, $2, $3, $4, 'ACTIVE'::public.person_status, $5)`,
       [personId, orgId, codeRows[0]!.c, `P1b ${label}`, `p1b-${RUN}-${label}@example.invalid`],
     );
-    const deptId = await mkDept(orgId);
+    const deptId = await mkDeptFor(orgId);
     await owner(
       `insert into public.engagements
          (id, org_id, person_id, department_id, engagement_type, status, start_date)
        values ($1, $2, $3, $4, 'EMPLOYEE', 'ACTIVE'::public.engagement_status, current_date)`,
       [randomUUID(), orgId, personId, deptId],
     );
-    await owner(
-      `insert into public.person_roles (person_id, role_id, org_id) values ($1, $2, $3)`,
-      [personId, roleId, orgId],
-    );
-    return { personId, auth: makeAuth(personId, orgId) };
+    return personId;
   }
 
   const toIso = (v: unknown): string =>
@@ -353,20 +337,26 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
 
     orgA = await mkOrg('a');
     orgB = await mkOrg('b');
-    ({ personId: manager, auth: managerAuth } = await mkPerson(orgA, 'manager', PERMS.manager));
-    ({ personId: assignee, auth: assigneeAuth } = await mkPerson(orgA, 'assignee', PERMS.assignee));
-    ({ personId: creator, auth: creatorAuth } = await mkPerson(orgA, 'creator', PERMS.creator));
-    ({ personId: dealOwner, auth: ownerAuth } = await mkPerson(orgA, 'owner', PERMS.dealOwner));
-    ({ personId: third } = await mkPerson(orgA, 'third', PERMS.assignee));
-    ({ personId: muted, auth: mutedAuth } = await mkPerson(orgA, 'muted', PERMS.assignee));
-    ({ auth: noJobsAuth } = await mkPerson(orgA, 'nojobs', PERMS.noJobs));
-    ({ personId: outsiderB, auth: outsiderAuth } = await mkPerson(orgB, 'outsider', PERMS.manager));
+    managerAcct = await mkActor(orgA, 'manager', PERMS.manager);
+    manager = managerAcct.personId;
+    assigneeAcct = await mkActor(orgA, 'assignee', PERMS.assignee);
+    assignee = assigneeAcct.personId;
+    creatorAcct = await mkActor(orgA, 'creator', PERMS.creator);
+    creator = creatorAcct.personId;
+    ownerAcct = await mkActor(orgA, 'owner', PERMS.dealOwner);
+    dealOwner = ownerAcct.personId;
+    third = await mkRecipient(orgA, 'third');
+    mutedAcct = await mkActor(orgA, 'muted', PERMS.assignee);
+    muted = mutedAcct.personId;
+    noJobsAcct = await mkActor(orgA, 'nojobs', PERMS.noJobs);
+    outsiderAcct = await mkActor(orgB, 'outsider', PERMS.manager);
+    outsiderB = outsiderAcct.personId;
   }, 120_000);
 
   // ── (a) task assignment ──────────────────────────────────────────────────
 
   it('assigning notifies the new assignee exactly once; reassigning notifies only the new assignee; unassigning notifies nobody', async () => {
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} assign flow`,
       assigneePersonId: assignee,
     });
@@ -375,14 +365,22 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     expect(first).toHaveLength(1);
     expect(first[0]!.org_id).toBe(orgA);
 
-    const reassigned = await tasks.assignTask(managerAuth, task.id, third);
+    const reassigned = await tasks.assignTask(
+      await authFor(managerAcct, 'tasks.assign'),
+      task.id,
+      third,
+    );
     expect(reassigned.assigneePersonId).toBe(third);
     await drainNotifications(orgA);
     expect(await notificationRows(orgA, third, 'TASK_ASSIGNED', task.id)).toHaveLength(1);
     // The previous assignee is NOT notified again.
     expect(await notificationRows(orgA, assignee, 'TASK_ASSIGNED', task.id)).toHaveLength(1);
 
-    const unassigned = await tasks.assignTask(managerAuth, task.id, null);
+    const unassigned = await tasks.assignTask(
+      await authFor(managerAcct, 'tasks.assign'),
+      task.id,
+      null,
+    );
     expect(unassigned.assigneePersonId).toBeNull();
     await drainNotifications(orgA);
     // Still exactly the two assignment notifications for this task.
@@ -395,7 +393,7 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   }, 120_000);
 
   it('self-assignment creates no notification', async () => {
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} self assign`,
       assigneePersonId: manager,
     });
@@ -404,7 +402,7 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   }, 120_000);
 
   it('an actor without jobs.create completes the assignment and no notification is created (D2 gate)', async () => {
-    const task = await tasks.createTask(noJobsAuth, {
+    const task = await tasks.createTask(await authFor(noJobsAcct, 'tasks.create'), {
       title: `${RUN} no-jobs actor`,
       assigneePersonId: assignee,
     });
@@ -418,11 +416,15 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   // ── (b) task completion ──────────────────────────────────────────────────
 
   it("completing another person's task notifies the creator exactly once; self-completion does not", async () => {
-    const task = await tasks.createTask(creatorAuth, { title: `${RUN} completion flow` });
-    await tasks.assignTask(creatorAuth, task.id, assignee);
+    const task = await tasks.createTask(await authFor(creatorAcct, 'tasks.create'), {
+      title: `${RUN} completion flow`,
+    });
+    await tasks.assignTask(await authFor(creatorAcct, 'tasks.assign'), task.id, assignee);
     await drainNotifications(orgA); // drains the TASK_ASSIGNED job
 
-    const done = await tasks.moveTask(assigneeAuth, task.id, { status: 'done' });
+    const done = await tasks.moveTask(await authFor(assigneeAcct, 'tasks.edit'), task.id, {
+      status: 'done',
+    });
     expect(done.toStatus).toBe('done');
     await drainNotifications(orgA);
     const rows = await notificationRows(orgA, creator, 'TASK_COMPLETED', task.id);
@@ -431,8 +433,10 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     // The completer is not notified about their own completion.
     expect(await notificationRows(orgA, assignee, 'TASK_COMPLETED', task.id)).toHaveLength(0);
 
-    const own = await tasks.createTask(creatorAuth, { title: `${RUN} self completion` });
-    await tasks.moveTask(creatorAuth, own.id, { status: 'done' });
+    const own = await tasks.createTask(await authFor(creatorAcct, 'tasks.create'), {
+      title: `${RUN} self completion`,
+    });
+    await tasks.moveTask(await authFor(creatorAcct, 'tasks.edit'), own.id, { status: 'done' });
     await drainNotifications(orgA);
     expect(await notificationRows(orgA, creator, 'TASK_COMPLETED', own.id)).toHaveLength(0);
   }, 120_000);
@@ -440,11 +444,13 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   // ── (c) deal stage changes ───────────────────────────────────────────────
 
   it("a deal stage change via updateDeal notifies the owner; the owner changing their own deal's stage does not", async () => {
-    const deal = await deals.createDeal(ownerAuth, {
+    const deal = await deals.createDeal(await authFor(ownerAcct, 'deals.create'), {
       title: `${RUN} stage deal`,
       stage: 'NEW',
     });
-    const updated = await deals.updateDeal(managerAuth, deal.id, { stage: 'QUALIFIED' });
+    const updated = await deals.updateDeal(await authFor(managerAcct, 'deals.edit'), deal.id, {
+      stage: 'QUALIFIED',
+    });
     expect(updated.stage).toBe('QUALIFIED');
     await drainNotifications(orgA);
     const rows = await notificationRows(orgA, dealOwner, 'DEAL_STAGE_CHANGED', deal.id);
@@ -453,13 +459,15 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     // The actor is not the recipient.
     expect(await notificationRows(orgA, manager, 'DEAL_STAGE_CHANGED', deal.id)).toHaveLength(0);
 
-    await deals.updateDeal(ownerAuth, deal.id, { stage: 'PROPOSAL' });
+    await deals.updateDeal(await authFor(ownerAcct, 'deals.edit'), deal.id, { stage: 'PROPOSAL' });
     await drainNotifications(orgA);
     expect(await notificationRows(orgA, dealOwner, 'DEAL_STAGE_CHANGED', deal.id)).toHaveLength(1);
   }, 120_000);
 
   it('a pipeline stage move notifies the deal owner', async () => {
-    const deal = await deals.createDeal(ownerAuth, { title: `${RUN} pipeline deal` });
+    const deal = await deals.createDeal(await authFor(ownerAcct, 'deals.create'), {
+      title: `${RUN} pipeline deal`,
+    });
     expect(deal.pipelineId).not.toBeNull();
     expect(deal.pipelineStageId).not.toBeNull();
     const { rows } = await owner<{ id: string }>(
@@ -469,9 +477,13 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
       [deal.pipelineId, deal.pipelineStageId],
     );
     expect(rows).toHaveLength(1);
-    const moved = await pipelines.moveDealToStage(managerAuth, deal.id, {
-      stageId: rows[0]!.id,
-    });
+    const moved = await pipelines.moveDealToStage(
+      await authFor(managerAcct, 'deals.edit'),
+      deal.id,
+      {
+        stageId: rows[0]!.id,
+      },
+    );
     expect(moved.ok).toBe(true);
     await drainNotifications(orgA);
     expect(await notificationRows(orgA, dealOwner, 'DEAL_STAGE_CHANGED', deal.id)).toHaveLength(1);
@@ -480,10 +492,10 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   // ── (d) preference suppression (domain path) ─────────────────────────────
 
   it('a recipient who disabled the type receives no notification (preference gate)', async () => {
-    await prefs.upsertPreferences(mutedAuth, [
+    await prefs.upsertPreferences(await authFor(mutedAcct, 'notifications.preferences.manage'), [
       { eventType: 'TASK_ASSIGNED', channel: 'in_app', enabled: false },
     ]);
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} muted assignment`,
       assigneePersonId: muted,
     });
@@ -497,7 +509,7 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
       [orgA, muted, task.id],
     );
     expect(rows[0]!.c).toBe('0');
-    await prefs.upsertPreferences(mutedAuth, [
+    await prefs.upsertPreferences(await authFor(mutedAcct, 'notifications.preferences.manage'), [
       { eventType: 'TASK_ASSIGNED', channel: 'in_app', enabled: true },
     ]);
   }, 120_000);
@@ -505,14 +517,20 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   // ── (e) reminder sweep ───────────────────────────────────────────────────
 
   it('sweep delivers a due reminder once, flips is_sent, and leaves future reminders untouched', async () => {
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} reminder task`,
       assigneePersonId: assignee,
     });
-    const due = await reminders.createReminder(assigneeAuth, task.id, { remindAt: inOneHour() });
-    const future = await reminders.createReminder(assigneeAuth, task.id, {
-      remindAt: new Date(Date.now() + 7_200_000).toISOString(),
+    const due = await reminders.createReminder(await authFor(assigneeAcct, 'tasks.edit'), task.id, {
+      remindAt: inOneHour(),
     });
+    const future = await reminders.createReminder(
+      await authFor(assigneeAcct, 'tasks.edit'),
+      task.id,
+      {
+        remindAt: new Date(Date.now() + 7_200_000).toISOString(),
+      },
+    );
     expect(due.isSent).toBe(false);
     await makeDue(due.id);
 
@@ -544,14 +562,16 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   }, 120_000);
 
   it("sweep honours the TASK_DUE preference: a muted recipient's reminder is claimed but not delivered", async () => {
-    await prefs.upsertPreferences(mutedAuth, [
+    await prefs.upsertPreferences(await authFor(mutedAcct, 'notifications.preferences.manage'), [
       { eventType: 'TASK_DUE', channel: 'in_app', enabled: false },
     ]);
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} muted reminder task`,
       assigneePersonId: muted,
     });
-    const rem = await reminders.createReminder(mutedAuth, task.id, { remindAt: inOneHour() });
+    const rem = await reminders.createReminder(await authFor(mutedAcct, 'tasks.edit'), task.id, {
+      remindAt: inOneHour(),
+    });
     await makeDue(rem.id);
     const result = await sweepDueTaskReminders();
     expect(result.failed).toBe(0);
@@ -562,17 +582,19 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
       (r) => r.data.reminderId === rem.id,
     );
     expect(rows).toHaveLength(0);
-    await prefs.upsertPreferences(mutedAuth, [
+    await prefs.upsertPreferences(await authFor(mutedAcct, 'notifications.preferences.manage'), [
       { eventType: 'TASK_DUE', channel: 'in_app', enabled: true },
     ]);
   }, 120_000);
 
   it('a reminder on a soft-deleted task is claimed without delivery', async () => {
-    const task = await tasks.createTask(managerAuth, {
+    const task = await tasks.createTask(await authFor(managerAcct, 'tasks.create'), {
       title: `${RUN} deleted reminder task`,
       assigneePersonId: assignee,
     });
-    const rem = await reminders.createReminder(assigneeAuth, task.id, { remindAt: inOneHour() });
+    const rem = await reminders.createReminder(await authFor(assigneeAcct, 'tasks.edit'), task.id, {
+      remindAt: inOneHour(),
+    });
     await owner(`update public.work_tasks set deleted_at = now() where id = $1`, [task.id]);
     await makeDue(rem.id);
     const result = await sweepDueTaskReminders();
@@ -587,8 +609,16 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
   // ── (e/f) cross-org delivery + tenant isolation ──────────────────────────
 
   it('cross-org reminders deliver within their own org only; no notification row ever crosses orgs', async () => {
-    const taskB = await tasks.createTask(outsiderAuth, { title: `${RUN} org-b reminder task` });
-    const remB = await reminders.createReminder(outsiderAuth, taskB.id, { remindAt: inOneHour() });
+    const taskB = await tasks.createTask(await authFor(outsiderAcct, 'tasks.create'), {
+      title: `${RUN} org-b reminder task`,
+    });
+    const remB = await reminders.createReminder(
+      await authFor(outsiderAcct, 'tasks.edit'),
+      taskB.id,
+      {
+        remindAt: inOneHour(),
+      },
+    );
     await makeDue(remB.id);
     const result = await sweepDueTaskReminders();
     expect(result.failed).toBe(0);
