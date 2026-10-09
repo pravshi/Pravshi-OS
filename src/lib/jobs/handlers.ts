@@ -532,7 +532,11 @@ export function parseIpv4Aton(host: string): [number, number, number, number] | 
     if (p.length === 0 || p.length > 10) return null;
     let n: number;
     if (/^0[xX][0-9a-fA-F]+$/.test(p)) n = parseInt(p, 16);
-    else if (/^0[0-9]+$/.test(p)) n = parseInt(p, 8);
+    else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+    // A leading-zero part containing 8/9 is invalid octal: WHATWG's IPv4
+    // parser and inet_aton both reject it outright. Never let parseInt
+    // silently truncate it into a different address ('08' → 0).
+    else if (/^0[0-9]/.test(p)) return null;
     else if (/^[0-9]+$/.test(p)) n = parseInt(p, 10);
     else return null;
     if (!Number.isSafeInteger(n) || n < 0 || n > 0xffffffff) return null;
@@ -585,8 +589,83 @@ const BLOCKED_V4: Array<[[number, number, number, number], number, string]> = [
 ];
 
 /**
+ * True when a host string is composed solely of inet_aton characters
+ * (digits, hex letters a–f, the 0x prefix marker, dots) and contains at
+ * least one digit. Such a string is an IP-literal ATTEMPT, never a plausible
+ * public DNS name: every character in it is meaningful to an IPv4 parser,
+ * so when the strict parsers (WHATWG URL, parseIpv4Aton) refuse it, it sits
+ * exactly in the parser-differential gap this guard exists to close.
+ */
+export function looksLikeIpv4Literal(host: string): boolean {
+  if (!/^[0-9a-fA-FxX.]+$/.test(host)) return false;
+  if (!/[0-9]/.test(host)) return false;
+  return host.split('.').every((label) => label.length > 0);
+}
+
+/**
+ * Parse an IPv6 literal (brackets, zone id, and dotted-quad tail all
+ * tolerated) into its 16 bytes. Returns null when the input is not a valid
+ * IPv6 address. Range checks run on the bytes, never on the textual form:
+ * `new URL()` serializes [::ffff:127.0.0.1] as [::ffff:7f00:1], so any
+ * text-pattern check for the dotted tail silently misses the mapped form.
+ */
+export function parseIpv6Bytes(host: string): number[] | null {
+  let h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  const zone = h.indexOf('%');
+  if (zone !== -1) h = h.slice(0, zone);
+  if (isIP(h) !== 6) return null;
+
+  // Rewrite a dotted-quad tail as its two hex groups, then parse uniformly.
+  if (h.includes('.')) {
+    const lastColon = h.lastIndexOf(':');
+    if (lastColon === -1) return null;
+    const tail = h.slice(lastColon + 1);
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(tail)) return null;
+    const quad = tail.split('.').map(Number);
+    if (quad.some((n) => n > 255)) return null;
+    const hi = (((quad[0] as number) << 8) | (quad[1] as number)).toString(16);
+    const lo = (((quad[2] as number) << 8) | (quad[3] as number)).toString(16);
+    h = `${h.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const halves = h.split('::');
+  if (halves.length > 2) return null;
+  const parseGroups = (s: string): number[] | null => {
+    if (s === '') return [];
+    const out: number[] = [];
+    for (const g of s.split(':')) {
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+      out.push(parseInt(g, 16));
+    }
+    return out;
+  };
+  const head = parseGroups(halves[0] as string);
+  if (head === null) return null;
+  let groups: number[];
+  if (halves.length === 2) {
+    const tailGroups = parseGroups(halves[1] as string);
+    if (tailGroups === null) return null;
+    const missing = 8 - head.length - tailGroups.length;
+    if (missing < 1) return null; // '::' must compress at least one group
+    groups = [...head, ...new Array<number>(missing).fill(0), ...tailGroups];
+  } else {
+    if (head.length !== 8) return null;
+    groups = head;
+  }
+  const bytes: number[] = [];
+  for (const g of groups) bytes.push((g >> 8) & 0xff, g & 0xff);
+  return bytes;
+}
+
+/**
  * True when an IPv4 literal (any inet_aton form) or IPv6 literal is blocked.
- * IPv4-mapped IPv6 (::ffff:a.b.c.d) is unwrapped and checked as IPv4.
+ * IPv4-mapped (::ffff:0:0/96) and IPv4-compatible (::/96) IPv6 forms are
+ * unwrapped and judged by their embedded IPv4 address. A string that is not
+ * a valid literal but is composed purely of inet_aton characters (see
+ * looksLikeIpv4Literal) is a malformed IP literal and fails closed: e.g.
+ * 0x7f.0x0.0x0x1, whose final part defeats WHATWG's ends-in-a-number
+ * heuristic, so `new URL()` leaves it un-normalized, masquerading as a DNS
+ * hostname that no IP range check would ever engage on.
  */
 export function isBlockedIpLiteral(host: string): boolean {
   const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
@@ -596,16 +675,28 @@ export function isBlockedIpLiteral(host: string): boolean {
     return BLOCKED_V4.some(([base, bits]) => inCidr(v4, base, bits));
   }
 
-  if (isIP(h) === 6) {
-    const lower = h.toLowerCase();
-    if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true; // loopback
-    if (/^(::|0(:0){7})$/.test(lower)) return true; // unspecified
-    if (lower.startsWith('fe80:')) return true; // link-local
-    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
-    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped && mapped[1]) return isBlockedIpLiteral(mapped[1]);
+  if (h.includes(':')) {
+    const b = parseIpv6Bytes(h);
+    if (!b) return true; // colon-bearing but not parseable IPv6: fail closed
+    const byte = (i: number): number => b[i] as number;
+    // :: (unspecified) and ::1 (loopback)
+    if (b.slice(0, 15).every((x) => x === 0) && (byte(15) === 0 || byte(15) === 1)) return true;
+    if (byte(0) === 0xfe && (byte(1) & 0xc0) === 0x80) return true; // fe80::/10 link-local
+    if ((byte(0) & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+    // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible ::/96 embed an IPv4
+    // address in the last 32 bits; judge that address by the IPv4 ranges.
+    const embedded = `${byte(12)}.${byte(13)}.${byte(14)}.${byte(15)}`;
+    if (b.slice(0, 10).every((x) => x === 0) && byte(10) === 0xff && byte(11) === 0xff) {
+      return isBlockedIpLiteral(embedded);
+    }
+    if (b.slice(0, 12).every((x) => x === 0)) {
+      return isBlockedIpLiteral(embedded);
+    }
     return false;
   }
+
+  // Malformed IP literal (see header): fail closed.
+  if (looksLikeIpv4Literal(h)) return true;
   return false;
 }
 
