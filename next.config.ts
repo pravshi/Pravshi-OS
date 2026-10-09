@@ -10,6 +10,19 @@ import type { NextConfig } from 'next';
  *   runtime style injection). No external script/style sources exist in this
  *   app, so nothing legitimate is blocked. frame-ancestors 'none' backs the
  *   X-Frame-Options header for browsers that prefer CSP.
+ *   Phase 11 (F-11-12) disposition on 'unsafe-inline': retained deliberately,
+ *   not silently accepted. Removing it needs nonce-based CSP served from
+ *   middleware, which this app does not have; that is a Phase 13 candidate
+ *   with its own verification pass (phase11-architecture-audit.md §6 Q3).
+ *   The mitigations standing behind it today are React's escaping, no
+ *   dangerouslySetInnerHTML in the app, and the workflow no-eval guard.
+ * - connect-src additionally allows the Sentry ingest hosts so the browser
+ *   SDK can actually report when NEXT_PUBLIC_SENTRY_DSN is configured —
+ *   under 'self' alone its events were silently dropped. With no DSN set
+ *   the SDK never loads and these hosts are simply unused.
+ * - Permissions-Policy denies the browser capabilities this app never uses
+ *   (camera, microphone, geolocation, payment), so a compromised or embedded
+ *   frame cannot reach for them either.
  * - X-Frame-Options DENY, nosniff, and a conservative referrer policy round
  *   out the set.
  */
@@ -26,13 +39,17 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
       "object-src 'none'",
       'upgrade-insecure-requests',
     ].join('; '),
+  },
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=(), payment=()',
   },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },

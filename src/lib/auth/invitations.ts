@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
+import { PasswordResetError, validateNewPasswordPolicy } from './password-reset';
 import { hashInvitationToken } from '@/lib/invitations/tokens';
 import type { AcceptInvitationInput } from '@/lib/invitations/schema';
 import { InvitationError } from '@/lib/invitations/service';
@@ -40,26 +41,40 @@ export interface AcceptedInvitation {
   orgId: string;
 }
 
+/** The shared policy's reasons, in this flow's error vocabulary. */
+const WEAK_PASSWORD_CODES = {
+  TOO_SHORT: 'PASSWORD_TOO_SHORT',
+  TOO_LONG: 'PASSWORD_TOO_LONG',
+  TOO_COMMON: 'PASSWORD_TOO_COMMON',
+  BREACHED: 'PASSWORD_BREACHED',
+} as const;
+
 /**
  * Pre-authentication: consume the invitation and create the login. The password policy
  * and the scrypt hash come from Better Auth's own configuration — this function never
  * invents password rules — and the expensive hash is computed only after the cheap
  * preview says the token is live, so unauthenticated callers cannot use this as a CPU sink.
+ *
+ * The policy is the FULL shared one — validateNewPasswordPolicy: length, the
+ * common-password list, and the HIBP breach check (F-11-07). This flow is the
+ * product's primary account-creation path; until Phase 11 it enforced length
+ * only, so a known-breached password could be installed at account creation
+ * even though reset/change refused it. The check runs before the preview,
+ * the reset flow's order (policy before the token is consumed): a weak
+ * password is refused without the token being consulted at all, and the
+ * scrypt hash still waits for a live preview.
  */
 export async function acceptInvitation(input: AcceptInvitationInput): Promise<AcceptedInvitation> {
   const context = await auth.$context;
-  const { minPasswordLength, maxPasswordLength } = context.password.config;
-  if (input.password.length < minPasswordLength) {
-    throw new InvitationError(
-      'PASSWORD_TOO_SHORT',
-      `Password must be at least ${minPasswordLength} characters.`,
-    );
-  }
-  if (input.password.length > maxPasswordLength) {
-    throw new InvitationError(
-      'PASSWORD_TOO_LONG',
-      `Password must be at most ${maxPasswordLength} characters.`,
-    );
+  try {
+    await validateNewPasswordPolicy(input.password);
+  } catch (e) {
+    if (e instanceof PasswordResetError && e.code === 'WEAK_PASSWORD' && e.reason) {
+      // The policy's authored messages are reused verbatim, so the wording a
+      // user sees for a weak password is identical on every flow.
+      throw new InvitationError(WEAK_PASSWORD_CODES[e.reason], e.message);
+    }
+    throw e;
   }
 
   const preview = await previewInvitation(input.token);

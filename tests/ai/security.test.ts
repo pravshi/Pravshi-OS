@@ -90,6 +90,38 @@ const usageRowsFor = async (requestId: string) =>
     )
   ).rows;
 
+/**
+ * The definer counters for one (org, person), read the way the runtime
+ * reads them: Phase 11 (migration 0061) made ai_usage_counters assert the
+ * transaction context (F-11-01), so a context-free owner-pool call now
+ * refuses with 42501 by design. The read runs in a transaction carrying
+ * the named person's identity GUCs.
+ */
+const countersInContext = async (orgId: string, personId: string) => {
+  const client = await owner.connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      `select set_config('app.person_id', $1, true), set_config('app.org_id', $2, true)`,
+      [personId, orgId],
+    );
+    const { rows } = await client.query<{
+      month_requests: string;
+      last_minute_requests: string;
+    }>(
+      `select month_requests, last_minute_requests from public.ai_usage_counters($1::uuid, $2::uuid)`,
+      [orgId, personId],
+    );
+    await client.query('commit');
+    return rows[0]!;
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 describe.skipIf(!HAS_DB)('ai security (§13) — tenant isolation, authorization, injection', () => {
   let orchestrator: OrchestratorModule | null = null;
   let usage: UsageModule | null = null;
@@ -762,12 +794,7 @@ describe.skipIf(!HAS_DB)('ai security (§13) — tenant isolation, authorization
       // rows are visible evidence but consumed nothing — monthly requests
       // counts exactly the two real requests, and the per-minute window
       // (status ≠ LIMITED) counts the same two.
-      const counters = (
-        await owner.query<{ month_requests: string; last_minute_requests: string }>(
-          `select month_requests, last_minute_requests from public.ai_usage_counters($1::uuid, $2::uuid)`,
-          [orgC, frankAcct.personId],
-        )
-      ).rows[0]!;
+      const counters = await countersInContext(orgC, frankAcct.personId);
       expect(Number(counters.month_requests)).toBe(2);
       expect(Number(counters.last_minute_requests)).toBe(2);
     } finally {
@@ -817,13 +844,7 @@ describe.skipIf(!HAS_DB)('ai security (§13) — tenant isolation, authorization
     // behaviour (reported as a low-severity contract inconsistency by
     // Workstream J): the direction is fail-closed — the window only ever
     // gets stricter, never looser.
-    const countersFor = async () =>
-      (
-        await owner.query<{ month_requests: string; last_minute_requests: string }>(
-          `select month_requests, last_minute_requests from public.ai_usage_counters($1::uuid, $2::uuid)`,
-          [orgC, graceAcct.personId],
-        )
-      ).rows[0]!;
+    const countersFor = async () => countersInContext(orgC, graceAcct.personId);
     const before = await countersFor();
     const inserted: string[] = [];
     try {

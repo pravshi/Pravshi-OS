@@ -298,7 +298,7 @@ describe.skipIf(!ready)('jobs RLS: jobs table matrix', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('update: moving a job to another org fails with 42501 (WITH CHECK pins org_id)', async () => {
+  it('update: moving a job to another org fails with 23514 (0061 identity freeze pins org_id; the WITH CHECK backstops)', async () => {
     const code = await sqlstateOf(
       inContext(
         asUser,
@@ -307,7 +307,7 @@ describe.skipIf(!ready)('jobs RLS: jobs table matrix', () => {
         [orgB, jobA],
       ),
     );
-    expect(code).toBe('42501');
+    expect(code).toBe('23514');
   });
 
   it('delete: raw DELETE raises 42501 even for own rows (status machine owns lifecycle)', async () => {
