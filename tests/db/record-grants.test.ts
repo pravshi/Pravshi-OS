@@ -560,8 +560,11 @@ describe('several grants', () => {
     expect(await hasGrant(ctx, 'lead', RECORD_ONE)).toBe(true);
     expect(await hasGrant(ctx, 'lead', RECORD_TWO)).toBe(true);
 
+    // Expire it relative to its own granted_at, not the clock. `now() - 1 second` only
+    // satisfied record_grants_expiry_after_grant when more than a second had passed since
+    // the insert — true over Neon's round-trips, false on a fast local database.
     await owner.query(
-      `update public.record_grants set expires_at = now() - interval '1 second' where id=$1`,
+      `update public.record_grants set expires_at = granted_at + interval '1 millisecond' where id=$1`,
       [expiring],
     );
     expect(await hasGrant(ctx, 'lead', RECORD_ONE)).toBe(false);

@@ -28,9 +28,10 @@ decision, not a blanket approval.
 ```
 production          the default branch. Nothing automated touches it.
 └── staging         persistent, non-production. The parent for everything else.
-    ├── dev/<name>  yours
-    └── ci/pr-<n>   created and destroyed by CI. Do not use these by hand.
+    └── dev/<name>  yours
 ```
+
+CI creates no Neon branches; it runs against its own throwaway Postgres container.
 
 Create `dev/<yourname>` from `staging` in the Neon console, then set `DATABASE_URL`,
 `DATABASE_URL_TEST` and `DATABASE_URL_MIGRATE` to point at it. See

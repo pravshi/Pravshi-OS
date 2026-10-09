@@ -61,16 +61,22 @@ like protection.
 
 ## Databases in CI
 
-CI never touches production. Each run creates an ephemeral Neon branch from the
-non-production `staging` parent, resets that branch's role passwords so the credentials
-it uses exist only for that run, and deletes the branch afterwards.
+CI never touches Neon. Each run starts its own empty Postgres 18 as a GitHub Actions
+service container, provisions it with `scripts/db/roles.sql`, applies every migration
+from zero, runs the tests, and is discarded with the job. CI used to branch from Neon
+for every run; with many pull requests a day that exhausted the project's monthly Neon
+storage allowance and copied production data into CI, so it no longer does.
 
-- Tests and the application connect as **`app_user`** (pooled) — the role with no
-  `BYPASSRLS` that owns no tables.
-- Only migrations connect as **`app_owner`** (direct).
-- No production database credential is ever stored in GitHub Actions. The only secrets
-  are `NEON_API_KEY` and `NEON_PROJECT_ID`; every connection string is derived at
-  runtime and masked.
+- The code under test uses the real `@neondatabase/serverless` driver. Neon's
+  `wsproxy` tunnels its WebSocket to Postgres byte-for-byte and authenticates nobody
+  itself, so every connection logs in as its own role with its own password and RLS
+  applies exactly as on Neon. `scripts/ci/neon-local.mjs` points the driver at the
+  proxy and is inert unless `NEON_LOCAL_WSPROXY` is set.
+- Tests and the application connect as **`app_user`** — the role with no `BYPASSRLS`
+  that owns no tables. A CI step proves it before the tests run.
+- Only migrations connect as **`app_owner`**.
+- CI holds no database credential and no Neon credential. Role passwords are generated
+  per run, masked, and die with the job.
 
 ## Before opening a pull request
 

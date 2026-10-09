@@ -9,15 +9,23 @@
  *     into statements (dollar-quote-aware), run each in a transaction, then
  *     record (sha256(file), when).
  *
+ * ONE CONNECTION, REAL TRANSACTIONS. Every statement runs on a single pooled
+ * WebSocket connection, so BEGIN … COMMIT genuinely wraps each migration and a
+ * failure rolls the whole migration back. (An earlier version used the driver's
+ * HTTP mode, where each query is its own request and its own transaction — its
+ * BEGIN/COMMIT wrapped nothing, so a failed migration left partial state.)
+ *
  * Usage: node scripts/migrate-ws.mjs
  * Requires: DATABASE_URL_MIGRATE in environment (direct URL; the neon
- * serverless driver tunnels over WebSocket).
+ * serverless driver tunnels over WebSocket). In CI, scripts/ci/neon-local.mjs
+ * points the same driver at the job's local Postgres.
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { neon } from '@neondatabase/serverless';
+import { Pool } from '@neondatabase/serverless';
+import './ci/neon-local.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -85,7 +93,11 @@ export function splitStatements(text) {
 async function main() {
   const url = process.env.DATABASE_URL_MIGRATE;
   if (!url) throw new Error('DATABASE_URL_MIGRATE is required');
-  const sql = neon(url);
+  // One dedicated connection for the whole run. `sql.query` keeps the shape the rest of
+  // this file was written against: it resolves to the result rows.
+  const pool = new Pool({ connectionString: url, max: 1 });
+  const client = await pool.connect();
+  const sql = { query: async (text, params) => (await client.query(text, params)).rows };
 
   // drizzle-kit creates the journal schema/table on first use; do the same so
   // this runner also works against a database no migrator has ever touched.
