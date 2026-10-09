@@ -72,7 +72,14 @@ const PERMS = {
     'notifications.view',
     'notifications.preferences.manage',
   ],
-  assignee: ['tasks.view', 'tasks.edit', 'notifications.view', 'notifications.preferences.manage'],
+  assignee: [
+    'tasks.view',
+    'tasks.edit',
+    'jobs.view',
+    'jobs.create',
+    'notifications.view',
+    'notifications.preferences.manage',
+  ],
   creator: [
     'people.view',
     'tasks.view',
@@ -472,7 +479,7 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     expect(deal.pipelineStageId).not.toBeNull();
     const { rows } = await owner<{ id: string }>(
       `select id from public.pipeline_stages
-        where pipeline_id = $1 and id <> $2 and deleted_at is null
+        where pipeline_id = $1 and id <> $2
         order by position limit 1`,
       [deal.pipelineId, deal.pipelineStageId],
     );
