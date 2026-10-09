@@ -72,11 +72,12 @@ Read by `scripts/bootstrap/run.mjs`, once per database, from the process environ
 
 ### Observability — not yet configured
 
-| Variable             | Required     | Notes                                                                                                                                                 |
-| -------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SENTRY_DSN`         | optional     | No Sentry project exists yet. Leave blank                                                                                                             |
-| `SENTRY_AUTH_TOKEN`  | optional     | Source-map upload. Not in use                                                                                                                         |
-| `BETTER_AUTH_SECRET` | **required** | Signs Better Auth session cookies. At least 32 characters. Without it each serverless instance would generate its own and reject the others' sessions |
+| Variable                 | Required     | Notes                                                                                                                                                                                                                                            |
+| ------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SENTRY_DSN`             | optional     | No Sentry project exists yet. Leave blank                                                                                                                                                                                                        |
+| `NEXT_PUBLIC_SENTRY_DSN` | optional     | Browser counterpart of `SENTRY_DSN`. Read as a literal by `instrumentation-client.ts` (inlined at build time), not through `src/env.ts`. Browser capture also needs the CSP `connect-src` allowance for Sentry ingest hosts (landed in Phase 11) |
+| `SENTRY_AUTH_TOKEN`      | optional     | Source-map upload. Not in use                                                                                                                                                                                                                    |
+| `BETTER_AUTH_SECRET`     | **required** | Signs Better Auth session cookies. At least 32 characters. Without it each serverless instance would generate its own and reject the others' sessions                                                                                            |
 
 ### AI Foundation (Phase 9) — optional
 
@@ -109,6 +110,13 @@ external senders are built from `APP_URL` (documented above).
 | `RESEND_API_KEY`               | optional | Resend credential used by invitation/auth mail; also the job email adapter's fallback credential                                                                                                                                                |
 | `EMAIL_FROM`                   | optional | Sender address for invitation mail and job email. Must be on a Resend-verified domain; no safe default                                                                                                                                          |
 | `WEBHOOK_SIGNING_SECRET_<REF>` | optional | Deployment-level webhook signing secrets, one per `<REF>` named by a delivery's `signatureSecretRef`. An unconfigured ref refuses to send unsigned                                                                                              |
+
+### Worker and workflow dispatch — optional
+
+| Variable              | Required | Notes                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SCHEDULER_TICK_MS`   | optional | Worker only. Read directly by `src/lib/jobs/runner.ts` from the process environment (not part of the `src/env.ts` runtime schema). Scheduler tick interval in milliseconds; default 60000, and an invalid or blank value falls back to the default                                                                                                                    |
+| `WORKFLOWS_USE_QUEUE` | optional | Part of the `src/env.ts` runtime schema. Only the exact string `true` enqueues top-level workflow dispatches as `workflow_run` jobs; unset, blank or any other value means inline execution in the HTTP request. Set it **only** when a worker process is running to claim those jobs — otherwise dispatches queue unexecuted (see DEPLOYMENT.md, "The worker plane") |
 
 ### Storage — not yet configured
 

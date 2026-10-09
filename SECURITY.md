@@ -240,6 +240,26 @@ Rotating a CI credential is never necessary: CI runs against its own throwaway P
 service container, generates every role password per run, and discards the database with
 the job. CI holds no Neon credential at all.
 
+### Rotation schedule
+
+The steps above are the mechanics for database credentials. Every other secret follows
+the same rule — exposure means rotate immediately — on its own trigger:
+
+| Secret                                                                 | Owner    | Rotate when                                                                                                                                                             | Procedure                                                                                                                       |
+| ---------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Neon role passwords (`app_user`, `app_owner`, `app_admin`, per branch) | Founder  | On exposure; when an operator changes; on a scheduled per-branch review                                                                                                 | The six steps above, on **every** branch that has the role                                                                      |
+| `BETTER_AUTH_SECRET`                                                   | Founder  | On exposure. Note: rotating it invalidates **all** live sessions — every user signs in again                                                                            | Generate a fresh value (≥32 chars), set it in Vercel **and** the worker host, redeploy/restart both                             |
+| `HEALTH_CHECK_TOKEN`                                                   | Operator | On exposure; each environment always holds a distinct value                                                                                                             | `openssl rand -hex 32`; update the environment and whoever runs the smoke pack                                                  |
+| `RESEND_API_KEY` / `EMAIL_PROVIDER_API_KEY`                            | Founder  | On exposure; on the provider's own rotation policy                                                                                                                      | Issue the new key in Resend, update the environment, verify a test send, revoke the old key                                     |
+| `AI_API_KEY`                                                           | Founder  | On exposure; on the provider's own rotation policy                                                                                                                      | Provider console → environment → restart. Never `NEXT_PUBLIC_`, never logged                                                    |
+| `INTEGRATIONS_ENCRYPTION_KEY`                                          | Founder  | On **suspected** exposure only — rotation orphans every existing Tier V ciphertext (documented Phase 10 limitation), so it is paired with re-entering those credentials | [docs/phase10-integrations.md](docs/phase10-integrations.md) rotation runbook                                                   |
+| `WEBHOOK_SIGNING_SECRET_<REF>`                                         | Operator | On exposure; per-delivery policy                                                                                                                                        | Update the environment **and** the receiving endpoint's expected secret together — an unconfigured ref refuses to send unsigned |
+| `DATABASE_URL_BOOTSTRAP` / `app_admin` password                        | Founder  | After each bootstrap use; per branch                                                                                                                                    | [scripts/bootstrap/README.md](scripts/bootstrap/README.md); the credential lives on the operator machine only                   |
+
+Values and storage rules for each variable live in [ENVIRONMENT.md](ENVIRONMENT.md);
+vault and webhook mechanics live in
+[docs/phase10-integrations.md](docs/phase10-integrations.md).
+
 ## Reporting a security problem
 
 Report privately to the founder. Do not open a public issue, and do not describe the problem
