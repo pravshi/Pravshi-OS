@@ -23,13 +23,23 @@ import { Pool, type PoolClient } from '@neondatabase/serverless';
  * ground truth — the suites still read them back through the owner
  * connection rather than trusting the formulae.
  *
- * Idempotence: ensurePerfDataset() takes a session-level advisory lock,
- * so the two CI suites may call it concurrently against one database.
- * If the orgs already exist, the dataset is verified against the scale it
- * was seeded at (detected from the companies count) and returned; a
- * dataset whose counts match NO single scale is a loud error, never a
- * silent top-up — a half-seeded dataset would teach false confidence
- * (audit §4.4/Q5).
+ * Idempotence: ensurePerfDataset() runs its whole check → seed → verify
+ * sequence inside ONE transaction on ONE dedicated client, serialized
+ * across suites and processes by a transaction-scoped advisory lock taken
+ * as the transaction's first statement. A concurrent caller blocks on
+ * the lock until the holder commits, then re-reads and sees the finished
+ * dataset (and verifies it); if the holder fails, its transaction rolls
+ * back and the next caller seeds from an empty slate. A half-seeded
+ * dataset can therefore never be committed — let alone observed — which
+ * PR #70 CI round 1 proved the previous shape allowed: the lock and the
+ * statements were on one client, but each statement autocommitted, so
+ * two suites overlapped mid-seed (a duplicate default pipeline for the
+ * same org; the second suite observing orgs with zero companies) and the
+ * partial rows stayed behind. If the orgs already exist, the dataset is
+ * verified against the scale it was seeded at (detected from the
+ * companies count) and returned; a dataset whose counts match NO single
+ * scale is a loud error, never a silent top-up — a half-seeded dataset
+ * would teach false confidence (audit §4.4/Q5).
  *
  * Scale: 1 is the contracted size. Smaller scales exist for the Tier-2
  * runner's --ci mode (trend lines on a throwaway database, §4.4) — the
@@ -515,14 +525,21 @@ function verifyExisting(actual: PerfCounts, orgSlug: string): number {
 }
 
 /**
- * Seed (or verify and reuse) the perf dataset. Serialized across suites
- * and processes by a session-level advisory lock on one owner client.
+ * Seed (or verify and reuse) the perf dataset. The entire sequence —
+ * advisory lock, existing-dataset check, seeding, verification — runs
+ * inside one transaction on one dedicated owner client, so concurrent
+ * callers serialize on the lock AND never observe (or leave behind) a
+ * partially seeded dataset: the holder's writes become visible atomically
+ * at COMMIT, and any failure rolls them all back.
  */
 export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
   const client = await owner.connect();
   try {
-    await client.query(`select pg_advisory_lock(hashtext('pravshi-perf-seed-v1')::bigint)`);
+    await client.query('begin');
     try {
+      // Transaction-scoped: released by COMMIT/ROLLBACK, so a holder that
+      // dies mid-seed takes its lock — and its uncommitted rows — with it.
+      await client.query(`select pg_advisory_xact_lock(hashtext('pravshi-perf-seed-v1')::bigint)`);
       const existing = await client.query<{ id: string }>(
         `select id from public.organizations where slug = $1`,
         [PERF_ORG_SLUGS[0]],
@@ -537,6 +554,7 @@ export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
         ).rows[0]!.id;
         const detected = verifyExisting(await readCounts(client, orgA), PERF_ORG_SLUGS[0]);
         verifyExisting(await readCounts(client, orgB), PERF_ORG_SLUGS[1]);
+        await client.query('commit');
         return {
           orgA,
           orgB,
@@ -569,6 +587,7 @@ export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
                  public.people, public.pipeline_stages, public.workflows,
                  public.workflow_executions, public.audit_logs`,
       );
+      await client.query('commit');
       return {
         orgA: orgIds[0]!,
         orgB: orgIds[1]!,
@@ -579,8 +598,9 @@ export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
         scale,
         counts,
       };
-    } finally {
-      await client.query(`select pg_advisory_unlock(hashtext('pravshi-perf-seed-v1')::bigint)`);
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
     }
   } finally {
     client.release();

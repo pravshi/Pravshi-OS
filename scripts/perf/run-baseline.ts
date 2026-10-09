@@ -17,12 +17,12 @@
  *
  * Usage (via baseline.mjs):
  *   node scripts/perf/baseline.mjs [--ci] [--scale <n>] [--iterations <n>]
- *                                  [--warmup <n>] [--out <path>]
+ *                                  [--prime <n>] [--out <path>]
  *     --ci          reduced scale (0.05) + 5 iterations, for trend lines
  *                   on a THROWAWAY database (CI services container).
  *     --scale <n>   dataset scale (default 1 = the §4.4 contracted size).
  *     --iterations  timed iterations per scenario (default 30).
- *     --warmup      untimed warm-up iterations per scenario (default 3).
+ *     --prime      untimed priming iterations per scenario (default 3).
  *     --out <path>  also write the markdown report to this path.
  *
  * Environment: DATABASE_URL (app_user, pooled) + DATABASE_URL_MIGRATE
@@ -52,12 +52,12 @@ interface Args {
   ci: boolean;
   scale: number;
   iterations: number;
-  warmup: number;
+  prime: number;
   out: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { ci: false, scale: 1, iterations: 30, warmup: 3, out: null };
+  const args: Args = { ci: false, scale: 1, iterations: 30, prime: 3, out: null };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!;
     const value = () => {
@@ -76,8 +76,8 @@ function parseArgs(argv: string[]): Args {
       case '--iterations':
         args.iterations = Number(value());
         break;
-      case '--warmup':
-        args.warmup = Number(value());
+      case '--prime':
+        args.prime = Number(value());
         break;
       case '--out':
         args.out = value();
@@ -118,11 +118,11 @@ interface ScenarioResult {
 async function runScenario(
   name: string,
   fn: () => Promise<void>,
-  warmup: number,
+  prime: number,
   iterations: number,
 ): Promise<ScenarioResult> {
   try {
-    for (let i = 0; i < warmup; i += 1) await fn();
+    for (let i = 0; i < prime; i += 1) await fn();
     const samples: number[] = [];
     for (let i = 0; i < iterations; i += 1) {
       const started = performance.now();
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
 
   const results: ScenarioResult[] = [];
   for (const [name, fn] of scenarios) {
-    results.push(await runScenario(name, fn, args.warmup, args.iterations));
+    results.push(await runScenario(name, fn, args.prime, args.iterations));
   }
 
   const dbHost = (() => {
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
     '',
     `Dataset: ${dataset}`,
     `Environment: ${environment}`,
-    `Iterations per scenario: ${args.iterations} timed after ${args.warmup} warm-up. ` +
+    `Iterations per scenario: ${args.iterations} timed, after ${args.prime} priming iterations. ` +
       `AI provider forced to the deterministic mock; the perf org's AI limits were ` +
       `raised via upsertAiOrgLimits (harness setup on a fixture org). Record-only — never gated.`,
     '',

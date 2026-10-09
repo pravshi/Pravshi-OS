@@ -14,20 +14,29 @@
 -- absorb transient lock contention itself.
 --
 -- THE HARDENING (signature, privilege shape and idempotence unchanged):
---   1. lock_timeout = 5s, transaction-local via set_config(..., true):
---      no lock wait inside this call — partition DDL or the advisory lock
---      below — may queue indefinitely behind a writer. A wait that would
---      have escalated into a deadlock cycle instead aborts fast with
---      lock_not_available (55P03), which step 3 absorbs. SET LOCAL
---      scoping means the caller's session settings are never leaked into.
---   2. pg_advisory_xact_lock(hashtext('ensure-audit-log-partitions')) —
---      the scheduler-tick idiom from 0046: concurrent maintenance runs
---      (an operator extending the window while a scheduled run is in
---      flight, or two CI suites) serialize instead of racing the
---      to_regclass check-then-create into a duplicate-table error or a
---      catalog lock cycle. The lock is transaction-scoped, so a holder
---      that dies mid-run releases it automatically. Writers never take
---      this lock: the hot insert path is untouched.
+--   1. pg_advisory_xact_lock(hashtext('ensure-audit-log-partitions')),
+--      acquired FIRST, with lock waits explicitly unbounded for the
+--      acquisition (set_config('lock_timeout', '0', true) clears any
+--      inherited timeout): the scheduler-tick idiom from 0046. Concurrent
+--      maintenance runs (an operator extending the window while a
+--      scheduled run is in flight, or two CI suites) serialize instead of
+--      racing the to_regclass check-then-create into a duplicate-table
+--      error or a catalog lock cycle. The lock is transaction-scoped, so
+--      a holder that dies mid-run releases it automatically. Writers
+--      never take this lock: the hot insert path is untouched.
+--      The ORDER is the fix CI round 1 of PR #70 proved necessary: this
+--      acquisition originally sat AFTER the lock_timeout below was armed
+--      and OUTSIDE the retry loop, so a caller queueing behind another
+--      maintenance run for more than 5s failed with lock_not_available
+--      (55P03) — the queue itself exhausted the call. Serialization waits
+--      are not contention: a maintenance caller must be able to wait for
+--      its turn for as long as the run ahead of it takes.
+--   2. lock_timeout = 5s, transaction-local via set_config(..., true),
+--      armed only AFTER the advisory lock is held, so it bounds the DDL
+--      lock waits of step 3 and nothing else: a wait that would have
+--      escalated into a deadlock cycle against a writer instead aborts
+--      fast with lock_not_available (55P03), which step 3 absorbs. SET
+--      LOCAL scoping means the caller's session settings never leak.
 --   3. Bounded in-function retry: the DDL loop runs inside a
 --      BEGIN...EXCEPTION block that retries on deadlock_detected (40P01)
 --      and lock_not_available (55P03), up to 5 attempts with a short
@@ -62,12 +71,17 @@ begin
       using errcode = '22023';
   end if;
 
-  -- (1) Bound every lock wait in this call; transaction-local.
-  perform set_config('lock_timeout', '5s', true);
-
-  -- (2) Serialize maintenance runs against each other for the rest of
-  -- this transaction. Bounded by the lock_timeout above.
+  -- (1) Serialize maintenance runs against each other for the rest of
+  -- this transaction. The acquisition must NOT be bounded by the DDL
+  -- lock_timeout armed in step (2): clear any lock_timeout first (ours
+  -- or inherited from the caller's session) so a caller can queue for
+  -- its turn behind another maintenance run indefinitely. Queueing
+  -- behind a peer run is serialization, not contention.
+  perform set_config('lock_timeout', '0', true);
   perform pg_advisory_xact_lock(hashtext('ensure-audit-log-partitions'));
+
+  -- (2) Bound every DDL lock wait from here on; transaction-local.
+  perform set_config('lock_timeout', '5s', true);
 
   -- (3) The 0011 DDL loop, retried as a unit on transient lock conflicts.
   for v_attempt in 1..5 loop
@@ -115,9 +129,11 @@ comment on function public.ensure_audit_log_partitions(integer) is
   'Creates any missing monthly partitions from the current month forward, each with RLS '
   'enabled and forced, an owner policy, and no privileges for the runtime roles. Idempotent. '
   'Returns how many it created. There is deliberately no DEFAULT partition. Hardened in '
-  '0062: transaction-local lock_timeout, an advisory lock serializing maintenance runs, '
-  'and a bounded retry on deadlock/lock-timeout so concurrent audit writers cannot fail '
-  'the call (Phase 10 PR #68 round-5 deadlock).';
+  '0062: an advisory lock serializing maintenance runs (acquired with lock waits '
+  'unbounded — queueing for a peer run is not contention), a transaction-local '
+  'lock_timeout bounding only the DDL phase, and a bounded retry on '
+  'deadlock/lock-timeout so concurrent audit writers cannot fail the call '
+  '(Phase 10 PR #68 round-5 deadlock; ordering fixed after PR #70 CI round 1).';
 
 --> statement-breakpoint
 

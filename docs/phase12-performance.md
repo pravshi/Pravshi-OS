@@ -158,7 +158,7 @@ against, seeded set-based and verified idempotently). The AI scenario forces
 `AI_PROVIDER=mock` (it measures our request path, never a real provider's latency)
 and the perf org's AI limits are raised through the real `upsertAiOrgLimits`
 service first — harness setup on a fixture org, stated in every report. Options:
-`--iterations <n>` / `--warmup <n>` (defaults 30 / 3), `--scale <n>` (dataset
+`--iterations <n>` / `--prime <n>` (defaults 30 / 3), `--scale <n>` (dataset
 scale, default 1), `--out <path>` (also write the markdown report to a file), and
 `--ci` (scale 0.05, 5 iterations — trend lines only, and only against a throwaway
 database such as a CI services container, never the dataset the Tier-1 suites

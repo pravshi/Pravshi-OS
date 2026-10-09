@@ -10,10 +10,12 @@
  * defect, not a test flake.
  *
  * Migration 0062 hardens the function (signature and idempotence
- * unchanged): a transaction-local lock_timeout bounds every lock wait, an
- * advisory lock serializes maintenance runs against each other, and a
- * bounded retry absorbs deadlock_detected / lock_not_available. These
- * tests pin the resulting contract against real Postgres:
+ * unchanged): an advisory lock serializes maintenance runs against each
+ * other — acquired with lock waits unbounded, since queueing behind a
+ * peer run is serialization, not contention — a transaction-local
+ * lock_timeout bounds the DDL phase's lock waits, and a bounded retry
+ * absorbs deadlock_detected / lock_not_available. These tests pin the
+ * resulting contract against real Postgres:
  *
  *   1. maintenance completes — no 40P01, no 55P03 surfacing — while
  *      writers insert audit rows concurrently the whole time;

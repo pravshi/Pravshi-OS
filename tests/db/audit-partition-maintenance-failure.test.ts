@@ -8,30 +8,37 @@
  * clear immediately:
  *
  *   - the call must not return a false success or a partial result while
- *     its advisory lock is held by someone else: it waits inside the
- *     function's lock_timeout + bounded-retry budget (probe A);
- *   - once contention clears inside that budget, the same call completes
- *     and leaves the partition window COMPLETE — every month present, a
- *     repeat call a no-op (probe B);
+ *     its advisory lock is held by someone else: it waits on the lock for
+ *     as long as the holder keeps it — the advisory acquisition is NOT
+ *     bounded by the function's DDL lock_timeout, because queueing behind
+ *     a peer maintenance run is serialization, not contention (probe A);
+ *   - once the lock clears, the same call completes and leaves the
+ *     partition window COMPLETE — every month present, a repeat call a
+ *     no-op (probe B);
  *   - under neither outcome may the partition set be left partial: the
  *     relname set is compared exactly before and after.
  *
  * The contention partner is a session-level pg_advisory_lock on the very
  * key the function serializes on (hashtext('ensure-audit-log-partitions'))
- * — deterministic, and it touches no table locks, so audit writers and
+ * — the same key expression, so the locks genuinely contend (PR #70 CI
+ * round 1 proved it twice over: the function's advisory wait raised
+ * 55P03 at exactly 5 s, when the acquisition was still bounded by the
+ * DDL lock_timeout and sat outside the retry loop). The partner is
+ * deterministic, and it touches no table locks, so audit writers and
  * sibling suites are never blocked by these probes.
  *
- * Deliberate scope limit, recorded honestly: the budget-EXHAUSTION branch
- * (5th failure re-raises 55P03) is not live-probed. Exhaustion takes
- * ~26 s of held lock (5 attempts × 5 s lock_timeout + backoff), and
- * vitest runs test files in parallel — a 26 s hold would starve sibling
- * suites' own maintenance calls (tests/db/audit-logs.test.ts) of THEIR
- * retry budgets and flake them. The holds here (≤ ~11 s) cost a sibling
- * call at most two attempts of its identical budget. The exhaustion
- * branch is pinned by construction: probe A proves attempts are consumed
- * (the call survives past one full 5 s attempt without resolving), the
- * retry cap and re-raise are in the 0062 body, and 0062's verification
- * DO block asserts the hardening is present at migration time.
+ * Deliberate scope limit, recorded honestly: the DDL-phase budget-
+ * EXHAUSTION branch (5th DDL failure re-raises 55P03/40P01) is not
+ * live-probed. Exhausting it needs ~26 s of sustained DDL contention
+ * (5 attempts × 5 s lock_timeout + backoff) against the audit_logs
+ * table itself, and vitest runs test files in parallel — holding a
+ * conflicting table lock that long would flake sibling suites whose own
+ * maintenance calls and writer probes share the table. The exhaustion
+ * branch is pinned by construction: probe A proves the advisory wait
+ * does not consume the DDL budget (the call survives past one full 5 s
+ * lock_timeout cycle without resolving), the retry cap and re-raise are
+ * in the 0062 body, and 0062's verification DO block asserts the
+ * hardening is present at migration time.
  *
  * Gated behind DB_READY (tests/workflows/helpers.ts), like every live-DB
  * suite: skipped locally, runs on CI.
@@ -123,9 +130,13 @@ describe.skipIf(!dbReady)('audit partition maintenance — failure modes (Phase 
       },
     );
     try {
-      // One full attempt cycle is 5 s of lock_timeout. At 5.5 s the call
-      // must STILL be inside its retry budget: not resolved (no false or
-      // partial success) and not rejected (the budget is not exhausted).
+      // One full DDL attempt cycle is 5 s of lock_timeout. At 5.5 s the
+      // call must STILL be waiting on the advisory lock: not resolved
+      // (no false or partial success) and not rejected (the acquisition
+      // is unbounded — there is no budget for it to exhaust). Before the
+      // 0062 ordering fix this call rejected at exactly 5 s: the
+      // lock_timeout armed for the DDL phase also bounded the advisory
+      // wait, and the wait sat outside the retry loop.
       await sleep(5_500);
       expect(settled).toBe(false);
       // The partition set is untouched while the call is contended.
@@ -139,7 +150,7 @@ describe.skipIf(!dbReady)('audit partition maintenance — failure modes (Phase 
     expect(await partitionNames()).toEqual(before);
   }, 60_000);
 
-  it('contention clearing inside the retry budget: the call completes and the window is whole', async () => {
+  it('contention clearing while the call waits: the call completes and the window is whole', async () => {
     // Find the smallest window that is NOT yet fully present, so this
     // call genuinely has partitions to create once it gets the lock.
     let target = -1;
@@ -156,9 +167,10 @@ describe.skipIf(!dbReady)('audit partition maintenance — failure modes (Phase 
     const partner = await holdMaintenanceLock();
     const call = ensure(target);
     try {
-      // Attempts 1–2 time out at ~5 s and ~10.1 s; attempt 3 starts at
-      // ~10.3 s. Releasing at ~10.8 s lands inside attempt 3's wait, so
-      // the SAME call must acquire and finish — no caller retry involved.
+      // The call waits on the advisory lock for the whole hold (~10.8 s —
+      // longer than two full 5 s DDL lock_timeout cycles). Releasing the
+      // partner lets the SAME call acquire, run its DDL phase and finish
+      // — no caller retry involved.
       await sleep(10_800);
     } finally {
       await releaseMaintenanceLock(partner);

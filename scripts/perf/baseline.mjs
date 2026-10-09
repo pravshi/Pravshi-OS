@@ -8,7 +8,7 @@
  * no new dependency.
  *
  *   node scripts/perf/baseline.mjs [--ci] [--scale <n>]
- *                                  [--iterations <n>] [--warmup <n>]
+ *                                  [--iterations <n>] [--prime <n>]
  *                                  [--out <path>]
  *
  * Record-only, never gated. First full run: the post-Nov-1 slot against

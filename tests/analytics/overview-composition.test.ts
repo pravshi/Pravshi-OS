@@ -292,7 +292,26 @@ describe.skipIf(!HAS_DB)('overview composition (Phase 12 F-12-01)', () => {
 
   it('fixtures are non-trivial (parity cannot pass on an empty org)', async () => {
     const payload = await overviewSharedTx();
-    expect(Number(payload.sales.pipelineValue.INR)).toBe(3000);
+    // Ground truth read back through the owner connection (the perf-seed
+    // idiom: never trust the fixture arithmetic alone). Open pipeline is
+    // every deal on a stage that is neither won nor lost — here 3000
+    // (PROPOSAL) + 100 (QUALIFIED after the lead move) + 100 (NEW) =
+    // 3200 INR; every fixture deal was created inside LAST_30_DAYS, so
+    // the metric's range predicate does not change the sum. The original
+    // anchor said 3000 — it counted only the PROPOSAL deal and forgot
+    // the two lead deals are open pipeline too; PR #70 CI round 1 caught
+    // the miscount (parity itself passed).
+    const gt = await owner.query<{ total: string }>(
+      `select coalesce(sum(d.value), 0)::text as total
+         from public.deals d
+         join public.pipeline_stages ps
+           on ps.id = d.pipeline_stage_id and ps.org_id = d.org_id
+        where d.org_id = $1 and d.currency = 'INR'
+          and not (ps.is_won or ps.is_lost) and d.deleted_at is null`,
+      [orgId],
+    );
+    expect(Number(gt.rows[0]!.total)).toBe(3200);
+    expect(Number(payload.sales.pipelineValue.INR)).toBe(Number(gt.rows[0]!.total));
     expect(Number(payload.sales.pipelineValue.USD)).toBe(700);
     expect(Number(payload.sales.wonRevenue.INR)).toBe(3000);
     expect(payload.sales.winRate).toBeCloseTo(2 / 3, 10);
