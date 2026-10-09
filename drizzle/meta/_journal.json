@@ -393,6 +393,22 @@
       "tag": "0053_search_indexes",
       "breakpoints": true,
       "hash": "d094788e8bc43ce964765b993bbb1b53dfb79ed7b49977cf205fa1be3e4f1468"
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791343891089,
+      "tag": "0054_ai_foundation",
+      "breakpoints": true,
+      "hash": "d2eef8cefcb0f00d46751e9d0cf16049a86ad011613703955b1d8142dd214875"
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791343891090,
+      "tag": "0055_ai_permissions",
+      "breakpoints": true,
+      "hash": "6d0096ffaefb73640fc081f375f01bb81f05e65b2654199b910c37d430b43acd"
     }
   ]
 }

@@ -25,6 +25,8 @@ import { UnarchiveProjectButton } from '../../_components/UnarchiveProjectButton
 import { ProjectMembers } from '../../_components/ProjectMembers';
 import { LinkedDealSection } from '@/components/work/linked-deal-section';
 import { unarchiveProjectAction } from '../../_components/unarchive-project.action';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 /**
  * /work/projects/[id] — the task kanban board. projects.view to see; task
@@ -34,10 +36,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   await requirePagePermission(WORK_PERMISSIONS.projects.view);
   const { id } = await params;
 
-  const [projectRes, tasksRes, held] = await Promise.all([
+  const [projectRes, tasksRes, held, aiAllowed] = await Promise.all([
     getProjectAction(id),
     listProjectTasksAction(id, { limit: 100, offset: 0 }),
     getWorkPermissions(),
+    canUseAi(),
   ]);
 
   if (isErrorEnvelope(projectRes)) {
@@ -109,6 +112,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             />
           ))}
       </div>
+
+      <AiSummaryPanel
+        capability="project_summary"
+        entityType="project"
+        entityId={project.id}
+        canUseAi={aiAllowed}
+      />
 
       {canEditProject && (
         <EditableSection buttonLabel="Edit project">

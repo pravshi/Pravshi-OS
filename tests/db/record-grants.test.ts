@@ -1014,7 +1014,10 @@ describe('the rest of the authorization model is untouched', () => {
     // The Phase 8 migration (0052) adds three more app_user policies —
     // select/insert/update on notification_preferences — none of them
     // scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(83);
+    // The Phase 9 migration (0054) adds six more app_user policies —
+    // select/insert/update on each of ai_usage_requests and ai_org_limits —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(policies.rows[0]!.n)).toBe(89);
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 
@@ -1138,14 +1141,15 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    // 123: the 109 counted before, plus the six Phase 5 workflow permissions
+    // 126: the 109 counted before, plus the six Phase 5 workflow permissions
     // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
     // plus the five Phase 6 jobs permissions
     // (jobs.view/create/retry/cancel/delete) from migration 0045, plus the three
     // Phase 8 notification permissions
     // (notifications.view/notifications.preferences.manage/notifications.send)
-    // from migration 0052.
-    expect(Number(rows[0]!.total)).toBe(123);
+    // from migration 0052, plus the three Phase 9 AI permissions
+    // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055.
+    expect(Number(rows[0]!.total)).toBe(126);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,

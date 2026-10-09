@@ -179,14 +179,15 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  // 123: the 109 counted before, plus the six Phase 5 workflow permissions
+  // 126: the 109 counted before, plus the six Phase 5 workflow permissions
   // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
   // plus the five Phase 6 jobs permissions
   // (jobs.view/create/retry/cancel/delete) from migration 0045, plus the three
   // Phase 8 notification permissions
   // (notifications.view/notifications.preferences.manage/notifications.send)
-  // from migration 0052.
-  expect(rows.length, `${label}: catalogue size`).toBe(123);
+  // from migration 0052, plus the three Phase 9 AI permissions
+  // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055.
+  expect(rows.length, `${label}: catalogue size`).toBe(126);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -748,8 +749,12 @@ describe('has() and scope_for() can never disagree', () => {
       } else if (key === 'MANAGER') {
         // Phase 4 (0042): MANAGER holds six work grants at DEPARTMENT plus
         // policies.acknowledge at SELF. Phase 8 (0052) adds notifications.view
-        // and notifications.preferences.manage, both at SELF — nine in total.
-        expect(held, `${key} holds the seven Phase 4 grants plus two Phase 8 grants`).toBe(9);
+        // and notifications.preferences.manage, both at SELF. Phase 9 (0055)
+        // adds ai.use at DEPARTMENT — ten in total.
+        expect(
+          held,
+          `${key} holds the seven Phase 4 grants plus two Phase 8 grants plus ai.use`,
+        ).toBe(10);
       } else {
         expect(held, `${key} holds something`).toBeGreaterThan(0);
       }
@@ -922,7 +927,10 @@ describe('RLS', () => {
     // update on each of jobs, schedules, and notifications.
     // The Phase 8 migration (0052) adds three more: select/insert/update on
     // notification_preferences.
-    expect(Number(rows[0]!.n)).toBe(83);
+    // The Phase 9 migration (0054) adds six more: select/insert/update on each
+    // of ai_usage_requests and ai_org_limits — none of them scope-driven
+    // (they branch on authz.has), so with_scope below stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(89);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM

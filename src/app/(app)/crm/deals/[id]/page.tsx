@@ -26,17 +26,20 @@ import {
   deleteDealAction,
 } from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 /** /crm/deals/[id] — deal detail with stage transitions, edit, and links. */
 export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireCrmPagePermission('deals', 'view');
   const { id } = await params;
 
-  const [dealRes, companiesRes, contactsRes, held] = await Promise.all([
+  const [dealRes, companiesRes, contactsRes, held, aiAllowed] = await Promise.all([
     getDealAction(id),
     listCompaniesAction({ limit: 100 }),
     listContactsAction({ limit: 100 }),
     getCrmPermissions(),
+    canUseAi(),
   ]);
 
   if (isErrorEnvelope(dealRes)) {
@@ -90,6 +93,15 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           />
         )}
       </div>
+
+      {/* A deal in the NEW stage is a lead (§6.1): it gets the lead summary,
+          whose recipe emphasizes missing information + next steps. */}
+      <AiSummaryPanel
+        capability={deal.stage === 'NEW' ? 'lead_summary' : 'deal_summary'}
+        entityType="deal"
+        entityId={deal.id}
+        canUseAi={aiAllowed}
+      />
 
       <Card>
         <CardHeader>
