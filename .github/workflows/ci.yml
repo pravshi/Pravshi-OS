@@ -94,7 +94,11 @@ jobs:
       - name: Run migrations
         env:
           DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
-        run: pnpm exec drizzle-kit migrate
+        # The repo's own runner: replicates drizzle-kit migrate semantics
+        # (same journal, per-migration transaction) but prints the failing
+        # statement's error — drizzle-kit exits silently in non-TTY logs —
+        # and does not depend on direct-TCP reachability.
+        run: node scripts/migrate-ws.mjs
 
       # Tests run as app_user on the POOLED host — the role that cannot bypass RLS.
       # APP_URL is required because src/env.ts validates the runtime environment at
