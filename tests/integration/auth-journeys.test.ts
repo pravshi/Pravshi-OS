@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
@@ -57,7 +57,8 @@ vi.mock('next/navigation', () => ({
 
 import { auth } from '@/lib/auth/server';
 import { acceptInvitation } from '@/lib/auth/invitations';
-import { hashResetToken, resetPassword } from '@/lib/auth/password-reset';
+import { requestPasswordReset, resetPassword } from '@/lib/auth/password-reset';
+import { generateInvitationToken } from '@/lib/invitations/tokens';
 import { resolveAuthContext } from '@/lib/auth/session';
 import { requireAuthenticated } from '@/lib/authz/page';
 import { POST as mediatedLoginPOST } from '@/app/api/auth/login/route';
@@ -81,7 +82,13 @@ let deptId = '';
 let inviterId = '';
 
 const digestOf = (token: string) => createHash('sha256').update(token).digest('hex');
-const newToken = () => randomBytes(32).toString('hex');
+// Invitation tokens come from the product's own generator: the accept ROUTE's
+// AcceptInvitationSchema enforces INVITATION_TOKEN_PATTERN (43-char base64url).
+// The library-level acceptInvitation never checks the shape — it only hashes —
+// so a hand-rolled hex token passes every lib-level scenario and fails only at
+// the one route-level call (scenario 1), answered INVALID_REQUEST before the
+// password policy is ever reached.
+const newToken = () => generateInvitationToken();
 // Identifier codes are NEVER hand-built: people.code is format-checked
 // (people_code_format, '^[A-Z]{2,8}-[0-9]{4}-[0-9]{4,}$') and invitation codes
 // are allocated by the same generator — see authz.next_identity_code usage in
@@ -411,7 +418,7 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
     const viaRow = await owner!.query<{ via: string | null }>(
       `select metadata->>'via' as via from public.login_events
           where email = $1::citext and event_type = 'LOGIN_SUCCESS'
-          order by created_at desc limit 1`,
+          order by occurred_at desc limit 1`,
       [email],
     );
     expect(viaRow.rows[0]!.via).toBe('backup-code');
@@ -445,13 +452,29 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
     const refused = await signInMediated(email, PASSWORD, ip);
     expect(refused.status).toBe(401);
 
-    // Complete a reset through the real reset path.
-    const token = randomBytes(32).toString('base64url');
-    await owner!.query(
-      `insert into auth.password_reset_tokens (auth_user_id, token_hash, expires_at)
-         values ($1, $2, now() + interval '1 hour')`,
-      [authUserId, Buffer.from(hashResetToken(token), 'hex')],
-    );
+    // Complete a reset through the real reset path: request one via the lib
+    // entry the forgot-password flow uses, then read the plaintext token back
+    // out of the enqueued email job — the mailbox is the only place it ever
+    // exists, exactly as for a real user. The live row in auth.password_resets
+    // (0024) is what the job's dedup key names (the phase11-adversarial §B
+    // idiom); the database itself only ever holds the token's digest.
+    await requestPasswordReset(email, ip);
+    const resetRow = (
+      await owner!.query<{ id: string }>(
+        `select id from auth.password_resets
+          where auth_user_id = $1::uuid and used_at is null
+          order by created_at desc limit 1`,
+        [authUserId],
+      )
+    ).rows[0]!;
+    const job = (
+      await owner!.query<{ payload: { html?: string } }>(
+        `select payload from public.jobs where dedup_key = $1`,
+        [`pwreset:${resetRow.id}`],
+      )
+    ).rows[0]!;
+    const token = /reset-password\?token=([0-9a-f]{64})/.exec(job.payload.html ?? '')?.[1];
+    if (!token) throw new Error('reset email job did not carry a token link');
     const done = await resetPassword(token, NEW_PASSWORD, ip);
     expect(done).toEqual({ ok: true });
 
