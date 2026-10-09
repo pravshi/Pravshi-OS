@@ -99,7 +99,7 @@ beforeAll(async () => {
 
   mentorA = await mkPerson(orgA, 'Mentor A');
   mentorB = await mkPerson(orgB, 'Mentor B');
-});
+}, 120_000); // 120s: setup can queue behind the Phase 12 perf seed + ANALYZE under CI parallel load (PR #70 round 4; PR #72 round 2; PR #74 main run).
 
 afterAll(async () => {
   await owner.end().catch(() => undefined);
@@ -392,7 +392,7 @@ describe('RLS and privileges', () => {
       [e],
     );
     expect(mentorView).toEqual([]);
-  });
+  }, 120_000); // 120s: fixture writes + context queries can queue behind the Phase 12 perf seed under CI parallel load (PR #74 main run).
 
   it('denies a cross-tenant claim', async () => {
     const intern = await mkPerson(orgA, 'CrossTenant');
@@ -403,7 +403,7 @@ describe('RLS and privileges', () => {
       `select engagement_id from public.internships`,
     );
     expect(rows).toEqual([]);
-  });
+  }, 120_000); // 120s: fixture writes + context queries can queue behind the Phase 12 perf seed under CI parallel load (PR #72 round 2).
 
   it('keeps app_user unable to bypass RLS and owning nothing', async () => {
     const r = await asUser.query<{ b: boolean; s: boolean }>(
@@ -442,7 +442,7 @@ describe('pooled-connection isolation', () => {
     internY = await mkPerson(orgB, 'PoolY');
     engY = await mkEngagement(orgB, internY, deptB, 'INTERN');
     await mkInternship(orgB, engY, mentorB);
-  });
+  }, 120_000); // 120s: setup can queue behind the Phase 12 perf seed + ANALYZE under CI parallel load (PR #70 round 4; PR #72 round 2; PR #74 main run).
 
   it('alternating interns see only their own record', async () => {
     for (const [pid, oid, expected] of [
