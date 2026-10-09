@@ -24,9 +24,15 @@ import { getProviderDefinition } from './providers';
  * SECURITY DEFINER functions 0058 installed (integration_inbound_resolve_
  * endpoint / integration_inbound_find_receipt — the invitation_preview
  * pattern), reached via withAuthorizedDb under a zero context that can see
- * nothing else. Every WRITE then runs inside the resolved org's RLS
- * context through 0056's tenant-only receipt policies, with no person
- * identity — exactly the shape 0056's policy comments describe.
+ * nothing else. The WRITES cross the same wall through 0060's companion
+ * definers (integration_inbound_write_receipt /
+ * integration_inbound_set_receipt_status — the notifications_insert
+ * pattern): 0056 designed receipt writes to run under its tenant-only
+ * policies (org_id = authz.org_id()), but authz.org_id() derives the org
+ * FROM THE PERSON and this plane has none, so the policies can never
+ * admit a pre-auth write. The definers derive the org inside — from the
+ * connection row (re-verifying the presented digest against it) and from
+ * the receipt row itself — and accept no org or person id at all.
  *
  * ── RESPONSES ARE UNIFORM AND UNREVEALING (§4.4) ───────────────────────────
  *
@@ -333,10 +339,13 @@ export async function issueInboundEndpointKey(
 /* ── Receipt (pre-auth) ──────────────────────────────────────────────────── */
 
 /**
- * The zero context used ONLY to reach the two 0058 definer reads before an
- * org exists. It satisfies no RLS policy (both ids are the nil UUID), which
- * is the point: if a future change replaced a definer read with a raw
- * table read, it would return nothing rather than everything.
+ * The zero context used ONLY to reach the definer plane (0058's reads,
+ * 0060's writes) before an org-person context exists — and, for the
+ * writes, instead of one, since the receipt plane never has a person.
+ * It satisfies no RLS policy (both ids are the nil UUID), which is the
+ * point: if a future change replaced a definer with a raw table access,
+ * a read would return nothing rather than everything, and a write would
+ * be refused rather than admitted.
  */
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 const RESOLUTION_CONTEXT: AuthContext = { personId: NIL_UUID, orgId: NIL_UUID, aal: 'aal1' };
@@ -362,30 +371,31 @@ function sqlstateOf(error: unknown): string | null {
   return null;
 }
 
-async function recordReceipt(
-  orgCtx: AuthContext,
-  row: {
-    orgId: string;
-    connectionId: string;
-    providerKey: string;
-    endpointKeyHash: string;
-    externalEventId: string | null;
-    payloadHash: string;
-    status: InboundReceiptStatus;
-    processed: boolean;
-  },
-): Promise<string> {
-  return withAuthorizedDb(orgCtx, async (tx) => {
+/**
+ * Writes one receipt row through the 0060 definer. The definer derives
+ * org_id / provider_key from the connection row and re-verifies the
+ * presented digest against the stored one, so this helper neither carries
+ * nor needs an org context. `processed` is the insert-time distinction
+ * the pipeline has always made: terminal receipts (REJECTED_* /
+ * DUPLICATE) are stamped processed_at at insert; the RECEIVED receipt is
+ * not. A lost race against a concurrent identical delivery still
+ * surfaces as SQLSTATE 23505 from the partial UNIQUE index (it
+ * propagates through the definer unchanged) — the caller maps it.
+ */
+async function recordReceipt(row: {
+  connectionId: string;
+  endpointKeyHash: string;
+  externalEventId: string | null;
+  payloadHash: string;
+  status: InboundReceiptStatus;
+  processed: boolean;
+}): Promise<string> {
+  return withAuthorizedDb(RESOLUTION_CONTEXT, async (tx) => {
     const res = await tx.execute<{ id: string }>(sql`
-      insert into public.integration_inbound_events (
-        org_id, connection_id, provider_key, endpoint_key,
-        external_event_id, payload_hash, status, processed_at
-      ) values (
-        ${row.orgId}::uuid, ${row.connectionId}::uuid, ${row.providerKey},
-        ${row.endpointKeyHash}, ${row.externalEventId}, ${row.payloadHash},
-        ${row.status}, ${row.processed ? sql`now()` : sql`null`}
-      )
-      returning id
+      select public.integration_inbound_write_receipt(
+        ${row.connectionId}::uuid, ${row.endpointKeyHash}, ${row.externalEventId},
+        ${row.payloadHash}, ${row.status}, ${row.processed}
+      ) as id
     `);
     const inserted = res.rows[0];
     if (!inserted) throw new Error('Integration inbound receipt insert failed.');
@@ -393,16 +403,19 @@ async function recordReceipt(
   });
 }
 
-async function setReceiptStatus(
-  orgCtx: AuthContext,
-  receiptId: string,
-  status: InboundReceiptStatus,
-): Promise<void> {
-  await withAuthorizedDb(orgCtx, async (tx) => {
+/**
+ * Transitions one receipt through the 0060 definer, which derives the
+ * receipt's org from the row itself. mark_processed is always true here:
+ * the direct UPDATE this replaced stamped processed_at on EVERY
+ * transition (including the reprocess reset to RECEIVED), and the
+ * definer's flag preserves that behaviour exactly.
+ */
+async function setReceiptStatus(receiptId: string, status: InboundReceiptStatus): Promise<void> {
+  await withAuthorizedDb(RESOLUTION_CONTEXT, async (tx) => {
     await tx.execute(sql`
-      update public.integration_inbound_events
-      set status = ${status}, processed_at = now()
-      where id = ${receiptId}::uuid
+      select public.integration_inbound_set_receipt_status(
+        ${receiptId}::uuid, ${status}, true
+      )
     `);
   });
 }
@@ -437,12 +450,9 @@ export async function receiveInbound(
 
   const provider = getProviderDefinition(resolved.provider_key);
   if (!provider || provider.inbound === null) return rejectionResult();
-  const orgCtx: AuthContext = { personId: NIL_UUID, orgId: resolved.org_id, aal: 'aal1' };
   const payloadHash = hashPayload(rawBody);
   const baseRow = {
-    orgId: resolved.org_id,
     connectionId: resolved.connection_id,
-    providerKey: resolved.provider_key,
     endpointKeyHash: presentedHash,
     payloadHash,
   };
@@ -458,7 +468,7 @@ export async function receiveInbound(
     rawBody,
   });
   if (!verified) {
-    await recordReceipt(orgCtx, {
+    await recordReceipt({
       ...baseRow,
       externalEventId: null,
       status: 'REJECTED_SIGNATURE',
@@ -474,7 +484,7 @@ export async function receiveInbound(
     resolved.config !== null &&
     (resolved.config as Record<string, unknown>).inboundEnabled !== false;
   if (resolved.status !== 'CONNECTED' || !inboundEnabled) {
-    await recordReceipt(orgCtx, {
+    await recordReceipt({
       ...baseRow,
       externalEventId: null,
       status: 'REJECTED_VALIDATION',
@@ -485,7 +495,7 @@ export async function receiveInbound(
 
   // Body cap BEFORE parsing (§4.4) — the resolved provider's own cap.
   if (!isBodyWithinCap(rawBody, provider.inbound.maxBodyBytes)) {
-    await recordReceipt(orgCtx, {
+    await recordReceipt({
       ...baseRow,
       externalEventId: null,
       status: 'REJECTED_VALIDATION',
@@ -500,7 +510,7 @@ export async function receiveInbound(
   try {
     parsedBody = JSON.parse(rawBody);
   } catch {
-    await recordReceipt(orgCtx, {
+    await recordReceipt({
       ...baseRow,
       externalEventId: null,
       status: 'REJECTED_VALIDATION',
@@ -534,7 +544,7 @@ export async function receiveInbound(
       // Recorded as its own DUPLICATE row (§4.5). An external-id duplicate
       // gets no second row — the partial UNIQUE index forbids it, and the
       // original receipt is its record.
-      await recordReceipt(orgCtx, {
+      await recordReceipt({
         ...baseRow,
         externalEventId,
         status: 'DUPLICATE',
@@ -549,10 +559,10 @@ export async function receiveInbound(
   let receiptId: string;
   if (decision.action === 'reprocess') {
     receiptId = decision.receiptId;
-    await setReceiptStatus(orgCtx, receiptId, 'RECEIVED');
+    await setReceiptStatus(receiptId, 'RECEIVED');
   } else {
     try {
-      receiptId = await recordReceipt(orgCtx, {
+      receiptId = await recordReceipt({
         ...baseRow,
         externalEventId,
         status: 'RECEIVED',
@@ -573,7 +583,7 @@ export async function receiveInbound(
   // connected_by there is no principal whose authority could run a
   // workflow — the receipt fails closed rather than inventing one.
   if (resolved.connected_by === null) {
-    await setReceiptStatus(orgCtx, receiptId, 'FAILED');
+    await setReceiptStatus(receiptId, 'FAILED');
     return acceptedResult();
   }
   const requestId = randomUUID();
@@ -606,14 +616,14 @@ export async function receiveInbound(
         data,
       },
     });
-    await setReceiptStatus(orgCtx, receiptId, 'PROCESSED');
+    await setReceiptStatus(receiptId, 'PROCESSED');
   } catch (error) {
     console.error('[integrations/inbound] dispatch pipeline failed', {
       connectionId: resolved.connection_id,
       receiptId,
       name: error instanceof Error ? error.name : typeof error,
     });
-    await setReceiptStatus(orgCtx, receiptId, 'FAILED');
+    await setReceiptStatus(receiptId, 'FAILED');
   }
   return acceptedResult();
 }

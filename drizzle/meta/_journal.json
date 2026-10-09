@@ -441,6 +441,14 @@
       "tag": "0059_webhook_delivery_resolution",
       "breakpoints": true,
       "hash": "e7175a7bdc41fbf3d26f772c01850abd04892a738d755c9e17d9f068a07b5cfd"
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1791343891095,
+      "tag": "0060_integrations_write_plane",
+      "breakpoints": true,
+      "hash": "52e99fe49d8216cb21f8289a18828ba041afe6dbe0af0867a780ca360cf64de4"
     }
   ]
 }

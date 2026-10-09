@@ -347,16 +347,18 @@ describe.skipIf(!ready)('workflow API: definitions', () => {
     ).toMatch(/^INVALID_REQUEST:/);
   });
 
-  it('refuses to activate a deferred-trigger workflow (400: trigger type not yet supported)', async () => {
-    const webhook = await S().createWorkflow(await authA('workflows.create'), {
-      name: `Webhook sink ${RUN}`,
-      trigger: { type: 'webhook' },
+  it('refuses to activate a task.overdue-trigger workflow (task.overdue remains deferred)', async () => {
+    // Phase 10 (Wave W-in) implemented the webhook trigger, so the refusal
+    // case now rides on task.overdue — the one still-deferred trigger type.
+    const overdue = await S().createWorkflow(await authA('workflows.create'), {
+      name: `Overdue sweep ${RUN}`,
+      trigger: { type: 'task.overdue' },
       conditions: [],
       actions: [],
     });
-    expect(webhook.status).toBe('DRAFT');
+    expect(overdue.status).toBe('DRAFT');
     const message = await messageOf(
-      S().activateWorkflow(await authA('workflows.activate'), webhook.id),
+      S().activateWorkflow(await authA('workflows.activate'), overdue.id),
     );
     expect(message).toMatch(/^INVALID_REQUEST: trigger type not yet supported/);
   });

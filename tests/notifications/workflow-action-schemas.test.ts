@@ -125,14 +125,37 @@ describe('ActionConfigSchema (Phase 8 save-time gap fix)', () => {
     ).toBe(false);
   });
 
-  it('still rejects the truly-deferred webhook/run_ai_action with a clear message', () => {
-    for (const type of ['webhook', 'run_ai_action']) {
-      const parsed = ActionConfigSchema.safeParse({ type, params: {} });
-      expect(parsed.success).toBe(false);
-      if (!parsed.success) {
-        expect(parsed.error.issues[0]!.message).toMatch(/registry-documented only/);
-      }
+  it('still rejects the truly-deferred run_ai_action with a clear message', () => {
+    const parsed = ActionConfigSchema.safeParse({ type: 'run_ai_action', params: {} });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]!.message).toMatch(/registry-documented only/);
     }
+  });
+
+  it('webhook is implemented (Phase 10): exactly one addressing mode, validated at save time', () => {
+    // Empty params fail the WebhookActionParamsSchema exactly-one-of refine.
+    const empty = ActionConfigSchema.safeParse({ type: 'webhook', params: {} });
+    expect(empty.success).toBe(false);
+    if (!empty.success) {
+      expect(empty.error.issues[0]!.message).toMatch(
+        /^exactly one of subscriptionId or url is required$/,
+      );
+    }
+    // Subscription-addressed form parses.
+    expect(
+      ActionConfigSchema.safeParse({
+        type: 'webhook',
+        params: { subscriptionId: PERSON },
+      }).success,
+    ).toBe(true);
+    // URL-addressed form parses.
+    expect(
+      ActionConfigSchema.safeParse({
+        type: 'webhook',
+        params: { url: 'https://hooks.example.com/pravshi' },
+      }).success,
+    ).toBe(true);
   });
 
   it('still rejects unknown action types', () => {

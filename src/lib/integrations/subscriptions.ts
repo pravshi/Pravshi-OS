@@ -138,6 +138,28 @@ export function generateSigningSecret(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/* ── Array binding (the invitations precedent) ───────────────────────────── */
+
+/**
+ * Binds a JS string array as a Postgres text[] WITHOUT passing it as a
+ * single parameter: drizzle's sql template serializes a JS array to one
+ * string value, so `${events}::text[]` reaches Postgres as the malformed
+ * array literal "deal.won" (22P02) and subscription creation fails. This
+ * is the invitations service's uuidArrayParam lesson (P0-3), applied to
+ * text: expand the array into one bound parameter per element inside an
+ * array[...] constructor so every value stays bound and the cast is
+ * correct. (validateSubscriptionEvents guarantees non-empty; the empty
+ * branch keeps the helper total.)
+ */
+function textArrayParam(values: readonly string[]) {
+  return values.length === 0
+    ? sql`array[]::text[]`
+    : sql`array[${sql.join(
+        values.map((v) => sql`${v}::text`),
+        sql`, `,
+      )}]`;
+}
+
 /* ── URL fail-fast (static SSRF check; delivery re-validates in full) ────── */
 
 /**
@@ -276,7 +298,7 @@ export async function createSubscription(
         signing_secret_ciphertext, signing_secret_nonce, signing_secret_key_version,
         created_by
       ) values (
-        ${auth.ctx.orgId}::uuid, ${data.url}, ${[...events]}::text[], true,
+        ${auth.ctx.orgId}::uuid, ${data.url}, ${textArrayParam(events)}, true,
         ${stored.ciphertext}, ${stored.nonce}, ${stored.keyVersion},
         ${auth.ctx.personId}::uuid
       )
@@ -327,7 +349,7 @@ export async function updateSubscription(
   }
   if (data.events !== undefined) {
     const events = validateSubscriptionEvents(data.events);
-    sets.push(sql`events = ${[...events]}::text[]`);
+    sets.push(sql`events = ${textArrayParam(events)}`);
     changedFields.push('events');
   }
   if (data.active !== undefined) {

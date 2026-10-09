@@ -663,37 +663,106 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
 
   /* ── The W-in write shape ────────────────────────────────────────────── */
 
-  it('inbound writes: a resolved-org context with no person and no grants can write receipts in its org — and nothing beyond it', async () => {
+  it('inbound writes: the definer write plane admits the resolved-org context — and nothing beyond it', async () => {
     const ctx = resolvedCtxA();
-    const inserted = await inCtx<{ id: string }>(
+    // Receipt rows are verified through the owner pool: the nil-person
+    // context itself can never read them back (asserted at the end).
+    const receiptRow = async (id: string) =>
+      (
+        await owner.query<{
+          org_id: string;
+          connection_id: string;
+          provider_key: string;
+          status: string;
+          processed_at: Date | string | null;
+        }>(
+          `select org_id, connection_id, provider_key, status, processed_at
+           from public.integration_inbound_events where id = $1::uuid`,
+          [id],
+        )
+      ).rows[0];
+    const ownerReceiptCountByExternalId = async (externalEventId: string) =>
+      (
+        await owner.query<{ n: number }>(
+          `select count(*)::int n from public.integration_inbound_events where external_event_id = $1`,
+          [externalEventId],
+        )
+      ).rows[0]!.n;
+
+    // The write definer (0060): the caller names only the connection and
+    // presents the endpoint digest — there is no org parameter to
+    // supply. With the digest the connection actually holds, the insert
+    // lands and its id comes back.
+    const written = await inCtx<{ id: string }>(
       ctx,
-      `insert into public.integration_inbound_events
-         (org_id, connection_id, provider_key, endpoint_key, external_event_id, payload_hash, status)
-       values ($1::uuid, $2::uuid, 'webhooks', $3, $4, $5, 'RECEIVED') returning id`,
-      [orgA, connA, KEYHASH_A, `rls-preauth-${RUN}`, PAYHASH_A],
+      `select public.integration_inbound_write_receipt($1::uuid, $2, $3, $4, $5, $6) as id`,
+      [connA, KEYHASH_A, `rls-definer-${RUN}`, PAYHASH_A, 'RECEIVED', false],
     );
-    expect(inserted.rows).toHaveLength(1);
-    const receiptId = inserted.rows[0]!.id;
-    const transitioned = await inCtx(
+    expect(written.rows).toHaveLength(1);
+    const receiptId = written.rows[0]!.id;
+    // org_id and provider_key were derived from the connection row,
+    // never supplied: the receipt belongs to org A / 'webhooks', and a
+    // RECEIVED receipt is not yet stamped processed.
+    const fresh = await receiptRow(receiptId);
+    expect(fresh).toMatchObject({
+      org_id: orgA,
+      connection_id: connA,
+      provider_key: 'webhooks',
+      status: 'RECEIVED',
+    });
+    expect(fresh?.processed_at).toBeNull();
+
+    // The transition definer moves it to PROCESSED and stamps
+    // processed_at — and the row's org is still org A afterwards: the
+    // definer derives the org from the receipt row itself, so no call
+    // can steer a receipt into another tenant.
+    const transitioned = await inCtx<{ ok: boolean }>(
       ctx,
-      `update public.integration_inbound_events set status = 'PROCESSED', processed_at = now() where id = $1::uuid`,
-      [receiptId],
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
+      [receiptId, 'PROCESSED', true],
     );
-    expect(transitioned.rowCount).toBe(1);
-    // The same context cannot write into org B…
+    expect(transitioned.rows[0]!.ok).toBe(true);
+    const settled = await receiptRow(receiptId);
+    expect(settled).toMatchObject({ org_id: orgA, status: 'PROCESSED' });
+    expect(settled?.processed_at).not.toBeNull();
+    // A missing receipt is a plain false, not an error (the service's
+    // transitions are fire-and-forget by design).
+    const missing = await inCtx<{ ok: boolean }>(
+      ctx,
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
+      ['11111111-2222-4333-8444-555555555555', 'PROCESSED', true],
+    );
+    expect(missing.rows[0]!.ok).toBe(false);
+
+    // A wrong digest is refused 42501 inside the definer and writes no
+    // row — org B's digest does not open org A's connection…
     expect(
       await sqlstateOf(
         inCtx(
           ctx,
-          `insert into public.integration_inbound_events
-             (org_id, connection_id, provider_key, endpoint_key, external_event_id, payload_hash, status)
-           values ($1::uuid, $2::uuid, 'webhooks', $3, $4, $5, 'RECEIVED')`,
-          [orgB, connB, KEYHASH_B, `rls-preauth-b-${RUN}`, PAYHASH_B],
+          `select public.integration_inbound_write_receipt($1::uuid, $2, $3, $4, $5, $6) as id`,
+          [connA, KEYHASH_B, `rls-definer-wrong-${RUN}`, PAYHASH_A, 'RECEIVED', false],
         ),
       ),
     ).toBe('42501');
-    // …and cannot read receipts back (SELECT is integrations.view-gated
-    // on a person; the nil person holds nothing).
+    expect(await ownerReceiptCountByExternalId(`rls-definer-wrong-${RUN}`)).toBe(0);
+    // …and org A's digest does not open org B's connection either: the
+    // digest is verified against the NAMED connection's stored digest,
+    // so the write plane cannot be steered across tenants.
+    expect(
+      await sqlstateOf(
+        inCtx(
+          ctx,
+          `select public.integration_inbound_write_receipt($1::uuid, $2, $3, $4, $5, $6) as id`,
+          [connB, KEYHASH_A, `rls-definer-xorg-${RUN}`, PAYHASH_B, 'RECEIVED', false],
+        ),
+      ),
+    ).toBe('42501');
+    expect(await ownerReceiptCountByExternalId(`rls-definer-xorg-${RUN}`)).toBe(0);
+
+    // Read-back under the same nil context still returns nothing
+    // (SELECT is integrations.view-gated on a person; the nil person
+    // holds nothing).
     expect(await countAs(ctx, 'integration_inbound_events', receiptId)).toBe(0);
   }, 60_000);
 
