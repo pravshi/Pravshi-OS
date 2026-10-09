@@ -5,6 +5,14 @@
 --   substring pattern (last dot separates), so the three columns cannot
 --   drift: integrations.view → integrations/view;
 --   integrations.manage → integrations/manage.
+--   LEGACY ROW: 0008 already seeded integrations.manage as an ungranted
+--   blueprint row under module 'settings' ("Configure integrations"), so the
+--   catalogue grows by ONE new key here (126 → 127), not two. PART 1 is
+--   therefore an upsert, not insert-or-nothing: on conflict it re-homes the
+--   legacy row to module 'integrations' with the §4.2 description. 0008's
+--   insert derived resource/action with the same substring expressions, so
+--   the legacy row's resource/action already equal the derived values
+--   ('integrations'/'manage') and need no update.
 -- PART 2 — seed_system_roles() CREATE OR REPLACE: the 0055 body plus the
 --   §4.2 grants appended to the grants VALUES list. New organizations are
 --   correct from here on; 0008/0033/.../0055 are never edited.
@@ -19,6 +27,12 @@
 -- PART 1 — permission catalogue seeds (contract §4.2)
 -- ═════════════════════════════════════════════════════════════════════════════════
 
+-- Upsert, not insert-or-nothing: integrations.manage already exists on every
+-- database that has run 0008 (module 'settings', granted to no role). The
+-- conflict branch re-homes that legacy row — module and description move to
+-- the integrations module; is_sensitive is false on both seeds and is set
+-- anyway so the row converges exactly. resource/action are derived
+-- identically in 0008 and here, so they cannot differ and are not updated.
 insert into public.permissions (key, resource, action, module, description, is_sensitive)
 select
   c.key,
@@ -31,7 +45,10 @@ from (values
   ('integrations.view',  'integrations', false, 'View organization integrations'),
   ('integrations.manage','integrations', false, 'Manage organization integrations')
 ) as c(key, module, is_sensitive, description)
-on conflict (key) do nothing;
+on conflict (key) do update set
+  module = excluded.module,
+  description = excluded.description,
+  is_sensitive = excluded.is_sensitive;
 
 --> statement-breakpoint
 

@@ -83,12 +83,14 @@ Provider definitions are **code** (the registry, §2) — there is deliberately 
 
 ### 1.4 Permissions (migration `0057_integrations_permissions`)
 
-Catalogue 126 → **128**, module `integrations`, neither marked sensitive:
+Catalogue 126 → **127**, module `integrations`, neither marked sensitive:
 
 | Key | Purpose | Grants |
 |---|---|---|
 | `integrations.view` | List providers/connections/subscriptions, view execution history and health | SUPER_ADMIN + ADMIN, GLOBAL |
 | `integrations.manage` | Connect/disconnect/revoke, edit config, rotate secrets, manage subscriptions, issue inbound endpoint keys | SUPER_ADMIN + ADMIN, GLOBAL |
+
+Only one of the two keys is new. `integrations.manage` pre-existed as an ungranted blueprint row seeded by migration 0008 under module `settings` ("Configure integrations", granted to no role); 0057's catalogue seed is an upsert that re-homes that row to module `integrations` with the description above, so the catalogue grows by exactly one key. Both keys are newly *granted* by 0057.
 
 There is deliberately **no `integrations.use`** broad grant: connections are an operational surface holding org-wide credentials, and no non-admin workflow needs to touch one. SUPER_ADMIN's grants also arrive via the whole-catalogue cross join in `seed_system_roles()`; existing orgs were backfilled with the 0045 defensive pattern. The printed matrix in `docs/architecture/security.md` §2 gained the two rows in the same change set (the Phase 9 lesson).
 

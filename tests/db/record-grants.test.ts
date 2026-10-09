@@ -1147,17 +1147,18 @@ describe('record_grants.manage', () => {
               count(*) filter (where key like 'record_grants.%') rg
        from public.permissions`,
     );
-    // 128: the 109 counted before, plus the six Phase 5 workflow permissions
+    // 127: the 109 counted before, plus the six Phase 5 workflow permissions
     // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
     // plus the five Phase 6 jobs permissions
     // (jobs.view/create/retry/cancel/delete) from migration 0045, plus the three
     // Phase 8 notification permissions
     // (notifications.view/notifications.preferences.manage/notifications.send)
     // from migration 0052, plus the three Phase 9 AI permissions
-    // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the two
-    // Phase 10 integration permissions (integrations.view/integrations.manage)
-    // from migration 0057.
-    expect(Number(rows[0]!.total)).toBe(128);
+    // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the one
+    // new Phase 10 integration permission (integrations.view) from migration
+    // 0057 (integrations.manage was already in the catalogue from migration
+    // 0008; 0057 re-homes and grants it).
+    expect(Number(rows[0]!.total)).toBe(127);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,
