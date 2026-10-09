@@ -1,10 +1,13 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { createAuthMiddleware, APIError } from 'better-auth/api';
+import { createAuthMiddleware, APIError, isAPIError } from 'better-auth/api';
 import { twoFactor } from 'better-auth/plugins';
+import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
 import { loginPersonActive } from './login-person-check';
+import { recordLoginEvent, resolveLoginOrg } from './login-events';
+import { isLockedOut, noteLoginFailure, noteLoginSuccess } from './login-lockout';
 import { env } from '@/env';
 
 /** Blueprint section 25: "minimum 12 characters". */
@@ -19,9 +22,13 @@ const SESSION_REFRESH_SECONDS = 60 * 60 * 24;
  * belongs on all of them, not only on sign-up, because a reset is just as good a way to
  * install a known-compromised password.
  *
- * None of these paths is reachable today: sign-up is disabled outright, and reset needs an
- * email transport that arrives with the invitation task. The list exists so the check has
- * one place to attach rather than being rediscovered three times.
+ * The check exists and has one home: validateNewPasswordPolicy() in
+ * src/lib/auth/password-reset.ts (length, the common-password list, and the HIBP
+ * k-anonymity breach check). The reset and change flows call it directly. The two
+ * password-setting flows that are NOT library endpoints — invitation accept and
+ * bootstrap setup, both application paths — call the same function (F-11-07), so
+ * no path that installs a password is weaker than another. Sign-up stays disabled
+ * outright; its entry remains here so the list stays complete.
  */
 export const PASSWORD_SETTING_PATHS = [
   '/sign-up/email',
@@ -40,6 +47,134 @@ export const TWO_FACTOR_VERIFY_PREFIX = '/two-factor/verify-';
 /** aal2 means a second factor was verified on THIS session, not that one is enrolled. */
 export const sessionAssuranceFor = (path: string | undefined): 'aal1' | 'aal2' =>
   typeof path === 'string' && path.startsWith(TWO_FACTOR_VERIFY_PREFIX) ? 'aal2' : 'aal1';
+
+/**
+ * ── THE SIGN-IN CHOKE POINT (Phase 11, F-11-04 / F-11-05) ─────────────────────
+ *
+ * The per-account lockout and the login-event recording used to live only in the
+ * mediated route (src/app/api/auth/login/route.ts). Better Auth's own
+ * POST /api/auth/sign-in/email — mounted by the [...all] catch-all — skipped
+ * both: credential stuffing against one account was bounded only per-IP, and
+ * the attempt left no trace in public.login_events. A comment in the client
+ * ("direct calls are a bug") was a convention, not a control.
+ *
+ * Both controls now live in the hooks below, the one place every sign-in
+ * crosses: the library dispatches auth.api.* calls and HTTP requests through
+ * the same hook pipeline (better-auth 1.7's dispatchAuthEndpoint), so the
+ * mediated route (which delegates via auth.api.signInEmail) and a raw POST to
+ * the library endpoint are enforced and recorded identically — exactly once
+ * per attempt, because the route no longer records anything itself.
+ *
+ * Lockout semantics are the mediated route's, unchanged (login-lockout.ts,
+ * migration 0027): the check runs BEFORE the credential check; a locked
+ * account is refused with an error body-identical to the library's own
+ * invalid-credentials error, so the refusal is not an oracle; the locked
+ * attempt records a LOGIN_FAILURE event but does NOT feed the failure counter
+ * (an active lockout is never extended by knocking); and the fixed parity
+ * delay below keeps the locked branch from answering faster than a wrong
+ * password, which pays for scrypt verification inside the endpoint. (The
+ * library itself dummy-hashes on the unknown-user branches — verified in the
+ * 1.7.3 sign-in endpoint source — so ordinary failure timing needs no floor.)
+ *
+ * The after-hook reads the outcome off the dispatch context: a thrown
+ * credential failure lands in ctx.context.returned as an APIError; a success
+ * lands as the endpoint's result object. An MFA challenge is recognised
+ * before the two-factor plugin rewrites that result: user after-hooks run
+ * ahead of plugin after-hooks, and when the freshly minted session's user has
+ * a second factor enrolled, the plugin is certain to convert the result into
+ * { twoFactorRedirect: true } (the trusted-device shortcut that could divert
+ * it is refused in the before-hook and can never have been minted here).
+ */
+
+/** Timing parity for the lockout refusal — see the choke-point note above. */
+const LOCKOUT_TIMING_PARITY_MS = 250;
+const timingParityDelay = () =>
+  new Promise<void>((resolve) => setTimeout(resolve, LOCKOUT_TIMING_PARITY_MS));
+
+/** The email a sign-in attempt names, trimmed as the mediated route's schema trims it. */
+function signInEmailOf(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const email = (body as { email?: unknown }).email;
+  if (typeof email !== 'string') return null;
+  const trimmed = email.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** clientIp()'s rule (login-events.ts) over the Headers a hook carries instead of a Request. */
+function ipOfHeaders(headers: Headers | undefined): string | null {
+  const forwarded = headers?.get('x-forwarded-for');
+  const ip = forwarded?.split(',')[0]?.trim() ?? null;
+  return ip && ip.length > 0 ? ip : null;
+}
+
+/**
+ * Records one /sign-in/email outcome — the after-hook half of the choke point.
+ * Every helper used here is never-throw by design; the caller still guards, so
+ * bookkeeping can never break authentication itself.
+ */
+async function recordSignInOutcome(args: {
+  email: string;
+  headers: Headers | undefined;
+  returned: unknown;
+  newSession: { user: { id?: unknown; twoFactorEnabled?: unknown } } | null | undefined;
+}): Promise<void> {
+  const ip = ipOfHeaders(args.headers);
+  const userAgent = args.headers?.get('user-agent') ?? null;
+
+  if (isAPIError(args.returned)) {
+    // Any library refusal of the attempt — wrong password, unknown email, the
+    // session-liveness veto, rate limit — is a failed sign-in, recorded the
+    // way the mediated route always recorded it.
+    const orgId = await resolveLoginOrg(args.email);
+    await noteLoginFailure(args.email, ip, userAgent);
+    await recordLoginEvent({
+      orgId,
+      eventType: 'LOGIN_FAILURE',
+      email: args.email,
+      authUserId: null,
+      ip,
+      userAgent,
+    });
+    return;
+  }
+
+  if (typeof args.returned !== 'object' || args.returned === null) return;
+
+  const returnedUserId = (args.returned as { user?: { id?: unknown } }).user?.id;
+  const sessionUserId = args.newSession?.user.id;
+  const authUserId =
+    typeof returnedUserId === 'string'
+      ? returnedUserId
+      : typeof sessionUserId === 'string'
+        ? sessionUserId
+        : null;
+  const orgId = await resolveLoginOrg(args.email);
+  await noteLoginSuccess(args.email);
+
+  const challenge =
+    (args.returned as { twoFactorRedirect?: unknown }).twoFactorRedirect === true ||
+    args.newSession?.user.twoFactorEnabled === true;
+  if (challenge) {
+    await recordLoginEvent({
+      orgId,
+      eventType: 'MFA_CHALLENGE',
+      email: args.email,
+      authUserId,
+      ip,
+      userAgent,
+      metadata: { twoFactorMethods: true },
+    });
+  } else {
+    await recordLoginEvent({
+      orgId,
+      eventType: 'LOGIN_SUCCESS',
+      email: args.email,
+      authUserId,
+      ip,
+      userAgent,
+    });
+  }
+}
 
 export const auth = betterAuth({
   appName: 'PRAVSHI OS',
@@ -164,6 +299,47 @@ export const auth = betterAuth({
           };
         },
       },
+      delete: {
+        /**
+         * Sign-out events (F-11-05, Info sub-item): a session deleted BY the
+         * /sign-out endpoint is recorded as SESSION_REVOKED.
+         *
+         * This cannot live in hooks.after on /sign-out: the endpoint keeps
+         * the session in a local variable, deletes the row, and returns only
+         * { success: true } — by the time an after-hook runs there is nothing
+         * left to observe. This hook is the one observation point the library
+         * offers: the delete pipeline pre-reads the row and hands it over
+         * together with the endpoint context, whose path discriminates a
+         * sign-out from every other deletion (revoke-session(s), the
+         * two-factor challenge teardown, expiry cleanup — none of them is
+         * recorded here). It fires only when a session row actually existed,
+         * which is exactly the contract's "when a session existed".
+         */
+        after: async (session, ctx) => {
+          if (ctx?.path !== '/sign-out') return;
+          const userId = (session as { userId?: unknown }).userId;
+          if (typeof userId !== 'string') return;
+          let email: string | null = null;
+          try {
+            const res = await authDb.execute<{ email: string }>(sql`
+              select email::text as email from auth.auth_users where id = ${userId}::uuid limit 1
+            `);
+            email = res.rows[0]?.email ?? null;
+          } catch {
+            email = null;
+          }
+          const ipAddress = (session as { ipAddress?: unknown }).ipAddress;
+          const userAgent = (session as { userAgent?: unknown }).userAgent;
+          await recordLoginEvent({
+            orgId: email !== null ? await resolveLoginOrg(email) : null,
+            eventType: 'SESSION_REVOKED',
+            email,
+            authUserId: userId,
+            ip: typeof ipAddress === 'string' ? ipAddress : null,
+            userAgent: typeof userAgent === 'string' ? userAgent : null,
+          });
+        },
+      },
     },
   },
 
@@ -206,6 +382,29 @@ export const auth = betterAuth({
       }
 
       /**
+       * The library's password-reset request is refused (F-11-05).
+       *
+       * No sendResetPassword is configured, so today the endpoint can only
+       * answer RESET_PASSWORD_DISABLED — but it sits unrefused, one config
+       * change away from becoming a live second reset flow that bypasses the
+       * application policy (breach check, event recording, the app token
+       * store). The single legitimate way to request a reset is the mediated
+       * /api/auth/forgot-password route.
+       *
+       * Path note: in the installed Better Auth (1.7.3) the endpoint lives at
+       * /request-password-reset; /forget-password is the legacy spelling the
+       * library no longer routes (it survives only in its rate-limiter's
+       * path list). Both are refused: the live one because it must be, the
+       * legacy one so the refusal survives a future re-introduction.
+       */
+      if (ctx.path === '/forget-password' || ctx.path === '/request-password-reset') {
+        throw new APIError('FORBIDDEN', {
+          message:
+            'Password resets go through /api/auth/forgot-password. This endpoint is disabled.',
+        });
+      }
+
+      /**
        * Remembered devices are refused.
        *
        * The plugin can issue a trusted-device cookie that skips the prompt for thirty days.
@@ -219,6 +418,63 @@ export const auth = betterAuth({
         throw new APIError('BAD_REQUEST', {
           message:
             'Trusted devices are disabled: every privileged session must verify its second factor.',
+        });
+      }
+
+      /**
+       * The per-account lockout, enforced before the credential check on
+       * EVERY sign-in path (F-11-04 — see the choke-point note at the top of
+       * this file). The refusal is body-identical to the library's own
+       * invalid-credentials error, so a locked account is indistinguishable
+       * from a wrong password; the attempt is recorded here because a
+       * before-hook refusal ends the dispatch before any after-hook runs.
+       */
+      if (ctx.path === '/sign-in/email') {
+        const email = signInEmailOf(ctx.body);
+        if (email !== null && (await isLockedOut(email))) {
+          const ip = ipOfHeaders(ctx.headers);
+          const userAgent = ctx.headers?.get('user-agent') ?? null;
+          await recordLoginEvent({
+            orgId: await resolveLoginOrg(email),
+            eventType: 'LOGIN_FAILURE',
+            email,
+            authUserId: null,
+            ip,
+            userAgent,
+          });
+          // Timing parity: do not answer faster than a wrong-password attempt.
+          await timingParityDelay();
+          throw new APIError('UNAUTHORIZED', {
+            code: 'INVALID_EMAIL_OR_PASSWORD',
+            message: 'Invalid email or password',
+          });
+        }
+      }
+    }),
+
+    /**
+     * Login-event recording for every sign-in outcome (F-11-04 — see the
+     * choke-point note). Runs for the mediated route's delegated call and
+     * for raw [...all] requests alike; the mediated route records nothing
+     * itself, so each attempt lands in public.login_events exactly once.
+     */
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== '/sign-in/email') return;
+      const email = signInEmailOf(ctx.body);
+      if (email === null) return;
+      try {
+        await recordSignInOutcome({
+          email,
+          headers: ctx.headers,
+          returned: ctx.context.returned,
+          newSession: ctx.context.newSession,
+        });
+      } catch (e) {
+        // The recording helpers are never-throw by design; this guard is the
+        // belt to their braces — an APIError escaping an after-hook would
+        // replace the sign-in response, so nothing may escape.
+        console.error('[auth] sign-in outcome recording failed', {
+          name: e instanceof Error ? e.name : typeof e,
         });
       }
     }),

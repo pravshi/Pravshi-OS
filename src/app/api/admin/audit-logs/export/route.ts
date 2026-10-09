@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { withPermission } from '@/lib/authz/http';
+import { checkIpRateLimit } from '@/lib/auth/rate-limit';
 import { requestMetadata, writeAuditEntry } from '@/lib/audit/log';
 import {
   EXPORT_ROW_CAP,
@@ -32,10 +33,34 @@ const MAX_FILTER_CHARS = 128;
  * Every completed export writes its own MEDIUM audit entry (audit.export) naming
  * the format, the filters, and the row count — the export of the trail is itself
  * on the trail.
+ *
+ * Rate limited per user (Phase 11, F-11-09): the export is deliberately heavy
+ * (a full count plus a streamed scan of the trail), so each person gets a
+ * small fixed-window allowance on the authz.check_rate_limit substrate,
+ * checked before any of that work starts. Legitimate use — a person pulling
+ * a report — never approaches 5/min; a scripted caller meets a 429 instead
+ * of a scan.
  */
+
+/** F-11-09 contract value: per-user allowance for the export. */
+const AUDIT_EXPORT_RATE_LIMIT_PER_MINUTE = 5;
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+
 export const GET = withPermission(
   { permission: 'audit_logs.view', minScope: 'GLOBAL' },
   async (request, authorization) => {
+    if (
+      !(await checkIpRateLimit(
+        `audit-export:user:${authorization.ctx.personId}`,
+        AUDIT_EXPORT_RATE_LIMIT_PER_MINUTE,
+        RATE_LIMIT_WINDOW_SECONDS,
+      ))
+    ) {
+      return Response.json(
+        { error: 'RATE_LIMITED', message: 'Too many export requests. Please try again later.' },
+        { status: 429, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     const url = new URL(request.url);
     const format = (url.searchParams.get('format') ?? 'csv').toLowerCase();
     if (format !== 'csv' && format !== 'json') {

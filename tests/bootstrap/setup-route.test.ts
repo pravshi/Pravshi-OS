@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 
@@ -15,13 +15,18 @@ import type { SQL } from 'drizzle-orm';
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   hash: vi.fn(async () => `${'a'.repeat(32)}:${'b'.repeat(128)}`),
+  // Mutable so a case can lower the length floor: every entry in the curated
+  // common-password list is shorter than the production minimum of 12, and
+  // the shared policy checks length first, so the TOO_COMMON branch is
+  // unreachable under the default config — here and in production alike.
+  config: { minPasswordLength: 12, maxPasswordLength: 128 },
 }));
 
 vi.mock('@/env', () => ({ env: { APP_URL: 'https://os.pravshi.com', NODE_ENV: 'test' } }));
 vi.mock('@/lib/auth/server', () => ({
   auth: {
     $context: Promise.resolve({
-      password: { hash: mocks.hash, config: { minPasswordLength: 12, maxPasswordLength: 128 } },
+      password: { hash: mocks.hash, config: mocks.config },
     }),
   },
 }));
@@ -54,9 +59,32 @@ const linked = () =>
 const rateLimitOk = () => mocks.execute.mockResolvedValueOnce({ rows: [{ allowed: true }] });
 const rateLimitExceeded = () => mocks.execute.mockResolvedValueOnce({ rows: [{ allowed: false }] });
 
+// F-11-07: setup now runs the shared policy, whose breach half is an HIBP
+// k-anonymity lookup. The fetch is stubbed — no network in tests (the Phase 9
+// adapter-test precedent): by default the range answer matches nothing, and a
+// case names the one password the stub reports as breached.
+let breachedPassword: string | null = null;
+
+const hibpBody = () => {
+  if (!breachedPassword) return 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:1\n';
+  const sha1 = createHash('sha1').update(breachedPassword, 'utf8').digest('hex').toUpperCase();
+  return `${sha1.slice(5)}:12345\n`;
+};
+
 beforeEach(() => {
   mocks.execute.mockReset();
   mocks.hash.mockClear();
+  mocks.config.minPasswordLength = 12;
+  mocks.config.maxPasswordLength = 128;
+  breachedPassword = null;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(hibpBody(), { status: 200 })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('completeBootstrapSetup()', () => {
@@ -89,6 +117,26 @@ describe('completeBootstrapSetup()', () => {
     });
     const long = await completeBootstrapSetup({ token: TOKEN, password: 'x'.repeat(129) });
     expect(long).toMatchObject({ ok: false, reason: 'PASSWORD_TOO_LONG' });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.hash).not.toHaveBeenCalled();
+  });
+
+  it('refuses a password on the common-password list, before the database or the hasher (F-11-07)', async () => {
+    mocks.config.minPasswordLength = 8; // see the mocks.config note
+    expect(await completeBootstrapSetup({ token: TOKEN, password: 'password123' })).toEqual({
+      ok: false,
+      reason: 'PASSWORD_TOO_COMMON',
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.hash).not.toHaveBeenCalled();
+  });
+
+  it('refuses a password the breach check reports, before the database or the hasher (F-11-07)', async () => {
+    breachedPassword = 'a very strong passphrase 42';
+    expect(await completeBootstrapSetup({ token: TOKEN, password: breachedPassword })).toEqual({
+      ok: false,
+      reason: 'PASSWORD_BREACHED',
+    });
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.hash).not.toHaveBeenCalled();
   });
@@ -202,6 +250,22 @@ describe('POST /api/bootstrap/complete', () => {
       minPasswordLength: 12,
       maxPasswordLength: 128,
     });
+  });
+
+  it('reports a common password by name (F-11-07)', async () => {
+    mocks.config.minPasswordLength = 8; // see the mocks.config note
+    rateLimitOk();
+    const res = await post({ token: TOKEN, password: 'password123' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'PASSWORD_TOO_COMMON' });
+  });
+
+  it('reports a breached password by name (F-11-07)', async () => {
+    breachedPassword = 'a very strong passphrase 42';
+    rateLimitOk();
+    const res = await post({ token: TOKEN, password: breachedPassword });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'PASSWORD_BREACHED' });
   });
 
   it('answers 429 when the IP is over the rate limit, before touching the token', async () => {

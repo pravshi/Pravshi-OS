@@ -1046,6 +1046,49 @@ describe.skipIf(!HAS_DB)('integrations security (§4.7) — isolation, authoriza
     expect(await good.json()).toEqual({ status: 'accepted' });
   }, 90_000);
 
+  /* ── I10: inbound ingress rate limits (Phase 11, F-11-08) ────────────── */
+  it('I10: the 61st delivery to one endpoint in a minute is a uniform 429; the 301st request from one IP likewise', async () => {
+    const aliceManage = await authFor(aliceAcct, 'integrations.manage');
+    const issued = await inbound!.issueInboundEndpointKey(aliceManage, connA);
+    const post = (key: string, fromIp: string) =>
+      inboundRoute!.POST(
+        new Request(`http://localhost:3000/api/integrations/inbound/${key}`, {
+          method: 'POST',
+          headers: { 'x-forwarded-for': fromIp },
+          body: JSON.stringify({ via: 'flood' }),
+        }),
+        { params: Promise.resolve({ endpointKey: key }) },
+      );
+
+    // Per-endpoint allowance (60/min): sixty deliveries from one sender are
+    // accepted (the identical body makes deliveries 2..60 payload-hash
+    // duplicates — still the uniform 200), the 61st is throttled.
+    const senderIp = '203.0.113.77';
+    for (let i = 0; i < 60; i++) {
+      const res = await post(issued.endpointKey, senderIp);
+      expect(res.status, `delivery ${i + 1} of 60`).toBe(200);
+    }
+    const limited = await post(issued.endpointKey, senderIp);
+    expect(limited.status).toBe(429);
+    // The throttled body is byte-for-byte the generic rejection body: the
+    // status is the only signal, so throttling leaks no endpoint existence.
+    expect(await limited.json()).toEqual({
+      error: { code: 'INBOUND_REJECTED', message: 'The webhook delivery was rejected.' },
+    });
+
+    // Per-IP allowance (300/min) under key spraying: three hundred invented
+    // keys meet the uniform 400; the 301st request from that IP meets the
+    // 429 instead — the spray is stopped before resolution.
+    const sprayIp = '203.0.113.78';
+    for (let i = 0; i < 300; i++) {
+      const res = await post(inbound!.generateEndpointKey(), sprayIp);
+      expect(res.status, `spray ${i + 1} of 300`).toBe(400);
+    }
+    const sprayLimited = await post(inbound!.generateEndpointKey(), sprayIp);
+    expect(sprayLimited.status).toBe(429);
+    expect(await sprayLimited.json()).toMatchObject({ error: { code: 'INBOUND_REJECTED' } });
+  }, 300_000);
+
   /* ── W1: SSRF fail-fast at subscription create/update ────────────────── */
   it('W1: the SSRF case list is VALIDATION at subscription create and update; a public URL is the control', async () => {
     const aliceManage = await authFor(aliceAcct, 'integrations.manage');

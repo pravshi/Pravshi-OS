@@ -35,7 +35,10 @@ const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL
 const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE }) : null;
 
 const RUN = randomBytes(4).toString('hex');
-const PASSWORD = 'correct horse battery staple 001';
+// F-11-07: acceptInvitation now runs the full shared password policy, HIBP
+// breach check included, so this fixture must be a password no corpus holds —
+// a famous phrase variant would be refused for the wrong reason.
+const PASSWORD = 'Tr7!marrow-quiz-9182-lantern';
 
 const newToken = () => randomBytes(32).toString('hex');
 const digestOf = (token: string) => createHash('sha256').update(token, 'utf8').digest('hex');

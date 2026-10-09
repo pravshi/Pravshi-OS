@@ -1,4 +1,5 @@
 import { withPermission } from '@/lib/authz/http';
+import { checkIpRateLimit } from '@/lib/auth/rate-limit';
 import { searchGlobal } from '@/lib/search/query';
 import {
   invalidRequestResponse,
@@ -33,11 +34,33 @@ import {
  *
  * Tenant: every query is pinned to auth.ctx.orgId inside the database. There
  * is no client-supplied orgId to trust.
+ *
+ * Rate limited per user (Phase 11, F-11-09): the typeahead fires per
+ * keystroke against trigram similarity — the most expensive routine read in
+ * the app — so each person gets a fixed-window allowance on the
+ * authz.check_rate_limit substrate. 120/min is far above any human typing
+ * cadence (the client debounces); only a scripted caller ever meets it.
  */
 
 export const dynamic = 'force-dynamic';
 
+/** F-11-09 contract value: per-user allowance for the typeahead. */
+const SEARCH_RATE_LIMIT_PER_MINUTE = 120;
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+
 export const GET = withPermission({ permission: 'people.view' }, async (request, authorization) => {
+  if (
+    !(await checkIpRateLimit(
+      `search:user:${authorization.ctx.personId}`,
+      SEARCH_RATE_LIMIT_PER_MINUTE,
+      RATE_LIMIT_WINDOW_SECONDS,
+    ))
+  ) {
+    return Response.json(
+      { error: 'RATE_LIMITED', message: 'Too many search requests. Please try again later.' },
+      { status: 429, headers: noStoreHeaders },
+    );
+  }
   try {
     const url = new URL(request.url);
     const response = await searchGlobal(authorization, {

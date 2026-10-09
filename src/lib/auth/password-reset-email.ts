@@ -30,10 +30,19 @@ function escapeHtml(s: string): string {
   );
 }
 
-export async function sendResetEmail(to: string, resetUrl: string): Promise<boolean> {
-  const resend = getClient();
-  if (!resend) return false;
+export interface ResetEmailContent {
+  subject: string;
+  html: string;
+}
 
+/**
+ * The reset email's content — the ONE source for it, whoever delivers it.
+ * The pre-auth request path enqueues these exact strings on the email job
+ * plane (F-11-06, src/lib/auth/password-reset.ts); the admin credential-reset
+ * path sends them inline via sendResetEmail below. One builder, so the two
+ * delivery mechanisms can never drift into different emails.
+ */
+export function buildResetEmailContent(resetUrl: string): ResetEmailContent {
   const subject = 'Reset your Pravshi OS password';
   const html = `
     <p>Hi,</p>
@@ -41,6 +50,14 @@ export async function sendResetEmail(to: string, resetUrl: string): Promise<bool
     <p><a href="${escapeHtml(resetUrl)}">Reset your password</a></p>
     <p>This link is single-use and expires in one hour. If you did not request this, you can safely ignore it — your password will not change.</p>
   `.trim();
+  return { subject, html };
+}
+
+export async function sendResetEmail(to: string, resetUrl: string): Promise<boolean> {
+  const resend = getClient();
+  if (!resend) return false;
+
+  const { subject, html } = buildResetEmailContent(resetUrl);
 
   try {
     const { error } = await resend.emails.send({

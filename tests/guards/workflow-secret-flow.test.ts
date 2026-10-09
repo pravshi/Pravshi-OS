@@ -122,7 +122,9 @@ jobs:
   });
 
   it('allows a URL derived from a step output that is NOT secret-derived', () => {
-    // This is the real pipeline's shape: the Neon API call produces the URL.
+    // The allowed shape: a URL built from a step output that no secret feeds.
+    // (The provisioning step below is a stand-in — since PR #66 the real
+    // pipeline constructs its URLs against an ephemeral local Postgres.)
     expect(
       run(`
 jobs:

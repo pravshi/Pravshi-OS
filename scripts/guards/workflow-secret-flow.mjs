@@ -2,8 +2,10 @@
 // PRAVSHI OS — workflow secret-flow guard (Task 11, finding #2).
 //
 // PURPOSE: prevent a GitHub Actions workflow from populating a DATABASE_URL* environment
-// variable from a GitHub secret. CI must derive database URLs at runtime from the Neon
-// API, so a database URL held as a long-lived Actions secret is a policy violation.
+// variable from a GitHub secret. CI constructs database URLs at runtime against its
+// ephemeral local Postgres container, with per-run generated passwords (since PR #66 CI
+// holds no Neon credential at all), so a database URL held as a long-lived Actions secret
+// is a policy violation.
 //
 // THIS IS A HEURISTIC, NOT DATA-FLOW ANALYSIS. It parses the workflow YAML and tracks a
 // taint set across env keys and step outputs. It catches direct binding, renaming through
@@ -14,7 +16,7 @@
 //
 // SECOND RULE (Task 1.14): the bootstrap never runs in CI. DATABASE_URL_BOOTSTRAP is the
 // app_admin credential that can create the first SUPER_ADMIN, and its custody is the
-// operator's machine alone — not an Actions secret, and not a URL derived from the Neon API
+// operator's machine alone — not an Actions secret, and not a runtime-constructed URL
 // either, which the taint rule above would otherwise allow. So ANY mention of that variable,
 // or any invocation of scripts/bootstrap/, anywhere in a workflow, is a violation regardless
 // of where a value comes from. This half is a plain text match over every key and string in
@@ -171,9 +173,9 @@ function main() {
   }
   if (total > 0) {
     console.error(
-      `\nworkflow-secret-flow: ${total} violation(s). CI must derive database URLs from the ` +
-        'Neon API at runtime, never hold them as GitHub secrets, and must never touch the ' +
-        'bootstrap credential or script at all.',
+      `\nworkflow-secret-flow: ${total} violation(s). CI constructs database URLs at ` +
+        'runtime against its ephemeral local Postgres container, never holds them as ' +
+        'GitHub secrets, and must never touch the bootstrap credential or script at all.',
     );
     process.exit(1);
   }

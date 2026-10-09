@@ -33,7 +33,12 @@ export class InvitationError extends Error {
       | 'INVITATION_ALREADY_ACCEPTED'
       | 'INVITATION_CANNOT_COMPLETE'
       | 'PASSWORD_TOO_SHORT'
-      | 'PASSWORD_TOO_LONG',
+      | 'PASSWORD_TOO_LONG'
+      // F-11-07: the full shared password policy (common list + HIBP breach
+      // check) runs on invitation accept, not length alone — see
+      // src/lib/auth/invitations.ts.
+      | 'PASSWORD_TOO_COMMON'
+      | 'PASSWORD_BREACHED',
     message: string,
   ) {
     super(message);

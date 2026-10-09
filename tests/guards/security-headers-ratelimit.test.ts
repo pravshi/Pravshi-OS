@@ -21,6 +21,9 @@ const PREVIEW = read('src/app/api/invitations/preview/route.ts');
 const BOOTSTRAP = read('src/app/api/bootstrap/complete/route.ts');
 const INVITE_CREATE = read('src/app/api/invitations/route.ts');
 const INVITE_REVOKE = read('src/app/api/invitations/[id]/revoke/route.ts');
+const INBOUND = read('src/app/api/integrations/inbound/[endpointKey]/route.ts');
+const SEARCH = read('src/app/api/search/route.ts');
+const AUDIT_EXPORT = read('src/app/api/admin/audit-logs/export/route.ts');
 
 describe('security headers: next.config.ts ships a complete set', () => {
   it('defines headers() applying to every route', () => {
@@ -49,6 +52,17 @@ describe('security headers: next.config.ts ships a complete set', () => {
     expect(CONFIG).toMatch(/value:\s*'nosniff'/);
     expect(CONFIG).toMatch(/Referrer-Policy/);
     expect(CONFIG).toMatch(/strict-origin-when-cross-origin/);
+  });
+
+  it('sets a Permissions-Policy denying capabilities the app never uses (Phase 11, F-11-12)', () => {
+    expect(CONFIG).toMatch(/Permissions-Policy/);
+    expect(CONFIG).toMatch(/camera=\(\), microphone=\(\), geolocation=\(\), payment=\(\)/);
+  });
+
+  it('lets the browser Sentry SDK reach its ingest hosts (Phase 11, F-11-12)', () => {
+    expect(CONFIG).toMatch(/connect-src 'self' https:\/\/\*\.ingest\.sentry\.io/);
+    expect(CONFIG).toMatch(/https:\/\/\*\.ingest\.us\.sentry\.io/);
+    expect(CONFIG).toMatch(/https:\/\/\*\.ingest\.de\.sentry\.io/);
   });
 });
 
@@ -119,5 +133,53 @@ describe('rate limiting: invitation admin routes are throttled per IP', () => {
       /checkIpRateLimit\(ipRateLimitKey\('invite:revoke', clientIp\(request\)\), 30, 60\)/,
     );
     expect(INVITE_REVOKE).toMatch(/status: 429/);
+  });
+});
+
+describe('rate limiting: Phase 11 Wave D surfaces (F-11-08, F-11-09)', () => {
+  it('inbound ingress is throttled per IP (300/min) and per endpoint digest (60/min)', () => {
+    expect(INBOUND).toMatch(/RATE_LIMIT_PER_IP_PER_MINUTE = 300/);
+    expect(INBOUND).toMatch(/RATE_LIMIT_PER_ENDPOINT_PER_MINUTE = 60/);
+    expect(INBOUND).toMatch(/`inbound:ip:\$\{clientIp\(req\) \?\? 'unknown'\}`/);
+    expect(INBOUND).toMatch(/`inbound:ep:\$\{hashEndpointKey\(endpointKey\)\}`/);
+    expect(INBOUND).toMatch(/RATE_LIMIT_PER_IP_PER_MINUTE,\s*RATE_LIMIT_WINDOW_SECONDS/);
+    expect(INBOUND).toMatch(/RATE_LIMIT_PER_ENDPOINT_PER_MINUTE,\s*RATE_LIMIT_WINDOW_SECONDS/);
+  });
+
+  it('inbound over-limit answers the uniform rejection body under a 429', () => {
+    // The body comes from rejectionResult() itself, so a throttled sender
+    // sees exactly what any other rejected sender sees — status aside.
+    expect(INBOUND).toMatch(/httpStatus: 429,\s*body: rejectionResult\(\)\.body/);
+  });
+
+  it('the inbound throttle runs before the body is read or the service is called', () => {
+    const throttleAt = INBOUND.indexOf('await checkIpRateLimit(');
+    const bodyAt = INBOUND.indexOf('await req.text()');
+    const serviceAt = INBOUND.indexOf('await receiveInbound(');
+    expect(throttleAt).toBeGreaterThanOrEqual(0);
+    expect(bodyAt).toBeGreaterThan(throttleAt);
+    expect(serviceAt).toBeGreaterThan(throttleAt);
+  });
+
+  it('search is throttled per user at 120/min and answers 429 in its envelope', () => {
+    expect(SEARCH).toMatch(/SEARCH_RATE_LIMIT_PER_MINUTE = 120/);
+    expect(SEARCH).toMatch(/`search:user:\$\{authorization\.ctx\.personId\}`/);
+    expect(SEARCH).toMatch(/error: 'RATE_LIMITED'/);
+    expect(SEARCH).toMatch(/status: 429/);
+    const throttleAt = SEARCH.indexOf('await checkIpRateLimit(');
+    const serviceAt = SEARCH.indexOf('await searchGlobal(');
+    expect(throttleAt).toBeGreaterThanOrEqual(0);
+    expect(serviceAt).toBeGreaterThan(throttleAt);
+  });
+
+  it('audit-log export is throttled per user at 5/min and answers 429 in its envelope', () => {
+    expect(AUDIT_EXPORT).toMatch(/AUDIT_EXPORT_RATE_LIMIT_PER_MINUTE = 5/);
+    expect(AUDIT_EXPORT).toMatch(/`audit-export:user:\$\{authorization\.ctx\.personId\}`/);
+    expect(AUDIT_EXPORT).toMatch(/error: 'RATE_LIMITED'/);
+    expect(AUDIT_EXPORT).toMatch(/status: 429/);
+    const throttleAt = AUDIT_EXPORT.indexOf('await checkIpRateLimit(');
+    const countAt = AUDIT_EXPORT.indexOf('await countAuditExportRows(');
+    expect(throttleAt).toBeGreaterThanOrEqual(0);
+    expect(countAt).toBeGreaterThan(throttleAt);
   });
 });

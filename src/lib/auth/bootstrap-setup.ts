@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
+import { PasswordResetError, validateNewPasswordPolicy } from './password-reset';
 import { SETUP_TOKEN_PATTERN } from './setup-token';
 
 /**
@@ -33,8 +34,12 @@ import { SETUP_TOKEN_PATTERN } from './setup-token';
  * error is never passed on as a cause, because drizzle embeds the query parameters in its
  * message and those parameters are the digest and the password hash.
  *
- * WHEN THE BREACH-LIST CHECK LANDS (blueprint section 25, not yet implemented anywhere) it
- * must cover this path as well as the PASSWORD_SETTING_PATHS listed in server.ts.
+ * The password policy is the FULL shared one — validateNewPasswordPolicy()
+ * (blueprint section 25: length, the common-password list, and the HIBP
+ * breach check), the same function reset and change run (F-11-07). This path
+ * enforced length alone until Phase 11; a known-breached password could have
+ * been installed on the owner's login at setup while every later flow
+ * refused it.
  */
 
 /** Hex SHA-256 of the token string. scripts/bootstrap/run.mjs computes the same digest. */
@@ -49,7 +54,10 @@ export type BootstrapSetupResult =
       reason: 'PASSWORD_TOO_SHORT' | 'PASSWORD_TOO_LONG';
       minPasswordLength: number;
       maxPasswordLength: number;
-    };
+    }
+  // F-11-07: the shared policy's other two refusals. They carry no length
+  // bounds — the setup form renders its TOO_COMMON / BREACHED copy for them.
+  | { ok: false; reason: 'PASSWORD_TOO_COMMON' | 'PASSWORD_BREACHED' };
 
 /** Anything unexpected. It carries the SQLSTATE and nothing else, by design. */
 export class BootstrapSetupError extends Error {
@@ -106,12 +114,26 @@ export async function completeBootstrapSetup(input: {
 
   const context = await auth.$context;
   const { minPasswordLength, maxPasswordLength } = context.password.config;
-  // The same comparisons Better Auth's own sign-up and reset endpoints make.
-  if (password.length < minPasswordLength) {
-    return { ok: false, reason: 'PASSWORD_TOO_SHORT', minPasswordLength, maxPasswordLength };
-  }
-  if (password.length > maxPasswordLength) {
-    return { ok: false, reason: 'PASSWORD_TOO_LONG', minPasswordLength, maxPasswordLength };
+  // The full shared policy (F-11-07) — length, common-password list, breach
+  // check — run before the database is asked anything, exactly as the length
+  // checks it replaces were. The bounds ride along on the length refusals
+  // because the setup form renders them; the other two reasons stand alone.
+  try {
+    await validateNewPasswordPolicy(password);
+  } catch (e) {
+    if (e instanceof PasswordResetError && e.code === 'WEAK_PASSWORD' && e.reason) {
+      if (e.reason === 'TOO_SHORT') {
+        return { ok: false, reason: 'PASSWORD_TOO_SHORT', minPasswordLength, maxPasswordLength };
+      }
+      if (e.reason === 'TOO_LONG') {
+        return { ok: false, reason: 'PASSWORD_TOO_LONG', minPasswordLength, maxPasswordLength };
+      }
+      return {
+        ok: false,
+        reason: e.reason === 'TOO_COMMON' ? 'PASSWORD_TOO_COMMON' : 'PASSWORD_BREACHED',
+      };
+    }
+    throw e;
   }
 
   const digest = hashSetupToken(token);

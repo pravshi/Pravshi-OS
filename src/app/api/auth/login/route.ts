@@ -2,32 +2,32 @@ import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
 import { mfaEnrollmentRequired } from '@/lib/auth/mfa-enforcement';
-import { clientIp, recordLoginEvent, resolveLoginOrg } from '@/lib/auth/login-events';
-import { isLockedOut, noteLoginFailure, noteLoginSuccess } from '@/lib/auth/login-lockout';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/auth/login — the server-mediated sign-in.
  *
- * The browser never calls Better Auth's /sign-in/email directly: every password outcome
- * is recorded as a login event (LOGIN_SUCCESS, MFA_CHALLENGE, LOGIN_FAILURE), which is
- * the reason public.login_events exists. The route delegates the actual credential
- * check to auth.api.signInEmail — it invents no password logic — inspects the outcome,
- * records it, and forwards Better Auth's response (cookies included) to the browser.
+ * The browser never calls Better Auth's /sign-in/email directly. The route
+ * validates the body, delegates the credential check to auth.api.signInEmail
+ * — it invents no password logic — and forwards Better Auth's response
+ * (cookies included) to the browser, adding one application behaviour of its
+ * own: the post-login MFA-enrolment steer for privileged roles.
+ *
+ * Enforcement and recording are NOT here any more (Phase 11, F-11-04). The
+ * per-account lockout and the login-event recording (LOGIN_SUCCESS,
+ * MFA_CHALLENGE, LOGIN_FAILURE) live in the auth hooks in
+ * src/lib/auth/server.ts — the choke point every sign-in crosses, including
+ * a raw POST to the library endpoint. Because the delegated call passes
+ * through those hooks, this route must record nothing itself: an outcome
+ * written in both places would be two rows for one attempt. Every refusal
+ * the hooks or the endpoint produce is answered here with the same generic
+ * 401, so unknown email, wrong password and locked account stay
+ * indistinguishable to the client.
  *
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts: this route
  * establishes identity, so it cannot require one. Rate limiting rides along with the
  * delegated call: /sign-in/email is limited to ten attempts a minute per address.
- *
- * ── LOGIN LOCKOUT ──────────────────────────────────────────────────────────────
- *
- * Lockout bookkeeping lives in src/lib/auth/login-lockout.ts (authDb is auth-module
- * only per tests/guards/single-db-path.test.ts): 5 failures within 15 minutes locks
- * the account for 15 minutes, checked before the credential check. A locked account
- * answers the same generic 401 as a wrong password; the HIGH audit entry
- * (auth.login.lockout) is written inside authz.record_login_failure() when the
- * threshold is crossed. A successful login clears the counter.
  */
 
 const MAX_BODY_CHARS = 4096;
@@ -38,18 +38,6 @@ const Body = z.strictObject({
 
 const reply = (status: number, body: Record<string, unknown>) =>
   Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
-
-/**
- * Timing parity for the lockout path. A wrong password pays for password-hash
- * verification inside Better Auth before the generic 401; the locked branch
- * skips that work and would otherwise answer observably faster, turning the
- * lockout into a timing oracle. This fixed delay is a coarse countermeasure —
- * it narrows the gap but does not promise constant time. It runs after the
- * login event is recorded so only the client-visible response is delayed.
- */
-const LOCKOUT_TIMING_PARITY_MS = 250;
-const timingParityDelay = () =>
-  new Promise<void>((resolve) => setTimeout(resolve, LOCKOUT_TIMING_PARITY_MS));
 
 /** Threat T-17: state-changing route handlers verify origin. */
 function originAllowed(req: Request): boolean {
@@ -89,26 +77,6 @@ export async function POST(req: Request) {
     return reply(400, { error: 'INVALID_REQUEST' });
   }
 
-  const ip = clientIp(req);
-  const userAgent = req.headers.get('user-agent');
-  const orgId = await resolveLoginOrg(body.email);
-
-  // Lockout is checked before the credential check, and answers the same generic
-  // 401 as a wrong password: the client never learns a lockout exists.
-  if (await isLockedOut(body.email)) {
-    await recordLoginEvent({
-      orgId,
-      eventType: 'LOGIN_FAILURE',
-      email: body.email,
-      authUserId: null,
-      ip,
-      userAgent,
-    });
-    // Timing parity: do not answer faster than a wrong-password attempt.
-    await timingParityDelay();
-    return reply(401, { error: 'INVALID_CREDENTIALS' });
-  }
-
   let res: Response;
   try {
     res = await auth.api.signInEmail({
@@ -117,16 +85,11 @@ export async function POST(req: Request) {
       asResponse: true,
     });
   } catch {
-    // The library throws rather than returning a response for some failures.
-    await noteLoginFailure(body.email, ip, userAgent);
-    await recordLoginEvent({
-      orgId,
-      eventType: 'LOGIN_FAILURE',
-      email: body.email,
-      authUserId: null,
-      ip,
-      userAgent,
-    });
+    // The library throws rather than returning a response for some failures —
+    // including the choke-point lockout refusal in server.ts, which has
+    // already recorded the attempt by the time it throws. Nothing is
+    // recorded here; the answer is the same generic 401 as any other
+    // credential failure.
     return reply(401, { error: 'INVALID_CREDENTIALS' });
   }
 
@@ -145,42 +108,13 @@ export async function POST(req: Request) {
 
   if (!res.ok || !data) {
     // Deliberately generic: unknown email, wrong password and locked account
-    // answer the same.
-    await noteLoginFailure(body.email, ip, userAgent);
-    await recordLoginEvent({
-      orgId,
-      eventType: 'LOGIN_FAILURE',
-      email: body.email,
-      authUserId: null,
-      ip,
-      userAgent,
-    });
+    // answer the same. The outcome was recorded by the auth hooks.
     return reply(401, { error: 'INVALID_CREDENTIALS' });
   }
 
   if (data.twoFactorRedirect === true) {
-    await noteLoginSuccess(body.email);
-    await recordLoginEvent({
-      orgId,
-      eventType: 'MFA_CHALLENGE',
-      email: body.email,
-      authUserId: data.user?.id ?? null,
-      ip,
-      userAgent,
-      metadata: { twoFactorMethods: true },
-    });
     return forward(res, JSON.stringify({ twoFactorRedirect: true }));
   }
-
-  await noteLoginSuccess(body.email);
-  await recordLoginEvent({
-    orgId,
-    eventType: 'LOGIN_SUCCESS',
-    email: body.email,
-    authUserId: data.user?.id ?? null,
-    ip,
-    userAgent,
-  });
 
   // Privileged roles must enroll in TOTP: steer the client to /me/security when
   // the freshly authenticated person holds users.manage/roles.manage and has no

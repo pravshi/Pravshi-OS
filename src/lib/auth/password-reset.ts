@@ -6,7 +6,7 @@ import { authDb } from '@/lib/db/auth-client';
 import { env } from '@/env';
 import { sqlstateOf } from './invitations';
 import { isCommonPassword } from './common-passwords';
-import { sendResetEmail } from './password-reset-email';
+import { buildResetEmailContent } from './password-reset-email';
 import { recordLoginEvent, resolveLoginOrg } from './login-events';
 import { revokeSessionsFor } from './session';
 
@@ -117,7 +117,9 @@ async function underRateLimit(key: string): Promise<boolean> {
 /**
  * Request a reset link. ALWAYS answers { ok: true } — whether the email holds a
  * login is never revealed, and the login event is emitted only server-side when a
- * login actually exists, so the response carries no enumeration signal at all.
+ * login actually exists, so the response carries no enumeration signal in its
+ * body, its status, or its timing (F-11-06: no branch awaits an external call —
+ * the email is enqueued, not sent; see enqueueResetEmail).
  */
 export async function requestPasswordReset(
   email: string,
@@ -148,16 +150,21 @@ export async function requestPasswordReset(
   `);
   const resetId = res.rows[0]?.reset_id ?? null;
 
-  // No login for this email: stop here, answer generic success. No event, no email,
-  // and no timing oracle worth defending — the digest round-trip dominates anyway.
+  // No login for this email: stop here, answer generic success. No event, no email.
   if (!resetId) return { ok: true };
 
   const resetUrl = buildResetUrl(env.APP_URL, token);
-  // Awaited like the invitation mailer: the email is the deliverable here, and a
-  // fire-and-forget send risks the serverless function freezing before Resend is
-  // reached. A false return is logged inside sendResetEmail; the row stays the
-  // source of truth and the user can simply request again.
-  await sendResetEmail(cleanEmail, resetUrl);
+  // The send is DECOUPLED from this response (F-11-06): the email goes onto the
+  // job plane as an `email` job and the worker delivers it, instead of this
+  // request awaiting Resend. The invariant this flow now keeps: NO branch of it
+  // awaits an external call. Both branches perform the same shape of work —
+  // token generation and local database round-trips — so response time carries
+  // no signal about whether the email holds a login. (Awaiting the send here
+  // was exactly that signal: an external HTTPS round-trip on the exists-branch
+  // only, an order of magnitude above a local round-trip.) Delivery failure is
+  // the queue's concern now — retry and dead-letter — and the password_resets
+  // row stays the source of truth: the user can simply request again.
+  await enqueueResetEmail(resetId, resetUrl);
 
   await recordLoginEvent({
     orgId: await resolveLoginOrg(cleanEmail),
@@ -169,6 +176,54 @@ export async function requestPasswordReset(
   });
 
   return { ok: true };
+}
+
+/**
+ * Enqueue the reset email on the job plane (F-11-06) — the only delivery path
+ * the pre-auth request flow uses. The job is an ordinary `email` job
+ * (EmailPayloadSchema: to / subject / html), so the worker's Phase 10 Resend
+ * adapter delivers it with the platform's retry, dead-letter and
+ * provider-idempotency behaviour.
+ *
+ * The insert goes through public.enqueue_password_reset_email() (migration
+ * 0061), a narrow SECURITY DEFINER on the scheduler_tick_fire pattern. It has
+ * to: this caller is pre-authentication — it holds no identity, so there is
+ * no Authorization for enqueueJob() and the jobs_insert policy (a live person
+ * holding jobs.create) can never admit it — and the definer is capability-
+ * shaped so the exception stays narrow: it takes the reset id plus the email
+ * CONTENT (only this caller knows the plaintext token the link must carry),
+ * derives the recipient and the org FROM THE RESET ROW, and returns null for
+ * any reset row that is not live. The job's enqueued_by stays NULL — a
+ * system-enqueued job, like the scheduler's; `email` jobs never resolve an
+ * execution principal from it.
+ *
+ * Dedup: the dedup key is `pwreset:<reset id>`, one job per issued token —
+ * a repeated request mints a NEW token row (superseding the old), so each
+ * live token gets exactly one job and retries of the insert itself are
+ * idempotent.
+ *
+ * Best-effort, mirroring the mailer contract it replaces: a failure is logged
+ * by error name only and never thrown, because the response must stay uniform
+ * (and the login event below must still be recorded). The token row remains
+ * the source of truth; if no job was created the user can simply request again.
+ */
+async function enqueueResetEmail(resetId: string, resetUrl: string): Promise<boolean> {
+  const { subject, html } = buildResetEmailContent(resetUrl);
+  try {
+    const res = await authDb.execute<{ job_id: string | null }>(sql`
+      select public.enqueue_password_reset_email(${resetId}::uuid, ${subject}, ${html}) as job_id
+    `);
+    if (!res.rows[0]?.job_id) {
+      console.error('[auth] reset email enqueue declined: reset row is not live');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[auth] reset email enqueue failed', {
+      name: e instanceof Error ? e.name : typeof e,
+    });
+    return false;
+  }
 }
 
 /**

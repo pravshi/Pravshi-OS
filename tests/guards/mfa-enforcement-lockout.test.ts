@@ -16,6 +16,7 @@ const root = (...p: string[]) => join(process.cwd(), ...p);
 const MIGRATION = readFileSync(root('drizzle/0027_mfa_enforcement_lockout.sql'), 'utf8');
 const HELPER = readFileSync(root('src/lib/auth/mfa-enforcement.ts'), 'utf8');
 const LOGIN_ROUTE = readFileSync(root('src/app/api/auth/login/route.ts'), 'utf8');
+const AUTH_SERVER = readFileSync(root('src/lib/auth/server.ts'), 'utf8');
 const ADMIN_LAYOUT = readFileSync(root('src/app/(app)/admin/layout.tsx'), 'utf8');
 const LOGIN_PAGE = readFileSync(root('src/app/(auth)/login/page.tsx'), 'utf8');
 const SECURITY_PAGE = readFileSync(root('src/app/(app)/me/security/page.tsx'), 'utf8');
@@ -133,44 +134,65 @@ describe('admin layout enrollment gate', () => {
   });
 });
 
-describe('login route: lockout + enrollment', () => {
-  it('checks the lockout before the credential check and answers generic 401', () => {
-    expect(LOGIN_ROUTE).toMatch(/isLockedOut\(body\.email\)/);
-    expect(LOGIN_ROUTE).toMatch(/INVALID_CREDENTIALS/);
-    // No lockout-specific error code may reach the client.
-    expect(LOGIN_ROUTE).not.toMatch(/ACCOUNT_LOCKED|LOCKED_OUT/);
+/**
+ * Phase 11 (F-11-04): the lockout left the mediated route. It now lives in the
+ * auth before-hook in server.ts — the choke point every sign-in crosses,
+ * including a raw POST to Better Auth's /sign-in/email — and the route keeps
+ * no bookkeeping of its own (single recording; the DB-level proof is in
+ * tests/integration/auth-choke-point.test.ts). These assertions follow the
+ * control to its new home; their intent is the Phase 1 intent, unchanged.
+ */
+describe('sign-in lockout: enforced at the auth choke point', () => {
+  it('checks the lockout in the before-hook for /sign-in/email, before the credential check', () => {
+    expect(AUTH_SERVER).toMatch(/ctx\.path === '\/sign-in\/email'/);
+    expect(AUTH_SERVER).toMatch(/isLockedOut\(email\)/);
   });
 
-  it('records failures and clears the counter on success', () => {
+  it('refuses a locked account with the generic invalid-credentials error', () => {
+    // Body-identical to the library's own credential failure: status
+    // UNAUTHORIZED, code INVALID_EMAIL_OR_PASSWORD, "Invalid email or
+    // password". No lockout-specific error code may reach any client.
+    expect(AUTH_SERVER).toMatch(/code: 'INVALID_EMAIL_OR_PASSWORD'/);
+    expect(AUTH_SERVER).toMatch(/message: 'Invalid email or password'/);
+    expect(AUTH_SERVER).not.toMatch(/ACCOUNT_LOCKED|LOCKED_OUT/);
+    expect(LOGIN_ROUTE).not.toMatch(/ACCOUNT_LOCKED|LOCKED_OUT/);
+    expect(LOGIN_ROUTE).toMatch(/INVALID_CREDENTIALS/);
+  });
+
+  it('records failures and clears the counter on success — in the hooks, not the route', () => {
     // Lockout bookkeeping lives in the auth module (single-db-path guard:
-    // authDb is auth-module only); the route delegates to it.
-    expect(LOGIN_ROUTE).toMatch(/from '@\/lib\/auth\/login-lockout'/);
-    expect(LOGIN_ROUTE).toMatch(/noteLoginFailure\(body\.email, ip, userAgent\)/);
-    expect(LOGIN_ROUTE).toMatch(/noteLoginSuccess\(body\.email\)/);
+    // authDb is auth-module only); the hooks delegate to it.
+    expect(AUTH_SERVER).toMatch(/from '\.\/login-lockout'/);
+    expect(AUTH_SERVER).toMatch(/noteLoginFailure\(args\.email, ip, userAgent\)/);
+    expect(AUTH_SERVER).toMatch(/noteLoginSuccess\(args\.email\)/);
+    // The mediated route holds no second copy: that is what makes recording
+    // exactly-once rather than twice.
+    expect(LOGIN_ROUTE).not.toMatch(/isLockedOut|noteLoginFailure|noteLoginSuccess/);
+    expect(LOGIN_ROUTE).not.toMatch(/recordLoginEvent|login-lockout|login-events/);
   });
 
   it('adds the mfaEnrollmentRequired hint to the success response', () => {
     expect(LOGIN_ROUTE).toMatch(/mfaEnrollmentRequired/);
   });
 
-  it('keeps anti-enumeration: failure paths stay generic', () => {
+  it('keeps anti-enumeration: the route failure paths stay generic', () => {
     const failures = LOGIN_ROUTE.match(/return reply\(401, \{ error: 'INVALID_CREDENTIALS' \}\)/g);
     expect(failures).not.toBeNull();
-    expect(failures!.length).toBeGreaterThanOrEqual(3);
+    expect(failures!.length).toBeGreaterThanOrEqual(2);
   });
 
   it('keeps the locked path timing-indistinguishable from a wrong password', () => {
-    // The locked branch skips password-hash verification, so without a delay it
-    // would answer observably faster and turn the lockout into a timing oracle.
-    // The parity delay must sit on the locked branch, immediately before the
-    // generic reply.
-    const lockedBranch = LOGIN_ROUTE.match(
-      /if \(await isLockedOut\(body\.email\)\) \{[\s\S]*?\n  \}/,
-    )?.[0];
-    expect(lockedBranch).toBeDefined();
-    expect(lockedBranch!).toMatch(/await timingParityDelay\(\)/);
-    expect(lockedBranch!).toMatch(/return reply\(401, \{ error: 'INVALID_CREDENTIALS' \}\)/);
-    expect(LOGIN_ROUTE).toMatch(/LOCKOUT_TIMING_PARITY_MS/);
+    // The locked branch skips password-hash verification, so without a delay
+    // it would answer observably faster and turn the lockout into a timing
+    // oracle. The parity delay must sit between the lockout check and the
+    // refusal, on the locked branch of the before-hook.
+    const checkAt = AUTH_SERVER.indexOf('isLockedOut(email)');
+    const delayAt = AUTH_SERVER.indexOf('await timingParityDelay()');
+    const throwAt = AUTH_SERVER.indexOf("code: 'INVALID_EMAIL_OR_PASSWORD'");
+    expect(checkAt).toBeGreaterThanOrEqual(0);
+    expect(delayAt).toBeGreaterThan(checkAt);
+    expect(throwAt).toBeGreaterThan(delayAt);
+    expect(AUTH_SERVER).toMatch(/LOCKOUT_TIMING_PARITY_MS/);
   });
 });
 

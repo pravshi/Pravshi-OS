@@ -18,6 +18,8 @@ const FORGOT_ROUTE = readFileSync(root('src/app/api/auth/forgot-password/route.t
 const RESET_ROUTE = readFileSync(root('src/app/api/auth/reset-password/route.ts'), 'utf8');
 const COMMON = readFileSync(root('src/lib/auth/common-passwords.ts'), 'utf8');
 const EMAIL = readFileSync(root('src/lib/auth/password-reset-email.ts'), 'utf8');
+const INVITATIONS = readFileSync(root('src/lib/auth/invitations.ts'), 'utf8');
+const BOOTSTRAP = readFileSync(root('src/lib/auth/bootstrap-setup.ts'), 'utf8');
 const MIGRATION_25 = readFileSync(root('drizzle/0025_password_reset_audit.sql'), 'utf8');
 
 describe('reset token handling: the plaintext never reaches the database', () => {
@@ -182,5 +184,71 @@ describe('routes and pages', () => {
     for (const reason of ['TOO_SHORT', 'TOO_LONG', 'TOO_COMMON', 'BREACHED']) {
       expect(page).toContain(reason);
     }
+  });
+});
+
+describe('F-11-06: the send is decoupled onto the email job plane', () => {
+  it('the request path never awaits the mailer — it enqueues the email job instead', () => {
+    expect(SERVICE).not.toMatch(/sendResetEmail/);
+    expect(SERVICE).toMatch(/await enqueueResetEmail\(resetId, resetUrl\)/);
+    expect(SERVICE).toMatch(
+      /public\.enqueue_password_reset_email\(\$\{resetId\}::uuid, \$\{subject\}, \$\{html\}\)/,
+    );
+  });
+
+  it('the dismissive timing comment is gone; the no-external-call invariant is stated', () => {
+    expect(SERVICE).not.toMatch(/no timing oracle worth defending/);
+    expect(SERVICE).toMatch(/NO branch of it/);
+    expect(SERVICE).toMatch(/awaits an external call/);
+  });
+
+  it('order: token row first, enqueue second, login event last — all server-side', () => {
+    const requestIdx = SERVICE.indexOf('authz.request_password_reset');
+    const enqueueIdx = SERVICE.indexOf('await enqueueResetEmail(resetId, resetUrl)');
+    const eventIdx = SERVICE.indexOf("eventType: 'PASSWORD_RESET_REQUESTED'");
+    expect(requestIdx).toBeGreaterThan(-1);
+    expect(enqueueIdx).toBeGreaterThan(requestIdx);
+    expect(eventIdx).toBeGreaterThan(enqueueIdx);
+  });
+
+  it('the enqueued content comes from the one shared builder the inline mailer also uses', () => {
+    expect(SERVICE).toMatch(/buildResetEmailContent\(resetUrl\)/);
+    expect(EMAIL).toMatch(/export function buildResetEmailContent/);
+    expect(EMAIL).toMatch(/buildResetEmailContent\(resetUrl\)/);
+  });
+
+  it('enqueue failure is best-effort and logged by name only — the mailer contract it replaces', () => {
+    expect(SERVICE).toMatch(/reset email enqueue failed/);
+    expect(SERVICE).toMatch(/reset email enqueue declined/);
+  });
+});
+
+describe('F-11-07: password-policy parity on invitation accept and bootstrap setup', () => {
+  it('acceptInvitation runs the full shared policy and maps all four weak reasons', () => {
+    expect(INVITATIONS).toMatch(/await validateNewPasswordPolicy\(input\.password\)/);
+    for (const code of [
+      'PASSWORD_TOO_SHORT',
+      'PASSWORD_TOO_LONG',
+      'PASSWORD_TOO_COMMON',
+      'PASSWORD_BREACHED',
+    ]) {
+      expect(INVITATIONS).toContain(code);
+    }
+    // Length alone is no longer the whole policy on this path.
+    expect(INVITATIONS).not.toMatch(/input\.password\.length < minPasswordLength/);
+  });
+
+  it('bootstrap setup runs the full shared policy and maps all four weak reasons', () => {
+    expect(BOOTSTRAP).toMatch(/await validateNewPasswordPolicy\(password\)/);
+    for (const code of [
+      'PASSWORD_TOO_SHORT',
+      'PASSWORD_TOO_LONG',
+      'PASSWORD_TOO_COMMON',
+      'PASSWORD_BREACHED',
+    ]) {
+      expect(BOOTSTRAP).toContain(code);
+    }
+    expect(BOOTSTRAP).not.toMatch(/WHEN THE BREACH-LIST CHECK LANDS/);
+    expect(BOOTSTRAP).not.toMatch(/password\.length < minPasswordLength/);
   });
 });
