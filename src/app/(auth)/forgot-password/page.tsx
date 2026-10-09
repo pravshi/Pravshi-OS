@@ -1,88 +1,19 @@
-'use client';
-
-import { useState } from 'react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { resolveAuthContext } from '@/lib/auth/session';
+import { ForgotPasswordForm } from './forgot-password-form';
 
 /**
- * /forgot-password — request a reset link.
+ * /forgot-password — request a reset link (server wrapper).
  *
- * The confirmation is deliberately generic and identical whether or not the
- * address holds a login: the page must never become an account-enumeration oracle.
+ * Like /login, an already-authenticated user is redirected into the app
+ * (AUD-21): asking for a reset link for the account you are signed in as is
+ * never the intent, and the signed-in password path is /me/security. The
+ * check lives on THIS page only — the (auth) layout must not blanket-redirect,
+ * because /access-denied shares the group and stays reachable while signed in.
  */
-export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
-  const [done, setDone] = useState(false);
-  const [pending, setPending] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setPending(true);
-    try {
-      await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-    } catch {
-      // The endpoint answers 200 either way; a network failure gets the same
-      // generic confirmation — retrying is harmless and idempotent.
-    } finally {
-      setPending(false);
-      setDone(true);
-    }
-  }
-
-  if (done) {
-    return (
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Check your inbox</h1>
-        <p className="mt-2 text-sm text-ink-muted">
-          If an account exists for that email, a single-use reset link is on its way. It expires in
-          one hour.
-        </p>
-        <p className="mt-6 text-sm">
-          <Link href="/login" className="underline underline-offset-4">
-            Back to sign in
-          </Link>
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Reset your password</h1>
-      <p className="mt-2 text-sm text-ink-muted">
-        Enter your work email and we will send you a single-use reset link.
-      </p>
-
-      <form onSubmit={onSubmit} className="mt-6 space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="email">Work email</Label>
-          <Input
-            id="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={pending}
-          />
-        </div>
-
-        <Button type="submit" className="w-full" disabled={pending}>
-          {pending ? 'Sending…' : 'Send reset link'}
-        </Button>
-      </form>
-
-      <p className="mt-6 text-sm text-ink-muted">
-        <Link href="/login" className="underline underline-offset-4">
-          Back to sign in
-        </Link>
-      </p>
-    </div>
-  );
+export default async function ForgotPasswordPage() {
+  const ctx = await resolveAuthContext(await headers());
+  if (ctx) redirect('/');
+  return <ForgotPasswordForm />;
 }

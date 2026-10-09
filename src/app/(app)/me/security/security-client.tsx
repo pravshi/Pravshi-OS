@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authClient } from '@/lib/auth/client';
+import { TotpQrCode } from '@/components/security/totp-qr-code';
 import { changePasswordAction, getLoginHistoryAction, type LoginHistoryRow } from './actions';
 
 /**
@@ -234,9 +235,10 @@ export function SecurityClient() {
         ) : totpUri ? (
           <div className="mt-3 space-y-4">
             <p className="text-sm">
-              Add this key to your authenticator app (Google Authenticator, 1Password, …), then
-              enter the 6-digit code to finish.
+              Scan this code with your authenticator app (Google Authenticator, 1Password, …), then
+              enter the 6-digit code to finish. On the same device, copy the key below instead.
             </p>
+            <TotpQrCode uri={totpUri} />
             <p className="break-all rounded bg-cream-dark p-2 font-mono text-xs">{totpUri}</p>
             <Button
               variant="outline"

@@ -8,6 +8,7 @@ import { sqlstateOf } from './invitations';
 import { isCommonPassword } from './common-passwords';
 import { buildResetEmailContent } from './password-reset-email';
 import { recordLoginEvent, resolveLoginOrg } from './login-events';
+import { clearLoginLockout } from './login-lockout';
 import { revokeSessionsFor } from './session';
 
 /**
@@ -228,8 +229,8 @@ async function enqueueResetEmail(resetId: string, resetUrl: string): Promise<boo
 
 /**
  * Complete a reset: validate the new password, consume the single-use token,
- * rotate the credential hash, kill every existing session, and record the
- * security-event evidence (login event + audit entry).
+ * rotate the credential hash, kill every existing session, clear the login
+ * lockout, and record the security-event evidence (login event + audit entry).
  */
 export async function resetPassword(
   token: string,
@@ -306,6 +307,13 @@ export async function resetPassword(
   await revokeSessionsFor(authUserId);
 
   const email = await lookupLoginEmail(authUserId);
+
+  // A completed reset also clears the login lockout (AUD-21): mailbox control
+  // is proven and the credential is new, so the failures the old password
+  // accumulated must not keep the account locked. clear_login_lockout deletes
+  // the ledger row — counter and locked_until together — and the helper is
+  // never-throw, so a bookkeeping failure cannot un-happen the reset.
+  if (email) await clearLoginLockout(email);
   await recordLoginEvent({
     orgId: email ? await resolveLoginOrg(email) : null,
     eventType: 'PASSWORD_RESET_COMPLETED',

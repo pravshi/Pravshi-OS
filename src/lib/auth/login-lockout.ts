@@ -51,8 +51,17 @@ export async function noteLoginFailure(
   }
 }
 
-/** Clears the failure counter after a successful login. Never throws. */
-export async function noteLoginSuccess(email: string): Promise<void> {
+/**
+ * Clears the failure counter AND any live lockout for the login — the definer
+ * deletes the ledger row outright, so locked_until goes with the count.
+ * Never throws.
+ *
+ * Two callers with the same intent: a successful login (noteLoginSuccess),
+ * and a completed password reset (AUD-21) — a user who proved mailbox control
+ * and installed a new credential must be able to sign in with it immediately,
+ * not sit out the remainder of a lockout the old password's failures earned.
+ */
+export async function clearLoginLockout(email: string): Promise<void> {
   try {
     await authDb.execute(sql`
       select authz.clear_login_lockout(${email})
@@ -62,4 +71,9 @@ export async function noteLoginSuccess(email: string): Promise<void> {
       name: e instanceof Error ? e.name : typeof e,
     });
   }
+}
+
+/** Clears the failure counter after a successful login. Never throws. */
+export async function noteLoginSuccess(email: string): Promise<void> {
+  await clearLoginLockout(email);
 }
