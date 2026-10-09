@@ -7,6 +7,7 @@ import {
   createTaskAction,
   deleteProjectAction,
   getProjectAction,
+  listProjectPeopleCandidatesAction,
   listProjectTasksAction,
   updateProjectAction,
 } from '../../_actions';
@@ -36,11 +37,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   await requirePagePermission(WORK_PERMISSIONS.projects.view);
   const { id } = await params;
 
-  const [projectRes, tasksRes, held, aiAllowed] = await Promise.all([
+  const [projectRes, tasksRes, held, aiAllowed, candidatesRes] = await Promise.all([
     getProjectAction(id),
     listProjectTasksAction(id, { limit: 100, offset: 0 }),
     getWorkPermissions(),
     canUseAi(),
+    listProjectPeopleCandidatesAction(),
   ]);
 
   if (isErrorEnvelope(projectRes)) {
@@ -70,18 +72,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canCreateTasks = held.has(WORK_PERMISSIONS.tasks.create);
   const canAssignTasks = held.has(WORK_PERMISSIONS.tasks.assign);
 
-  // Assignee options are the people visible on this project's tasks. The API
-  // returns denormalized assignee names, so the UI never shows raw UUIDs.
-  const assigneeMap = new Map<string, string>();
-  for (const task of tasks) {
-    if (task.assigneePersonId && task.assigneeName && !assigneeMap.has(task.assigneePersonId)) {
-      assigneeMap.set(task.assigneePersonId, task.assigneeName);
-    }
-  }
-  const assignees: PersonOption[] = [...assigneeMap].map(([pid, displayName]) => ({
-    id: pid,
-    displayName,
-  }));
+  // Picker options (member add + task assignment) are the org people this
+  // viewer may pick: their people.view scope, resolved server-side by
+  // people_select RLS — including people on no project or task yet, so a
+  // first member can be added and a first task assigned. A failed candidates
+  // load degrades to an empty picker, never a broken page.
+  const assignees: PersonOption[] = isErrorEnvelope(candidatesRes)
+    ? []
+    : candidatesRes.map((c) => ({ id: c.personId, displayName: c.displayName }));
 
   const statusLabel = projectStatusLabel(project.isArchived);
 

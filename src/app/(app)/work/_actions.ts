@@ -20,6 +20,8 @@ import {
   moveTask,
   updateTask,
 } from '@/lib/work/tasks';
+import { listOrgPeopleCandidates } from '@/lib/work/people-candidates';
+import type { PersonCandidate } from '@/lib/work/schema';
 import {
   TASK_STATUSES,
   type DeleteResult,
@@ -143,6 +145,35 @@ export async function getTaskAction(id: string): Promise<WorkResult<WorkTask>> {
       permission: 'tasks.view',
     });
     return await getTask(authorization, uuid.parse(id));
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+// ── People picker candidates ────────────────────────────────────────────────
+// One service, two gates: each action is entered under the permission its
+// page already requires, so a page viewer never trips a spurious denial.
+// The ROWS are not decided here — people_select RLS scopes them to exactly
+// the people the caller may pick (their people.view data scope); see
+// src/lib/work/people-candidates.ts for the contract.
+
+export async function listProjectPeopleCandidatesAction(): Promise<WorkResult<PersonCandidate[]>> {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'projects.view',
+    });
+    return await listOrgPeopleCandidates(authorization);
+  } catch (error) {
+    return actionError(error);
+  }
+}
+
+export async function listTaskPeopleCandidatesAction(): Promise<WorkResult<PersonCandidate[]>> {
+  try {
+    const authorization = await requirePermission(await headers(), {
+      permission: 'tasks.view',
+    });
+    return await listOrgPeopleCandidates(authorization);
   } catch (error) {
     return actionError(error);
   }
