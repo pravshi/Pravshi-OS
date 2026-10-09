@@ -1,4 +1,5 @@
 import { withPermission } from '@/lib/authz/http';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/analytics/tenant';
 import type { DashboardFilter } from '@/lib/analytics/types';
 import {
@@ -25,21 +26,27 @@ import {
  * POST { preset, timezone, customStart, customEnd, filters }  reports.view → CRM metrics
  *
  * Plain JSON, no envelope, no-store.
+ *
+ * Phase 12 (F-12-01): the five metrics compose over ONE shared
+ * withAuthorizedDb transaction (each metric's trailing `tx`). Per-route
+ * transaction budget: ≤ 2 (shared metrics tx + the authz tx).
  */
 
 export const dynamic = 'force-dynamic';
 
 async function buildCrmDashboard(ctx: AuthContext, orgId: string, filter: DashboardFilter) {
   const grain = filter.grain ?? 'day';
-  const [leadCounts, leadConversionRate, contactGrowth, companyGrowth, activityVolume] =
-    await Promise.all([
-      getLeadCounts(orgId, ctx, filter),
-      getLeadConversionRate(orgId, ctx, filter.dateRange),
-      getContactGrowth(orgId, ctx, filter.dateRange, grain),
-      getCompanyGrowth(orgId, ctx, filter.dateRange, grain),
-      getActivityVolume(orgId, ctx, filter.dateRange, grain),
-    ]);
-  return { leadCounts, leadConversionRate, contactGrowth, companyGrowth, activityVolume };
+  return withAuthorizedDb(ctx, async (tx) => {
+    const [leadCounts, leadConversionRate, contactGrowth, companyGrowth, activityVolume] =
+      await Promise.all([
+        getLeadCounts(orgId, ctx, filter, tx),
+        getLeadConversionRate(orgId, ctx, filter.dateRange, tx),
+        getContactGrowth(orgId, ctx, filter.dateRange, grain, tx),
+        getCompanyGrowth(orgId, ctx, filter.dateRange, grain, tx),
+        getActivityVolume(orgId, ctx, filter.dateRange, grain, tx),
+      ]);
+    return { leadCounts, leadConversionRate, contactGrowth, companyGrowth, activityVolume };
+  });
 }
 
 async function handleCrm(request: Request, raw: unknown, authorizationOrgId: string) {

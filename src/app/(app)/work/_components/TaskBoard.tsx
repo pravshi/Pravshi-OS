@@ -2,10 +2,12 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/crm/empty-state';
 import {
   TASK_STATUSES,
@@ -17,7 +19,30 @@ import {
   type WorkTask,
 } from '../_types';
 import { StatusColumn } from './StatusColumn';
-import { TaskForm, type TaskFormInput } from './TaskForm';
+import type { TaskFormInput } from './TaskForm';
+
+/**
+ * The create-task form (with its assignee picker) only renders inside the
+ * "New task" dialog, so it is code-split out of the board's First Load and
+ * fetched when the dialog first opens (Phase 12, F-12-09). `ssr: false` is
+ * the load-bearing half: with server rendering on, next/dynamic still
+ * preloads the chunk into First Load.
+ */
+const TaskForm = dynamic(() => import('./TaskForm').then((m) => m.TaskForm), {
+  ssr: false,
+  loading: () => <TaskFormSkeleton />,
+});
+
+function TaskFormSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true">
+      <span className="sr-only">Loading task form…</span>
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-10 w-full" />
+    </div>
+  );
+}
 
 type ColumnsState = Record<TaskStatus, WorkTask[]>;
 

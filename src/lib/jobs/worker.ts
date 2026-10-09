@@ -19,6 +19,17 @@
  * idempotent (dedup keys, step_key) because crash/shutdown recovery can
  * re-deliver a job another worker partially processed.
  *
+ * ── IDLE POLLING ─────────────────────────────────────────────────────────────
+ * When a claim returns null, the idle sleep backs off geometrically (×2)
+ * from pollIntervalMs (default 1 s) to a pollMaxIdleMs ceiling (default
+ * 10 s), resetting to pollIntervalMs on any claimed job (Phase 12,
+ * F-12-04). An idle worker therefore polls at most once per 10 s instead
+ * of once per second, so a running worker no longer holds the database
+ * awake by existence alone. Tradeoff: worst-case claim latency for a job
+ * arriving during deep idle is the 10 s ceiling — acceptable for every
+ * current job type (none is user-blocking; user-facing work is
+ * synchronous). The scheduler tick cadence is unchanged.
+ *
  * ── SHUTDOWN ─────────────────────────────────────────────────────────────────
  * SIGTERM/SIGINT → stop claiming → fire the current job's AbortSignal → wait
  * for the in-flight job up to shutdownTimeoutMs → on timeout, release the
@@ -65,6 +76,16 @@ export interface WorkerConfig {
   types?: JobType[];
   /** Idle sleep between claim attempts. Default 1000. */
   pollIntervalMs?: number;
+  /**
+   * Idle-poll backoff ceiling (Phase 12, F-12-04): when a claim returns no
+   * job, the idle sleep grows geometrically (×2) from pollIntervalMs up to
+   * this ceiling, and resets to pollIntervalMs on any claimed job. Default
+   * 10000. A job arriving during deep idle can therefore wait up to this
+   * long before it is claimed — acceptable for every current job type
+   * (none is user-blocking; user-facing work is synchronous). A ceiling at
+   * or below pollIntervalMs simply disables the backoff growth.
+   */
+  pollMaxIdleMs?: number;
   /** Liveness ping while a handler runs. Default 15000. */
   heartbeatIntervalMs?: number;
   /** Max wait for the in-flight job on SIGTERM/SIGINT. Default 30000. */
@@ -76,6 +97,18 @@ export interface WorkerConfig {
    * one interval after worker start.
    */
   retrySweepIntervalMs?: number;
+  /**
+   * Stale-claim reaper cadence (Phase 12, F-12-02): every this many ms,
+   * reapStaleJobs() resets 'claimed'/'running' jobs whose heartbeat went
+   * stale back to 'pending' (0049 definer). This is the steady-state lease
+   * expiry path — before it existed, lease expiry depended on per-org
+   * cleanup jobs that nothing scheduled, so a job orphaned by a dead worker
+   * could sit claimed forever. Default 300000; 0 or negative disables the
+   * in-loop reap. The first in-loop reap fires one interval after worker
+   * start; runner.ts additionally reaps once at startup, before the first
+   * claim.
+   */
+  reapIntervalMs?: number;
 }
 
 export type JobHandler = (ctx: JobExecutionContext) => Promise<void>;
@@ -311,9 +344,18 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   }
   const types = config.types && config.types.length > 0 ? config.types : undefined;
   const pollIntervalMs = config.pollIntervalMs ?? 1000;
+  const pollMaxIdleMs =
+    config.pollMaxIdleMs !== undefined && Number.isFinite(config.pollMaxIdleMs)
+      ? config.pollMaxIdleMs
+      : 10000;
+  // The ceiling never sits below the base interval: a misconfigured
+  // pollMaxIdleMs degrades to constant pollIntervalMs polling, never to
+  // sleeping less than the base interval between claims.
+  const maxIdleSleepMs = Math.max(pollIntervalMs, pollMaxIdleMs);
   const heartbeatIntervalMs = config.heartbeatIntervalMs ?? 15000;
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 30000;
   const retrySweepIntervalMs = config.retrySweepIntervalMs ?? 30000;
+  const reapIntervalMs = config.reapIntervalMs ?? 300000;
 
   let settled = false;
   let settle!: () => void;
@@ -365,6 +407,11 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   const loop = async (): Promise<void> => {
     try {
       let nextRetrySweepMs = Date.now() + retrySweepIntervalMs;
+      let nextReapMs = Date.now() + reapIntervalMs;
+      // Adaptive idle poll (Phase 12, F-12-04): the sleep after an empty
+      // claim starts at pollIntervalMs and doubles up to maxIdleSleepMs;
+      // any claimed job resets it to pollIntervalMs.
+      let idleSleepMs = pollIntervalMs;
       while (!state.shuttingDown) {
         if (retrySweepIntervalMs > 0 && Date.now() >= nextRetrySweepMs) {
           // Automatic retry: re-drive retryable 'failed' jobs whose backoff
@@ -372,19 +419,31 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           nextRetrySweepMs = Date.now() + retrySweepIntervalMs;
           await sweepRetryableJobs().catch(() => undefined);
         }
+        if (reapIntervalMs > 0 && Date.now() >= nextReapMs) {
+          // Crash recovery: reset claims whose heartbeat went stale back to
+          // 'pending' (the abandoned attempt counts). Same failure posture
+          // as the retry sweep — a DB blip must never kill the worker.
+          nextReapMs = Date.now() + reapIntervalMs;
+          await reapStaleJobs().catch(() => undefined);
+        }
         let job: Job | null;
         try {
           job = await claimJob(workerId, types);
         } catch {
           // A claim failure (DB blip, privilege path hiccup) must never kill
-          // the worker — back off and keep polling.
+          // the worker — back off and keep polling. Queue state is unknown
+          // after an error, so the idle backoff restarts from the base
+          // interval rather than staying at the deep-idle ceiling.
+          idleSleepMs = pollIntervalMs;
           await sleep(pollIntervalMs);
           continue;
         }
         if (job === null) {
-          await sleep(pollIntervalMs);
+          await sleep(idleSleepMs);
+          idleSleepMs = Math.min(idleSleepMs * 2, maxIdleSleepMs);
           continue;
         }
+        idleSleepMs = pollIntervalMs;
         await executeJob(workerId, heartbeatIntervalMs, job, state);
       }
     } finally {
@@ -429,7 +488,10 @@ function validateStaleThreshold(thresholdMs: number): number {
  * per-request identity, so a raw UPDATE would match zero rows under the
  * FORCED RLS on public.jobs. Returns the number of jobs reaped.
  *
- * Run at worker startup and/or on a periodic cleanup job.
+ * Wired (Phase 12, F-12-02): runner.ts calls this once at startup, before
+ * the first claim, and runWorker() calls it on the reapIntervalMs cadence.
+ * Lease expiry therefore no longer depends on the per-org cleanup job —
+ * that job remains only as the retention tool (terminal-row deletion).
  */
 export async function reapStaleJobs(thresholdMs = 60000): Promise<number> {
   const safeThreshold = validateStaleThreshold(thresholdMs);

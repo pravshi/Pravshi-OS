@@ -14,6 +14,12 @@
  * the authenticated session context — NEVER a caller-supplied org id. All
  * reads go through withAuthorizedDb; the RLS policies fail closed on top.
  *
+ * Phase 12 (F-12-01): every metric accepts an optional trailing `tx?: Tx`.
+ * When a caller (an analytics route composing a dashboard) supplies one, the
+ * metric runs on that shared authorized transaction and opens none of its
+ * own; when omitted, it opens its own via withAuthorizedDb exactly as
+ * before. Results are identical either way — one snapshot instead of many.
+ *
  * Server-only module. Never import from a 'use client' component.
  *
  * Source: public.workflow_executions (Phase 5; drizzle/0044_workflow_engine.sql).
@@ -22,7 +28,7 @@
  * with different statuses and are NOT aggregated here).
  */
 import { sql } from 'drizzle-orm';
-import { withAuthorizedDb } from '@/lib/db/authorized';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import type {
   DashboardFilter,
@@ -127,10 +133,11 @@ export interface WorkflowStats {
 export async function getWorkflowStats(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<WorkflowStats> {
   const { start, end } = bounds(filters.dateRange);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{
+  const run = async (db: Tx): Promise<WorkflowStats> => {
+    const res = await db.execute<{
       total: string;
       pending: string;
       running: string;
@@ -159,7 +166,8 @@ export async function getWorkflowStats(
       failed: Number(r?.failed ?? 0),
       cancelled: Number(r?.cancelled ?? 0),
     };
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -171,10 +179,11 @@ export async function getWorkflowStats(
 export async function getWorkflowSuccessRate(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MetricResult> {
   const { start, end } = bounds(filters.dateRange);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ rate: string | null }>(sql`
+  const run = async (db: Tx): Promise<MetricResult> => {
+    const res = await db.execute<{ rate: string | null }>(sql`
       select
         count(*) filter (where status = 'SUCCEEDED')::float
         / nullif(count(*) filter (where status in ('SUCCEEDED', 'FAILED', 'CANCELLED')), 0)
@@ -186,7 +195,8 @@ export async function getWorkflowSuccessRate(
     `);
     const rate = res.rows[0]?.rate;
     return rate == null ? null : Number(rate);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -197,11 +207,12 @@ export async function getWorkflowSuccessRate(
 export async function getExecutionsOverTime(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<TimeSeriesPoint[]> {
   const { start, end } = bounds(filters.dateRange);
   const grain: TimeSeriesGrain = filters.grain ?? 'day';
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ bucket: Date; n: string }>(sql`
+  const run = async (db: Tx): Promise<TimeSeriesPoint[]> => {
+    const res = await db.execute<{ bucket: Date; n: string }>(sql`
       select date_trunc(${grain}, created_at) as bucket, count(*) as n
       from workflow_executions
       where org_id = ${ctx.orgId}
@@ -216,7 +227,8 @@ export async function getExecutionsOverTime(
       counts.set(bucket.toISOString(), Number(row.n));
     }
     return buildCountSeries(filters.dateRange, grain, counts);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /** One workflow ranked by execution volume. */
@@ -236,11 +248,12 @@ export async function getTopWorkflows(
   ctx: AuthContext,
   filters: DashboardFilter,
   limit = 10,
+  tx?: Tx,
 ): Promise<TopWorkflow[]> {
   const { start, end } = bounds(filters.dateRange);
   const safeLimit = Math.min(Math.max(limit, 1), 50);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{
+  const run = async (db: Tx): Promise<TopWorkflow[]> => {
+    const res = await db.execute<{
       workflow_id: string;
       workflow_name: string;
       executions: string;
@@ -266,7 +279,8 @@ export async function getTopWorkflows(
       workflowName: String(row.workflow_name),
       executions: Number(row.executions),
     }));
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 export { TERMINAL_STATUSES };

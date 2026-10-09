@@ -35,6 +35,16 @@ import { AI_CAPABILITY_IDS, AI_TARGET_ENTITY_TYPES, type AiRequestOutcome } from
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Phase 12 (F-12-06, audit contract §4.6): the AI budget is 30 s end-to-end
+ * (AI_DEFAULT_TIMEOUT_MS, src/lib/ai/config.ts); 60 s of platform headroom
+ * covers the usage-metering and context reads around the provider call.
+ * Whether the deployed plan's ceiling permits 60 s is verified only at
+ * deployment (Phase 13); the fallback is lowering AI_TIMEOUT_MS via env —
+ * already supported, no code change needed.
+ */
+export const maxDuration = 60;
+
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
 /** §5.2: body ≤ 16 KB. */

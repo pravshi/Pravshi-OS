@@ -26,10 +26,16 @@
  *     foundation's MetricByCurrency = Record<string, number | null>, because
  *     the metric contracts mandate numeric strings for money per API
  *     conventions (numeric(19,4) precision safety).
+ *
+ * Phase 12 (F-12-01): every metric accepts an optional trailing `tx?: Tx`.
+ * When a caller (an analytics route composing a dashboard) supplies one, the
+ * metric runs on that shared authorized transaction and opens none of its
+ * own; when omitted, it opens its own via withAuthorizedDb exactly as
+ * before. Results are identical either way — one snapshot instead of many.
  */
 
 import { sql, type SQL } from 'drizzle-orm';
-import { withAuthorizedDb } from '@/lib/db/authorized';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import type { DashboardFilter, DateRange, MetricResult } from './types';
 import {
@@ -102,9 +108,10 @@ function dealScope(
 export async function getDealsByStage(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<DealsByStageRow[]> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<DealsByStageRow>(sql`
+  const run = async (db: Tx): Promise<DealsByStageRow[]> => {
+    const res = await db.execute<DealsByStageRow>(sql`
       select
         ps.id as "stageId",
         ps.name as "stageName",
@@ -148,7 +155,8 @@ export async function getDealsByStage(
       order by p.name asc, ps.position asc, ps.id asc
     `);
     return res.rows;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -158,9 +166,10 @@ export async function getDealsByStage(
 export async function getPipelineValue(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MoneyByCurrency> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ currency: string; total: string | null }>(sql`
+  const run = async (db: Tx): Promise<MoneyByCurrency> => {
+    const res = await db.execute<{ currency: string; total: string | null }>(sql`
       select d.currency as currency, sum(d.value)::text as total
       from public.deals d
       join public.pipeline_stages ps
@@ -176,7 +185,8 @@ export async function getPipelineValue(
     const out: MoneyByCurrency = {};
     for (const row of res.rows) out[row.currency] = row.total;
     return out;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -187,9 +197,10 @@ export async function getPipelineValue(
 export async function getWonRevenue(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MoneyByCurrency> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ currency: string; total: string | null }>(sql`
+  const run = async (db: Tx): Promise<MoneyByCurrency> => {
+    const res = await db.execute<{ currency: string; total: string | null }>(sql`
       select d.currency as currency, sum(d.value)::text as total
       from public.deals d
       join public.pipeline_stages ps
@@ -205,7 +216,8 @@ export async function getWonRevenue(
     const out: MoneyByCurrency = {};
     for (const row of res.rows) out[row.currency] = row.total;
     return out;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -216,9 +228,10 @@ export async function getWonRevenue(
 export async function getWinRate(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MetricResult> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ winRate: string | null }>(sql`
+  const run = async (db: Tx): Promise<MetricResult> => {
+    const res = await db.execute<{ winRate: string | null }>(sql`
       select ${ratio(countWhere(sql`ps.is_won`), countWhere(sql`ps.is_won or ps.is_lost`))} as "winRate"
       from public.deals d
       join public.pipeline_stages ps
@@ -227,7 +240,8 @@ export async function getWinRate(
       where ${dealScope(ctx, sql`d.org_id`, sql`d.deleted_at`, sql`d.closed_at`, filters.dateRange)}
     `);
     return toMetricResult(res.rows[0]?.winRate ?? null);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -237,9 +251,10 @@ export async function getWinRate(
 export async function getAvgDealValue(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MoneyByCurrency> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ currency: string; average: string | null }>(sql`
+  const run = async (db: Tx): Promise<MoneyByCurrency> => {
+    const res = await db.execute<{ currency: string; average: string | null }>(sql`
       select d.currency as currency, round(avg(d.value), 4)::text as average
       from public.deals d
       join public.pipeline_stages ps
@@ -255,7 +270,8 @@ export async function getAvgDealValue(
     const out: MoneyByCurrency = {};
     for (const row of res.rows) out[row.currency] = row.average;
     return out;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -266,9 +282,10 @@ export async function getAvgDealValue(
 export async function getDealsByOwner(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<DealsByOwnerRow[]> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<DealsByOwnerRow>(sql`
+  const run = async (db: Tx): Promise<DealsByOwnerRow[]> => {
+    const res = await db.execute<DealsByOwnerRow>(sql`
       select
         d.owner_person_id as "ownerPersonId",
         p.full_legal_name as "ownerName",
@@ -301,5 +318,6 @@ export async function getDealsByOwner(
       order by count(d.id) desc, p.full_legal_name asc nulls last
     `);
     return res.rows;
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }

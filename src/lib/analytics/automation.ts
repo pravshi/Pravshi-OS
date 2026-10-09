@@ -22,6 +22,12 @@
  * reads go through withAuthorizedDb; the RLS policies fail closed on top.
  * Pattern mirrors getJobsStats in src/app/(app)/jobs/_jobs.ts.
  *
+ * Phase 12 (F-12-01): every metric accepts an optional trailing `tx?: Tx`.
+ * When a caller (an analytics route composing a dashboard) supplies one, the
+ * metric runs on that shared authorized transaction and opens none of its
+ * own; when omitted, it opens its own via withAuthorizedDb exactly as
+ * before. Results are identical either way — one snapshot instead of many.
+ *
  * Server-only module. Never import from a 'use client' component.
  *
  * Source: public.jobs (Phase 6; drizzle/0045_automation_jobs.sql).
@@ -31,7 +37,7 @@
  *   cleanup | notification | email.
  */
 import { sql } from 'drizzle-orm';
-import { withAuthorizedDb } from '@/lib/db/authorized';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import { JOB_STATUSES, JOB_TYPES, type JobStatus, type JobType } from '@/lib/jobs/types';
 import type {
@@ -112,10 +118,14 @@ export interface JobStats {
  * when the count is 0 — an absent key would mean "not measured", and here
  * zero is a real measurement.
  */
-export async function getJobStats(ctx: AuthContext, filters: DashboardFilter): Promise<JobStats> {
+export async function getJobStats(
+  ctx: AuthContext,
+  filters: DashboardFilter,
+  tx?: Tx,
+): Promise<JobStats> {
   const { start, end } = bounds(filters.dateRange);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<Record<string, string>>(sql`
+  const run = async (db: Tx): Promise<JobStats> => {
+    const res = await db.execute<Record<string, string>>(sql`
       select
         count(*) filter (where status = 'pending')     as s_pending,
         count(*) filter (where status = 'claimed')     as s_claimed,
@@ -146,7 +156,8 @@ export async function getJobStats(ctx: AuthContext, filters: DashboardFilter): P
       byType[type] = Number(r[`t_${type}`] ?? 0);
     }
     return { byStatus, byType };
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -165,10 +176,11 @@ export async function getJobStats(ctx: AuthContext, filters: DashboardFilter): P
 export async function getAutomationSuccessRate(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<MetricResult> {
   const { start, end } = bounds(filters.dateRange);
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ rate: string | null }>(sql`
+  const run = async (db: Tx): Promise<MetricResult> => {
+    const res = await db.execute<{ rate: string | null }>(sql`
       select
         count(*) filter (where status = 'succeeded')::float
         / nullif(count(*) filter (where status in ('succeeded', 'failed', 'dead_letter')), 0)
@@ -180,7 +192,8 @@ export async function getAutomationSuccessRate(
     `);
     const rate = res.rows[0]?.rate;
     return rate == null ? null : Number(rate);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -190,16 +203,17 @@ export async function getAutomationSuccessRate(
  * date range applies, because a dead-lettered job stays actionable until
  * someone resolves it.
  */
-export async function getDeadLetterCount(ctx: AuthContext): Promise<number> {
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ n: string }>(sql`
+export async function getDeadLetterCount(ctx: AuthContext, tx?: Tx): Promise<number> {
+  const run = async (db: Tx): Promise<number> => {
+    const res = await db.execute<{ n: string }>(sql`
       select count(*) as n
       from jobs
       where org_id = ${ctx.orgId}
         and status = 'dead_letter'
     `);
     return Number(res.rows[0]?.n ?? 0);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
 
 /**
@@ -210,11 +224,12 @@ export async function getDeadLetterCount(ctx: AuthContext): Promise<number> {
 export async function getJobsOverTime(
   ctx: AuthContext,
   filters: DashboardFilter,
+  tx?: Tx,
 ): Promise<TimeSeriesPoint[]> {
   const { start, end } = bounds(filters.dateRange);
   const grain: TimeSeriesGrain = filters.grain ?? 'day';
-  return withAuthorizedDb(ctx, async (tx) => {
-    const res = await tx.execute<{ bucket: Date; n: string }>(sql`
+  const run = async (db: Tx): Promise<TimeSeriesPoint[]> => {
+    const res = await db.execute<{ bucket: Date; n: string }>(sql`
       select date_trunc(${grain}, created_at) as bucket, count(*) as n
       from jobs
       where org_id = ${ctx.orgId}
@@ -229,5 +244,6 @@ export async function getJobsOverTime(
       counts.set(bucket.toISOString(), Number(row.n));
     }
     return buildCountSeries(filters.dateRange, grain, counts);
-  });
+  };
+  return tx ? run(tx) : withAuthorizedDb(ctx, run);
 }
