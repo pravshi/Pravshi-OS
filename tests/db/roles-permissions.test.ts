@@ -1428,9 +1428,9 @@ describe('authz.has()', () => {
     );
     const names = rows.map((r) => r.proname);
     // scope_for was on this list for Task 1.7 and arrived with Task 1.8, has_record_grant
-    // with Task 1.9, reports_to_me with Task 1.16. Shrinking is the only direction this list
-    // is allowed to move.
-    for (const deferred of ['is_project_member']) {
+    // with Task 1.9, reports_to_me with Task 1.16, and is_project_member with 0063 (with
+    // is_project_manager). Shrinking is the only direction this list is allowed to move.
+    for (const deferred of [] as string[]) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });

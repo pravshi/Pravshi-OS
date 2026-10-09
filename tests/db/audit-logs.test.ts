@@ -974,6 +974,10 @@ describe('the rest of the model is untouched', () => {
       `select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        where n.nspname='authz' order by proname`,
     );
+    // The literal list is the census as of this suite's migration; 0063 later
+    // added is_project_member and is_project_manager (the project_members
+    // policy fix), so the two names are pinned here as well — the census this
+    // test guards is "no helper appears without a migration accounting for it".
     expect(rows.map((r) => r.proname)).toEqual([
       'aal',
       'audit_two_factor_change',
@@ -987,6 +991,8 @@ describe('the rest of the model is untouched', () => {
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'is_project_manager',
+      'is_project_member',
       'login_person_active',
       'mfa_enrollment_required',
       'my_departments',

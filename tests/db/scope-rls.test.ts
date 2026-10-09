@@ -847,7 +847,7 @@ describe('the authorization model around these policies', () => {
     }
   });
 
-  it('adds two helpers and nothing else, and still has no is_project_member', async () => {
+  it('adds two helpers and nothing else', async () => {
     const { rows } = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        where n.nspname='authz' order by proname`,
@@ -855,7 +855,10 @@ describe('the authorization model around these policies', () => {
     const names = rows.map((r) => r.proname);
     expect(names).toContain('reports_to_me');
     expect(names).toContain('in_my_departments');
-    expect(names, 'PROJECT scope is Phase 4').not.toContain('is_project_member');
+    // This test once also pinned is_project_member's ABSENCE ('PROJECT scope
+    // is Phase 4'); 0063 created it (with is_project_manager) for the
+    // project_members policy fix, so the absence pin is retired — the count
+    // below, derived from the migration SQL, is the standing guard.
     // 0017 left 18; 0027 added the five lockout/MFA helpers (derived from the
     // migration SQL so the next migration does not red this).
     expect(names.length).toBe(authzHelperCountFromSql());
