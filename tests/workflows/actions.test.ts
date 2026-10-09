@@ -123,12 +123,26 @@ describe('resolveTemplates', () => {
 });
 
 describe('executeAction: registry guards (never throws)', () => {
-  it('rejects deferred (Phase 6+) actions with INVALID_REQUEST', async () => {
-    for (const type of ['send_notification', 'send_email', 'webhook', 'run_ai_action']) {
+  it('rejects still-deferred actions with INVALID_REQUEST', async () => {
+    // Phase 8 implemented send_notification/send_email — only webhook and
+    // run_ai_action remain deferred.
+    for (const type of ['webhook', 'run_ai_action']) {
       const result = await executeAction(fakeAuth, event, action(type, {}), context);
       expect(result.ok).toBe(false);
       expect(result.errorCode).toBe('INVALID_REQUEST');
       expect(result.errorMessage).toContain('not implemented in Phase 5');
+    }
+  });
+
+  it('no longer rejects the Phase-8 implemented notification actions as deferred', async () => {
+    // Invalid params fail schema validation (INVALID_REQUEST) instead of the
+    // deferred-action rejection — the guard lets them through to execution.
+    // (No DB is touched: schema validation fails before any enqueue.)
+    for (const type of ['send_notification', 'send_email']) {
+      const result = await executeAction(fakeAuth, event, action(type, {}), context);
+      expect(result.ok).toBe(false);
+      expect(result.errorCode).toBe('INVALID_REQUEST');
+      expect(result.errorMessage ?? '').not.toContain('not implemented in Phase 5');
     }
   });
 
@@ -261,7 +275,7 @@ describe('per-action param schemas (direct zod validation)', () => {
 });
 
 describe('action registry', () => {
-  it('documents exactly the 6 implemented Phase-5 actions', () => {
+  it('documents exactly the 8 implemented actions (6 Phase-5 + 2 Phase-8)', () => {
     const implemented = Object.entries(ACTION_REGISTRY)
       .filter(([, entry]) => entry.implemented)
       .map(([type]) => type)
@@ -272,15 +286,24 @@ describe('action registry', () => {
         'create_project',
         'create_task',
         'link_deal_project',
+        'send_email',
+        'send_notification',
         'update_deal',
         'update_task',
       ].sort(),
     );
   });
 
-  it('marks the 4 Phase-6 actions as not implemented', () => {
-    for (const type of ['send_notification', 'send_email', 'webhook', 'run_ai_action']) {
+  it('marks the 2 remaining deferred actions as not implemented', () => {
+    // Phase 8 implemented send_notification/send_email.
+    for (const type of ['webhook', 'run_ai_action']) {
       expect(ACTION_REGISTRY[type as keyof typeof ACTION_REGISTRY].implemented).toBe(false);
+    }
+  });
+
+  it('marks the Phase-8 notification actions as implemented', () => {
+    for (const type of ['send_notification', 'send_email']) {
+      expect(ACTION_REGISTRY[type as keyof typeof ACTION_REGISTRY].implemented).toBe(true);
     }
   });
 });

@@ -83,6 +83,22 @@ export function jobFail(code: string, message: string, extra?: Record<string, un
   throw err;
 }
 
+/**
+ * The SQLSTATE of a database error, following the repository convention
+ * (auth/bootstrap-setup.ts, authz/require-permission.ts): drizzle wraps the
+ * driver error, so the code may live on the error or on its `cause`. Reading
+ * only the outer error silently disables every SQLSTATE branch below — the
+ * Phase 8 DB verification proved the 23505 dedupe catch never fired against
+ * the real driver for exactly that reason.
+ */
+export function sqlstateOf(e: unknown): string | null {
+  for (const candidate of [e, (e as { cause?: unknown } | null)?.cause]) {
+    const code = (candidate as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+}
+
 /** Non-retryable: caller/config/data problem — retrying cannot help. */
 export function failConfig(message: string): never {
   jobFail('CONFIG_ERROR', message);
@@ -119,16 +135,50 @@ export interface NormalizedNotification {
   title: string;
   message: string;
   data: Record<string, unknown>;
+  /**
+   * Phase 8: notification event type, read from `data.type` (written by the
+   * Phase 8 notification service / workflow actions). Defaults to
+   * SYSTEM_ALERT — the same default migration 0052 uses when backfilling the
+   * new `type` column. Format-validated only; the enum contract is enforced
+   * at the service/API boundary, not on the worker plane.
+   */
+  type: string;
+  /**
+   * Phase 8: idempotency key, read from `data.eventId` (nullable) →
+   * the `event_id` column (migration 0052).
+   */
+  eventId: string | null;
+}
+
+/** data.type → column value: non-empty string ≤ 64 chars, else SYSTEM_ALERT. */
+function readNotificationType(data: Record<string, unknown>): string {
+  const raw = data['type'];
+  if (typeof raw !== 'string') return 'SYSTEM_ALERT';
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed.length > 64) return 'SYSTEM_ALERT';
+  return trimmed;
+}
+
+/** data.eventId → column value: string ≤ 256 chars, else null. */
+function readNotificationEventId(data: Record<string, unknown>): string | null {
+  const raw = data['eventId'];
+  if (typeof raw !== 'string' || raw === '' || raw.length > 256) return null;
+  return raw;
 }
 
 export function normalizeNotificationPayload(raw: unknown): NormalizedNotification {
   const parsed = NotificationPayloadSchema.safeParse(raw);
   if (parsed.success) {
-    return {
+    const base = {
       personId: parsed.data.personId ?? null,
       title: parsed.data.title,
       message: parsed.data.message,
       data: parsed.data.data ?? {},
+    };
+    return {
+      ...base,
+      type: readNotificationType(base.data),
+      eventId: readNotificationEventId(base.data),
     };
   }
   // Alias shape (task contract §6 payload).
@@ -137,11 +187,16 @@ export function normalizeNotificationPayload(raw: unknown): NormalizedNotificati
     const data: Record<string, unknown> = {};
     if (alias.data.entityType !== undefined) data.entityType = alias.data.entityType;
     if (alias.data.entityId !== undefined) data.entityId = alias.data.entityId;
-    return {
+    const base = {
       personId: alias.data.recipientPersonId ?? null,
       title: alias.data.title,
       message: alias.data.body,
       data,
+    };
+    return {
+      ...base,
+      type: readNotificationType(base.data),
+      eventId: readNotificationEventId(base.data),
     };
   }
   // Surface the canonical schema's issues (non-retryable via ZodError name).
@@ -154,16 +209,20 @@ async function assertPersonInOrg(
   orgId: string,
   personId: string,
 ): Promise<void> {
+  // The worker runs as the nil-UUID system actor, which is not a person row
+  // and therefore cannot see the recipient through people_select RLS. Ask the
+  // bounded SECURITY DEFINER check added by migration 0052 instead of reading
+  // public.people directly: it returns only whether this exact person is a
+  // non-deleted member of the job row's organization.
   const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-    tx.execute<{ id: string }>(
-      sql`select id from public.people
-          where id = ${personId}::uuid
-            and org_id = ${orgId}::uuid
-            and deleted_at is null
-          limit 1`,
+    tx.execute<{ recipient_exists: boolean }>(
+      sql`select public.notifications_recipient_exists(
+            ${orgId}::uuid,
+            ${personId}::uuid
+          ) as recipient_exists`,
     ),
   );
-  if (rows.rows.length === 0) {
+  if (rows.rows[0]?.recipient_exists !== true) {
     failNotFound(`notification recipient ${personId} is not an active person in org ${orgId}`);
   }
 }
@@ -188,34 +247,75 @@ export const handleNotification: JobHandler = async (ctx: JobExecutionContext) =
     // notifications_insert() privilege path — the jobs_claim_next() pattern.
     // org_id comes from the job row; the recipient was verified in-org above
     // (and re-verified by the person_org guard trigger in SQL).
-    await withAuthorizedDb(ctx.auth.ctx, (tx) =>
-      tx.execute(
-        sql`select public.notifications_insert(
-               ${orgId}::uuid,
-               ${n.personId}::uuid,
-               ${n.title},
-               ${n.message},
-               ${JSON.stringify(n.data)}::jsonb
-             )`,
-      ),
-    );
+    //
+    // Phase 8: the extended signature carries the type/event_id columns
+    // (migration 0052, Workstream A):
+    //   notifications_insert(p_org_id, p_person_id, p_title, p_message,
+    //                        p_data, p_type default 'SYSTEM_ALERT',
+    //                        p_event_id default null)
+    // When 0052 is not applied yet, 42883 falls back to the Phase-6 5-arg
+    // insert so the notification is still delivered (the 0052 function keeps
+    // the 5-arg call shape working via defaults once applied).
+    try {
+      await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+        tx.execute(
+          sql`select public.notifications_insert(
+                 ${orgId}::uuid,
+                 ${n.personId}::uuid,
+                 ${n.title},
+                 ${n.message},
+                 ${JSON.stringify(n.data)}::jsonb,
+                 ${n.type},
+                 ${n.eventId}
+               )`,
+        ),
+      );
+    } catch (extendedErr) {
+      if (sqlstateOf(extendedErr) !== '42883') throw extendedErr;
+      console.warn(
+        `[jobs] extended notifications_insert() unavailable job=${ctx.job.id} ` +
+          '— falling back to the 5-argument signature (type/event_id defaulted)',
+      );
+      await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+        tx.execute(
+          sql`select public.notifications_insert(
+                 ${orgId}::uuid,
+                 ${n.personId}::uuid,
+                 ${n.title},
+                 ${n.message},
+                 ${JSON.stringify(n.data)}::jsonb
+               )`,
+        ),
+      );
+    }
   } catch (err) {
     // 42P01 = undefined_table, 42883 = undefined_function: migration 0047
     // has not been applied yet (see module header). Fail closed and loud —
     // non-retryable.
-    const code = (err as { code?: unknown }).code;
+    const code = sqlstateOf(err);
     if (code === '42P01' || code === '42883') {
       failConfig(
         'NOTIFICATIONS_TABLE_MISSING: public.notifications / notifications_insert() ' +
           'do not exist; apply migration 0047_notifications. Notification NOT written.',
       );
     }
+    // 23505: the (org_id, event_id) unique partial index fired (migration
+    // 0052) — a redelivered event was already written by an earlier
+    // attempt. The DB already deduped the row; the job must not crash or
+    // retry on duplicates. Success-as-no-op.
+    if (code === '23505') {
+      console.info(
+        `[jobs] notification duplicate job=${ctx.job.id} event_id=${n.eventId} ` +
+          '— already delivered, no-op (unique index deduped)',
+      );
+      return;
+    }
     throw err;
   }
 
   console.info(
     `[jobs] notification written job=${ctx.job.id} org=${orgId} ` +
-      `recipient=${n.personId ?? 'org-broadcast'} title_len=${n.title.length}`,
+      `recipient=${n.personId ?? 'org-broadcast'} type=${n.type} title_len=${n.title.length}`,
   );
 };
 

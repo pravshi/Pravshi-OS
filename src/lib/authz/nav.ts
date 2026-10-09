@@ -30,6 +30,7 @@ const NAV_PERMISSIONS = [
   'workflows.view', // Phase 5 (Workflow Engine): Automations sidebar section / /workflows
   'jobs.view', // Phase 6 (Automation & Background Jobs): Automations sidebar section / /jobs
   'reports.view', // Phase 7 (Analytics & Dashboards): Analytics sidebar section / /analytics/*
+  'notifications.view', // Phase 8 (Search & Notifications): Notifications sidebar entry / /notifications
 ] as const;
 
 export type NavPermission = (typeof NAV_PERMISSIONS)[number];

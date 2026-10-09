@@ -4,6 +4,10 @@ import { TaskPrioritySchema, TaskStatusSchema } from '../work/schema';
 // jobs/cron.ts is a pure module (no imports), so this cannot create an
 // import cycle with the workflow engine graph.
 import { CRON_REGEX, isValidCron, isValidTimezone } from '../jobs/cron';
+// Phase 8: NOTIFICATION_EVENT_TYPES for the send_notification action params.
+// notifications/types.ts imports only zod, so this cannot create an import
+// cycle with the workflow engine graph.
+import { NOTIFICATION_EVENT_TYPES } from '../notifications/types';
 
 /**
  * Workflow definition input validation (Phase 5). Every untrusted value — REST
@@ -389,9 +393,17 @@ export const IMPLEMENTED_ACTION_TYPES = [
 export type ImplementedActionType = (typeof IMPLEMENTED_ACTION_TYPES)[number];
 
 /**
- * Phase 6+ action contracts (audit §12 registry). They exist as registry
- * entries with implemented:false — the engine rejects them with a clear
- * error if forced, and this schema rejects them at save time.
+ * Phase 6+ action contracts (audit §12 registry). Deferred entries are
+ * contracts for later phases, not validatable for execution — the engine
+ * rejects them with a clear error if forced, and the save-time schema below
+ * rejects the STILL-deferred ones.
+ *
+ * Phase 8 (Workstream F): send_notification and send_email are IMPLEMENTED at
+ * runtime and accepted by the save-time ActionConfigSchema below. They remain
+ * in this list (not in IMPLEMENTED_ACTION_TYPES) for UI-label compatibility:
+ * src/app/(app)/workflows/_components/schemas.ts builds
+ * Record<(typeof DEFERRED_ACTION_TYPES)[number], string> label maps, so
+ * membership here must stay stable.
  *
  * Nit-3: 'scheduled' used to sit in this list, but it is a *trigger* type
  * (DEFERRED_TRIGGER_TYPES), not an action — it never belonged here and is
@@ -499,10 +511,55 @@ const LinkDealProjectActionSchema = z.strictObject({
   key: actionKey,
 });
 
+// ── Phase 8: send_notification / send_email save-time params ──────────────────
+// Save-time contracts, mirroring the executor params in
+// src/lib/workflows/actions.ts. Defined HERE (not imported from actions.ts)
+// because actions.ts imports this module — the reverse direction would be an
+// import cycle. (Follow-up for the action owner: re-export these from
+// actions.ts so the two copies cannot drift.)
+export const SendNotificationParamsSchema = z.strictObject({
+  recipientPersonId: templateOr(uuid),
+  title: z.string().trim().min(1, 'title is required').max(200),
+  body: z.string().trim().min(1, 'body is required').max(2000),
+  /** Defaults to SYSTEM_ALERT: workflow-authored content has no domain type of its own. */
+  eventType: z.enum(NOTIFICATION_EVENT_TYPES).optional(),
+  entityType: z.string().trim().min(1).max(128).optional(),
+  entityId: z.string().trim().min(1).max(256).optional(),
+  link: z.string().trim().min(1).max(2048).optional(),
+});
+export type SendNotificationParams = z.infer<typeof SendNotificationParamsSchema>;
+
+export const SendEmailParamsSchema = z.strictObject({
+  to: z.union([
+    templateOr(z.string().email()),
+    z.array(templateOr(z.string().email())).min(1).max(50),
+  ]),
+  subject: z.string().trim().min(1, 'subject is required').max(300),
+  body: z.string().trim().min(1, 'body is required').max(200_000),
+  bodyHtml: z.string().trim().min(1).max(500_000).optional(),
+});
+export type SendEmailParams = z.infer<typeof SendEmailParamsSchema>;
+
+const SendNotificationActionSchema = z.strictObject({
+  type: z.literal('send_notification'),
+  params: SendNotificationParamsSchema,
+  key: actionKey,
+});
+const SendEmailActionSchema = z.strictObject({
+  type: z.literal('send_email'),
+  params: SendEmailParamsSchema,
+  key: actionKey,
+});
+
 /** Deferred action types match their registry shape but are rejected with a
- *  clear message — they are contracts for Phase 6+, not validatable for
- *  Phase-5 execution (D6). */
-const deferredActionSchemas = DEFERRED_ACTION_TYPES.map((deferredType) =>
+ *  clear message — they are contracts for a later phase, not validatable for
+ *  execution. Phase 8: send_notification / send_email are implemented (real
+ *  schemas above), so only webhook and run_ai_action remain in the rejection
+ *  path. */
+const STILL_DEFERRED_ACTION_TYPES = ['webhook', 'run_ai_action'] as const satisfies Readonly<
+  DeferredActionType[]
+>;
+const deferredActionSchemas = STILL_DEFERRED_ACTION_TYPES.map((deferredType) =>
   z
     .strictObject({
       type: z.literal(deferredType),
@@ -510,16 +567,18 @@ const deferredActionSchemas = DEFERRED_ACTION_TYPES.map((deferredType) =>
       key: actionKey,
     })
     .refine(() => false, {
-      message: `action type '${deferredType}' is registry-documented only (deferred to Phase 6+); it cannot be used in a Phase 5 workflow`,
+      message: `action type '${deferredType}' is registry-documented only (deferred to a later phase); it cannot be used in a workflow`,
     }),
 );
 
 /**
  * Discriminated union on `type` → the correct per-action params schema.
- * Deferred types are rejected with a clear message; unknown types fail the
- * union. Note: template strings inside params are validated for syntax here;
- * resolvability against the execution context is an engine concern (§12) and
- * surfaces as a FAILED step with INVALID_REQUEST, not a save-time error.
+ * Phase 8 adds send_notification / send_email as fully validatable actions
+ * (implementations landed in the engine). Truly-deferred types are rejected
+ * with a clear message; unknown types fail the union. Note: template strings
+ * inside params are validated for syntax here; resolvability against the
+ * execution context is an engine concern (§12) and surfaces as a FAILED step
+ * with INVALID_REQUEST, not a save-time error.
  */
 export const ActionConfigSchema = z.union([
   z.discriminatedUnion('type', [
@@ -529,6 +588,8 @@ export const ActionConfigSchema = z.union([
     UpdateTaskActionSchema,
     AssignTaskActionSchema,
     LinkDealProjectActionSchema,
+    SendNotificationActionSchema,
+    SendEmailActionSchema,
   ]),
   ...deferredActionSchemas,
 ]);

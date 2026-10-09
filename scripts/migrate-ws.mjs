@@ -87,6 +87,13 @@ async function main() {
   if (!url) throw new Error('DATABASE_URL_MIGRATE is required');
   const sql = neon(url);
 
+  // drizzle-kit creates the journal schema/table on first use; do the same so
+  // this runner also works against a database no migrator has ever touched.
+  await sql.query('create schema if not exists drizzle');
+  await sql.query(
+    'create table if not exists drizzle.__drizzle_migrations (id serial primary key, hash text not null, created_at bigint)',
+  );
+
   const journal = JSON.parse(
     fs.readFileSync(path.join(root, 'drizzle/meta/_journal.json'), 'utf8'),
   );

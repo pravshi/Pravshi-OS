@@ -13,6 +13,12 @@ vi.mock('../../src/lib/jobs/worker', () => ({
   registerHandler: vi.fn(),
 }));
 
+// Phase 8 integration (Workstream G): pin the duplicate-redelivery contract.
+// withAuthorizedDb is mocked so no real database is touched.
+vi.mock('../../src/lib/db/authorized', () => ({
+  withAuthorizedDb: vi.fn(),
+}));
+
 import type { JobExecutionContext } from '../../src/lib/jobs/worker';
 import {
   assertValidEmailAddress,
@@ -30,6 +36,7 @@ import {
 import { classifyError } from '../../src/lib/jobs/retry';
 import { env } from '../../src/env';
 import type { Job } from '../../src/lib/jobs/types';
+import { withAuthorizedDb } from '../../src/lib/db/authorized';
 
 const ORG_ID = '11111111-1111-4111-8111-111111111111';
 const PERSON_ID = '22222222-2222-4222-8222-222222222222';
@@ -97,6 +104,9 @@ describe('normalizeNotificationPayload', () => {
       title: 'Deal moved',
       message: 'Acme deal moved to Negotiation',
       data: { dealId: 'x' },
+      // Phase 8: event type / idempotency key folded out of data.
+      type: 'SYSTEM_ALERT',
+      eventId: null,
     });
   });
 
@@ -113,6 +123,9 @@ describe('normalizeNotificationPayload', () => {
       title: 'Hi',
       message: 'Hello there',
       data: { entityType: 'deal', entityId: 'deal-1' },
+      // Phase 8: event type / idempotency key folded out of data.
+      type: 'SYSTEM_ALERT',
+      eventId: null,
     });
   });
 
@@ -387,5 +400,62 @@ describe('handleCleanup validation', () => {
   it('throws non-retryable on unknown target without touching the DB', async () => {
     const ctx = makeCtx(makeJob({ type: 'cleanup', payload: { target: 'nuke' } }));
     await expectNonRetryable(() => handleCleanup(ctx));
+  });
+});
+
+describe('handleNotification duplicate dedupe (Phase 8, 0052)', () => {
+  const dbMock = vi.mocked(withAuthorizedDb);
+
+  beforeEach(() => {
+    dbMock.mockReset();
+  });
+
+  it('treats a 23505 from the (org_id, event_id) unique index as success-no-op', async () => {
+    // A redelivered event: the earlier attempt already wrote the row, so the
+    // (org_id, event_id) unique partial index raises 23505. The DB has
+    // already deduped; the job must resolve (no crash, no retry) rather
+    // than failing.
+    const dbErr = Object.assign(new Error('duplicate key value violates unique constraint'), {
+      code: '23505',
+    });
+    dbMock.mockImplementation(async (_ctx, fn) => {
+      await fn({
+        execute: async () => {
+          throw dbErr;
+        },
+      } as never);
+      return undefined as never;
+    });
+    const ctx = makeCtx(
+      makeJob({
+        type: 'notification',
+        payload: {
+          title: 'Task assigned',
+          message: 'You got a task',
+          data: { eventId: 'evt-123' },
+        },
+      }),
+    );
+    await expect(handleNotification(ctx)).resolves.toBeUndefined();
+    expect(dbMock).toHaveBeenCalled();
+  });
+
+  it('still throws on non-23505 database errors', async () => {
+    const dbErr = Object.assign(new Error('connection reset'), { code: '08006' });
+    dbMock.mockImplementation(async (_ctx, fn) => {
+      await fn({
+        execute: async () => {
+          throw dbErr;
+        },
+      } as never);
+      return undefined as never;
+    });
+    const ctx = makeCtx(
+      makeJob({
+        type: 'notification',
+        payload: { title: 'Task assigned', message: 'You got a task' },
+      }),
+    );
+    await expect(handleNotification(ctx)).rejects.toThrow('connection reset');
   });
 });
