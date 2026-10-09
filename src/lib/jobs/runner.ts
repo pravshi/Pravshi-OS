@@ -20,9 +20,11 @@
  *   APP_URL             public app URL
  *   NODE_ENV            development | test | production
  *   BETTER_AUTH_SECRET  >= 32 chars (session signing)
- *   HEALTH_CHECK_TOKEN  >= 32 chars
  *
  * Optional:
+ *   HEALTH_CHECK_TOKEN  >= 32 chars when set. Optional in src/env.ts: unset
+ *                       means /health/db denies everyone (fail-closed). The
+ *                       worker's liveness does not depend on it.
  *   SCHEDULER_TICK_MS   scheduler tick interval in ms (default 60000)
  *   HOSTNAME            used in the worker id; falls back to os.hostname()
  *

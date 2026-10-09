@@ -6,31 +6,32 @@ the application layer.
 
 **Internal use only. No public signup exists.**
 
-## Status: Phase 0 (foundation), partially complete
+## Status: V1 — implementation complete, deployment pending founder gates
 
-Phase 0 ships nothing user-facing. It builds the guarantees every later phase depends on:
-one authorized path to Postgres, row-level security the runtime role cannot bypass, a CI
-pipeline that proves those properties on every pull request, and the documentation you are
-reading.
+All thirteen build phases are implemented, reviewed and merged to `main`: the Phase 0
+foundation (one authorized path to Postgres, row-level security the runtime role cannot
+bypass, a CI pipeline that proves those properties on every pull request), CRM, sales
+pipelines, work management, the workflow engine, automation and background jobs,
+analytics, search and notifications, the AI foundation, the integrations platform,
+security hardening, and performance/reliability hardening.
 
-| Area                              | Status                                            |
-| --------------------------------- | ------------------------------------------------- |
-| Repository, tooling, test harness | Done                                              |
-| Neon database, roles, RLS proof   | Done — `production` and `staging` branches exist  |
-| `withAuthorizedDb()` data path    | Done                                              |
-| Health endpoints                  | Done                                              |
-| Design system and app shell       | Done                                              |
-| GitHub org, teams, CODEOWNERS     | Done, within GitHub Free limits                   |
-| CI pipeline + security guards     | Done — green on every PR                          |
-| Storage object-key format         | Done                                              |
-| Documentation                     | This set                                          |
-| **Vercel deployment and DNS**     | **Deferred by founder decision — not configured** |
-| **Cloudflare R2 buckets**         | **Deferred — no buckets exist**                   |
-| **Sentry**                        | **Not configured — no DSN issued**                |
+| Area                                  | Status                                             |
+| ------------------------------------- | -------------------------------------------------- |
+| Product surface (Phases 1–10)         | Done — merged, CI green                            |
+| Security hardening (Phase 11)         | Done — migration 0061, catalogue at 127            |
+| Performance & reliability (Phase 12)  | Done — migration 0062                              |
+| Production readiness (Phase 13)       | Docs, runbooks and release identity in this change |
+| **Vercel deployment and DNS**         | **Not performed — founder gates HG-1, HG-5**       |
+| **Production migrations (0045–0062)** | **Not applied — founder gate HG-2**                |
+| **First SUPER_ADMIN bootstrap**       | **Not performed — founder gate HG-9**              |
+| **Cloudflare R2 buckets**             | **Deferred — no buckets exist; out of V1 scope**   |
+| **Sentry**                            | **Not configured — no DSN issued (gate HG-6)**     |
 
-Nothing is deployed. `os.pravshi.com` does not resolve, no Vercel project exists, and no
-migration has been applied to the production database. See [DEPLOYMENT.md](DEPLOYMENT.md)
-for the procedure that will be followed when deployment happens.
+Nothing is deployed. `os.pravshi.com` does not resolve and no Vercel project exists.
+Deployment is a founder-approved act, not an engineering default: the operative gate list
+is [docs/runbooks/release-checklist.md](docs/runbooks/release-checklist.md), the procedure
+is [DEPLOYMENT.md](DEPLOYMENT.md), and the production migration has its own runbook,
+[docs/runbooks/production-migration.md](docs/runbooks/production-migration.md).
 
 ## Prerequisites
 
@@ -47,8 +48,9 @@ cp .env.example .env      # then fill in the values — see ENVIRONMENT.md
 pnpm dev
 ```
 
-Open http://localhost:3000. The Phase 0 placeholder renders the application shell; there is
-no feature behind it yet.
+Open http://localhost:3000 and sign in. On a fresh database with no users yet, the one-time
+bootstrap creates the first SUPER_ADMIN — see [DEPLOYMENT.md](DEPLOYMENT.md) §7 and
+[scripts/bootstrap/README.md](scripts/bootstrap/README.md).
 
 ## Documentation
 

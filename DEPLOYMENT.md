@@ -1,23 +1,30 @@
 # Deployment
 
-## Nothing is deployed yet
+## Current state: V1 built, nothing deployed yet
 
-**This document describes a future procedure, not the current state.** As of Phase 0:
+**The application is complete; the deployment has not happened.** All thirteen build phases
+are implemented and merged to `main`, and this procedure is written and ready to execute.
+What remains is a set of founder decisions and operator acts — the human gates HG-1…HG-9
+in [docs/runbooks/release-checklist.md](docs/runbooks/release-checklist.md). No agent
+performs those steps; this document prepares them.
+
+As of the V1 release:
 
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
-- **No migration has been applied to the `production` Neon branch.** Migrations have run only
-  on ephemeral CI branches, which are destroyed at the end of each run.
-- **No Cloudflare R2 bucket exists**, and no R2 API token has been issued.
-- **Sentry is not configured** and no DSN has been issued.
+- **The production database is behind the code.** The repository journal runs to migration
+  0062; project records indicate the `production` Neon branch stopped at 0044 (October
+  2026), but the exact journal state is recorded nowhere and must be verified read-only
+  before anything is applied — that is step 0 of the
+  [production migration runbook](docs/runbooks/production-migration.md). Migrations have
+  otherwise run only in CI, against an ephemeral Postgres container created per run.
+- **No Cloudflare R2 bucket exists**, and no R2 API token has been issued. The `R2_*`
+  variables are placeholders for deferred storage work — do not provision them for V1.
+- **Sentry is not configured** and no DSN has been issued (gate HG-6).
 
-Production deployment was **deferred by founder decision**: the application will be built and
-validated locally first, then deployed as a separate readiness phase. Nothing in the
-architecture was changed to compensate for that deferral.
-
-What _is_ real today: the repository, the CI pipeline, the Neon `production` and `staging`
-branches with their roles and RLS, and the `vercel.json` configuration that a future
-deployment will consume.
+What _is_ real today: the repository, the CI pipeline (green on `main`), the Neon
+`production` and `staging` branches with their roles and RLS, and the `vercel.json`
+configuration that a future deployment will consume.
 
 ## What already exists
 
@@ -67,19 +74,39 @@ production branch. Confirm the region resolves to `sin1` from `vercel.json`.
 
 ### 2. Set environment variables per environment
 
-| Vercel environment | Variable             | Value                                   |
-| ------------------ | -------------------- | --------------------------------------- |
-| Production         | `DATABASE_URL`       | `production` branch, `app_user`, pooled |
-| Production         | `APP_URL`            | `https://os.pravshi.com`                |
-| Production         | `HEALTH_CHECK_TOKEN` | 32+ chars, generated fresh              |
-| Preview            | `DATABASE_URL`       | `staging` branch, `app_user`, pooled    |
-| Preview            | `APP_URL`            | the preview URL                         |
-| Preview            | `HEALTH_CHECK_TOKEN` | a different value from production       |
+This table is the production inventory from `src/env.ts` — the enforcing source. If this
+table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is the bug.
 
-**Never add to Vercel:** `DATABASE_URL_MIGRATE`, `DATABASE_URL_BOOTSTRAP`, `NEON_OWNER_URL`,
-`APP_OWNER_PASSWORD`, `APP_USER_PASSWORD`, `APP_ADMIN_PASSWORD`, `NEON_API_KEY`, or any
-`BOOTSTRAP_*` setting. See
-[ENVIRONMENT.md](ENVIRONMENT.md) for why the migration credential in particular is fatal.
+| Variable                                                                                   | Required in prod                                   | Secret   | If unset/mis-set in production                                                             |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                                                                             | **Yes** (`production` branch, `app_user`, pooled)  | Yes      | Boot failure (schema/refine)                                                               |
+| `APP_URL`                                                                                  | **Yes** (`https://os.pravshi.com`)                 | No       | Boot failure; links/inbound URLs wrong                                                     |
+| `NODE_ENV`                                                                                 | **Yes** (`production`, platform-set)               | No       | Boot refusal logic disarmed                                                                |
+| `BETTER_AUTH_SECRET`                                                                       | **Yes** (≥32 chars, fresh for prod)                | Yes      | Boot failure — sessions impossible                                                         |
+| `HEALTH_CHECK_TOKEN`                                                                       | Operationally yes (≥32, per-env distinct)          | Yes      | `/health/db` denies everyone (fail-closed; the smoke pack's DB check is impossible)        |
+| `SENTRY_DSN`                                                                               | Operationally yes (HG-6)                           | No       | Error reporting silently disabled                                                          |
+| `NEXT_PUBLIC_SENTRY_DSN`                                                                   | With HG-6 (browser reporting)                      | No       | No browser error capture                                                                   |
+| `SENTRY_AUTH_TOKEN`                                                                        | Build-time only, optional                          | Yes      | No source-map upload (symbols unreadable). Not currently wired — deferred production setup |
+| `RESEND_API_KEY`                                                                           | Operationally yes                                  | Yes      | Invitation/reset mail not sent; endpoint falls back to returning tokens to admins          |
+| `EMAIL_FROM`                                                                               | With `RESEND_API_KEY` (verified domain)            | No       | Same as above                                                                              |
+| `EMAIL_PROVIDER` + `EMAIL_PROVIDER_API_KEY`                                                | For job email (the Phase 10 path)                  | Key: yes | Email jobs dead-letter by design (`EMAIL_PROVIDER_UNCONFIGURED`, non-retryable)            |
+| `INTEGRATIONS_ENCRYPTION_KEY`                                                              | For Tier V integrations (base64, exactly 32 bytes) | Yes      | Vault credentials NOT_CONFIGURED (typed, UI-honest)                                        |
+| `AI_PROVIDER`/`AI_MODEL`/`AI_API_KEY`/`AI_BASE_URL`/`AI_TIMEOUT_MS`/`AI_MAX_OUTPUT_TOKENS` | No (the mock is the honest default)                | Key: yes | AI runs on the deterministic mock — a _product_ decision for go-live, not a defect         |
+| `WEBHOOK_SIGNING_SECRET_<REF>`                                                             | Per configured delivery ref                        | Yes      | That delivery refuses to send (by design)                                                  |
+| `SCHEDULER_TICK_MS`                                                                        | Worker only, optional (default 60000)              | No       | Default applies                                                                            |
+| `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live       | No       | If set without a worker: workflow dispatches queue unexecuted                              |
+| `R2_*`                                                                                     | **Must not be provisioned for V1**                 | —        | No R2 buckets exist; the variables are placeholders for deferred storage work              |
+
+**Preview** holds the same runtime set, with `DATABASE_URL` naming the `staging` branch
+(`app_user`, pooled) and a `HEALTH_CHECK_TOKEN` distinct from production's.
+
+**Must be absent from every Vercel environment:** `DATABASE_URL_MIGRATE`,
+`DATABASE_URL_BOOTSTRAP`, every `BOOTSTRAP_*` setting, `NEON_API_KEY`, `NEON_OWNER_URL`,
+`APP_OWNER_PASSWORD`, `APP_USER_PASSWORD`, `APP_ADMIN_PASSWORD`. This is enforced, not
+just policy: in production the application **refuses to boot** if `DATABASE_URL_MIGRATE`
+or `DATABASE_URL_BOOTSTRAP` is present (`src/env.ts`, skipped only during `next build`).
+See [ENVIRONMENT.md](ENVIRONMENT.md) for why the migration credential in particular is
+fatal.
 
 Then verify the owner credential is genuinely absent rather than assumed absent, by listing
 the environment and confirming no `DATABASE_URL_MIGRATE` entry exists.
@@ -115,15 +142,24 @@ is token-gated. Point uptime monitors at `/health`, which is public and touches 
 
 ### 6. Migrations
 
-Migrations are **never run by the Vercel runtime**. They run from CI or a developer machine,
-as `app_owner` against the direct endpoint. The deployed application holds only `app_user`
+Migrations are **never run by the Vercel runtime**. They run from an operator machine, as
+`app_owner` against the direct endpoint. The deployed application holds only `app_user`
 and could not run one even if asked.
+
+Applying the pending chain to production is its own gated procedure — **do not improvise
+it from this page.** Follow
+[docs/runbooks/production-migration.md](docs/runbooks/production-migration.md): verify the
+current production journal state read-only, freeze and snapshot, rehearse the full chain
+on the snapshot branch, then apply and verify. Migrations are forward-fix only — no
+down-migrations exist in this repository. Executing the runbook requires founder approval
+(gate HG-2).
 
 ### 7. Bootstrap the first SUPER_ADMIN — once
 
-**Unperformed, and blocked on frontend work:** the `/setup` page that completes the one-time
-link does not exist yet. Do not bootstrap production until it does, because the link expires
-60 minutes after it is printed and cannot be re-issued.
+**Unperformed (gate HG-9).** The `/setup` page that completes the one-time link exists
+(`src/app/setup/`) — what remains is the operator act, with a human at the keyboard: the
+link expires 60 minutes after it is printed and cannot be re-issued, so the bootstrap is
+run only when that human is ready to complete it immediately.
 
 From the operator's machine, never from CI or Vercel, following
 [scripts/bootstrap/README.md](scripts/bootstrap/README.md):
@@ -151,8 +187,9 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   the database).
 - **Environment:** parity with the web app. Required — validated at boot, and the process
   refuses to start without them: `DATABASE_URL` (the **pooled** endpoint; the host
-  contains `-pooler.`), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`, `HEALTH_CHECK_TOKEN`.
-  Because the worker executes the email, webhook and AI handlers, it also needs the web
+  contains `-pooler.`), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`. (`HEALTH_CHECK_TOKEN`
+  is optional in `src/env.ts` — unset means `/health/db` denies everyone; set it on the
+  web app, and the worker does not depend on it.) Because the worker executes the email, webhook and AI handlers, it also needs the web
   app's integration and AI variables (`INTEGRATIONS_ENCRYPTION_KEY`, the email provider
   key, `AI_*`) wherever those features are configured. Optional: `SCHEDULER_TICK_MS`
   (scheduler tick interval, default 60000) and `HOSTNAME` (part of the worker id). The
