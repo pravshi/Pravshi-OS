@@ -231,6 +231,20 @@ describe('0063 catalogue', () => {
     expect(dir.rows[0]!.provolatile).toBe('s');
   });
 
+  it('grants app_user DELETE on project_members — the privilege the delete policy presupposes', async () => {
+    // roles.sql gives app_user select/insert/update on all tables and DELETE
+    // on none (0060 precedent: DELETE is granted per-table, only where the
+    // service hard-deletes). 0042's design is a manager-gated HARD delete and
+    // removeProjectMember raw-deletes as app_user, so without this grant
+    // every delete dies with 42501 "permission denied for table
+    // project_members" before the (rewritten) policy is ever evaluated —
+    // the failure mode PR #72 round 1 surfaced in the manager-arm tests.
+    const { rows } = await owner.query<{ has_delete: boolean }>(
+      `select has_table_privilege('app_user', 'public.project_members', 'DELETE') as has_delete`,
+    );
+    expect(rows[0]!.has_delete).toBe(true);
+  });
+
   it('rewrites the four policies onto the helpers, with no self-scan left', async () => {
     const { rows } = await owner.query<{ policyname: string; qual: string; with_check: string }>(
       `select policyname, coalesce(qual, '') as qual, coalesce(with_check, '') as with_check
@@ -277,31 +291,31 @@ describe('actor capability preconditions', () => {
   it('pins each actor\u2019s effective grants through the helpers themselves', async () => {
     // vera: the key arm, and deliberately NO people.view (the roster's display
     // fields must come from the directory, not from her people access).
-    expect((await probe(vera.personId, orgA, `authz.has('projects.view') v`))[0]!.v).toBe(true);
-    expect((await probe(vera.personId, orgA, `authz.has('people.view') v`))[0]!.v).toBe(false);
+    expect((await probe(vera.personId, orgA, `authz.has('projects.view')`))[0]!.v).toBe(true);
+    expect((await probe(vera.personId, orgA, `authz.has('people.view')`))[0]!.v).toBe(false);
     // mem: no keys at all; membership is the whole of his access.
-    expect((await probe(mem.personId, orgA, `authz.has('projects.view') v`))[0]!.v).toBe(false);
+    expect((await probe(mem.personId, orgA, `authz.has('projects.view')`))[0]!.v).toBe(false);
     expect(
-      (await probe(mem.personId, orgA, `authz.is_project_member('${projectP}'::uuid) v`))[0]!.v,
+      (await probe(mem.personId, orgA, `authz.is_project_member('${projectP}'::uuid)`))[0]!.v,
     ).toBe(true);
     expect(
-      (await probe(mem.personId, orgA, `authz.is_project_manager('${projectP}'::uuid) v`))[0]!.v,
+      (await probe(mem.personId, orgA, `authz.is_project_manager('${projectP}'::uuid)`))[0]!.v,
     ).toBe(false);
     // mgr: project-level manager, no global manage_members key.
-    expect((await probe(mgr, orgA, `authz.has('projects.manage_members') v`))[0]!.v).toBe(false);
-    expect((await probe(mgr, orgA, `authz.is_project_manager('${projectP}'::uuid) v`))[0]!.v).toBe(
+    expect((await probe(mgr, orgA, `authz.has('projects.manage_members')`))[0]!.v).toBe(false);
+    expect((await probe(mgr, orgA, `authz.is_project_manager('${projectP}'::uuid)`))[0]!.v).toBe(
       true,
     );
     // selfy: projects.view GLOBAL, people.view SELF (the Finding-2 setup).
-    expect((await probe(selfy.personId, orgA, `authz.has('projects.view') v`))[0]!.v).toBe(true);
-    expect(
-      (await probe(selfy.personId, orgA, `authz.scope_for('people.view')::text v`))[0]!.v,
-    ).toBe('SELF');
+    expect((await probe(selfy.personId, orgA, `authz.has('projects.view')`))[0]!.v).toBe(true);
+    expect((await probe(selfy.personId, orgA, `authz.scope_for('people.view')::text`))[0]!.v).toBe(
+      'SELF',
+    );
     // admin + bob hold exactly the keys their tests rely on.
-    expect(
-      (await probe(admin.personId, orgA, `authz.has('projects.manage_members') v`))[0]!.v,
-    ).toBe(true);
-    expect((await probe(bob.personId, orgB, `authz.has('projects.view') v`))[0]!.v).toBe(true);
+    expect((await probe(admin.personId, orgA, `authz.has('projects.manage_members')`))[0]!.v).toBe(
+      true,
+    );
+    expect((await probe(bob.personId, orgB, `authz.has('projects.view')`))[0]!.v).toBe(true);
   });
 });
 

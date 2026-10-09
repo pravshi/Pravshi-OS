@@ -17,7 +17,7 @@
 -- yet — was never created once the table landed in 0042; the policies inlined
 -- the self-scan instead.
 --
--- THE FIX, in three parts, with NO widening of access:
+-- THE FIX, in four parts, with NO widening of access:
 --   1. authz.is_project_member(uuid) / authz.is_project_manager(uuid) — the
 --      deferred helpers, SECURITY DEFINER in the 0003 idiom: the membership
 --      probe runs as app_owner (project_members_owner_all), so it never
@@ -36,6 +36,16 @@
 --      members ONLY after re-checking the caller's read access to the
 --      project itself (see its comment); a caller without project read
 --      access gets zero rows, never an error and never a name.
+--   4. The DELETE table privilege on project_members for app_user. The
+--      policy rewrite alone cannot make a delete work: roles.sql grants
+--      app_user select/insert/update on all tables and DELETE on none
+--      (DELETE is granted per-table, only where a service hard-deletes —
+--      the 0060 precedent). 0042's design is a manager-gated HARD delete
+--      behind the delete policy, and the service removes members with a
+--      raw DELETE as app_user, so without the grant every delete died
+--      with 42501 "permission denied for table project_members" before
+--      the policy was ever evaluated. The grant exposes nothing the
+--      policy does not already gate: RLS still decides row by row.
 --
 -- PROJECT scope wiring is deliberately NOT part of this migration:
 -- authz.scope_for() and the scope consumers keep answering exactly what they
@@ -224,3 +234,18 @@ create policy project_members_delete on public.project_members
       or (select authz.is_project_manager(project_members.project_id))
     )
   );
+--> statement-breakpoint
+-- ═════════════════════════════════════════════════════════════════════════════
+-- PART 4 — the DELETE table privilege the delete policy presupposes
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- A policy can only gate rows for a role that holds the table privilege in
+-- the first place. app_user holds DELETE on no table by default (roles.sql
+-- grants select/insert/update; 0060 granted DELETE per-table for the same
+-- reason), so every app_user DELETE on project_members — the manager arm
+-- above, and removeProjectMember's raw delete in the service — failed with
+-- 42501 "permission denied for table project_members" regardless of the
+-- policy. Grant exactly that one privilege on exactly this table; the
+-- rewritten delete policy remains the only row-level gate.
+
+grant delete on public.project_members to app_user;
