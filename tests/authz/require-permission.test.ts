@@ -668,8 +668,13 @@ describe('the rest of the authorization model is unchanged', () => {
     // and notifications), and the Phase 8 migration (0052) adds three more
     // (select/insert/update on notification_preferences), and the Phase 9
     // migration (0054) adds six more (select/insert/update on each of
-    // ai_usage_requests and ai_org_limits).
-    expect(policies.rows[0]!.n).toBe(89);
+    // ai_usage_requests and ai_org_limits), and the Phase 10 migration
+    // (0056) adds sixteen more (select/insert/update/delete on each of
+    // integration_connections and integration_webhook_subscriptions,
+    // select/insert on integration_webhook_deliveries, select/insert/update
+    // on each of integration_inbound_events and
+    // integration_sync_checkpoints).
+    expect(policies.rows[0]!.n).toBe(105);
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

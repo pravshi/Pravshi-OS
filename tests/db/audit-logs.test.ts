@@ -949,7 +949,13 @@ describe('the rest of the model is untouched', () => {
     // The Phase 9 migration (0054) adds six more app_user policies —
     // select/insert/update on each of ai_usage_requests and ai_org_limits —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(89);
+    // The Phase 10 migration (0056) adds sixteen more app_user policies —
+    // select/insert/update/delete on each of integration_connections and
+    // integration_webhook_subscriptions, select/insert on
+    // integration_webhook_deliveries, select/insert/update on each of
+    // integration_inbound_events and integration_sync_checkpoints —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(105);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 

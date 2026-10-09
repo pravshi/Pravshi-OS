@@ -93,6 +93,23 @@ mock provider and the rest of the application is unaffected. See
 | `AI_TIMEOUT_MS`        | optional | Overall per-request AI budget in milliseconds (default 30000, clamped by the config layer)    |
 | `AI_MAX_OUTPUT_TOKENS` | optional | Caps model output tokens per request (default set by the config layer)                        |
 
+### Integrations (Phase 10) — optional
+
+All variables are optional. With none set, the application boots and runs normally:
+org-entered (Tier V) credentials report NOT_CONFIGURED, and job email fails closed
+(dead-letters) instead of sending. See `docs/phase10-integrations.md` for the full
+architecture, credential tiers and rotation runbooks. Integration URLs given to
+external senders are built from `APP_URL` (documented above).
+
+| Variable                       | Required | Notes                                                                                                                                                                                                                                           |
+| ------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INTEGRATIONS_ENCRYPTION_KEY`  | optional | Tier V credential-vault key (AES-256-GCM). Base64, exactly 32 bytes — generate with `openssl rand -base64 32`. Unset = vault-backed credentials NOT_CONFIGURED; env-referenced (Tier E) integrations unaffected. Server-side only, never logged |
+| `EMAIL_PROVIDER`               | optional | Job-email adapter selector. `resend` = the real Resend adapter. Unset or any other value = email jobs fail closed (dead-letter, non-retryable)                                                                                                  |
+| `EMAIL_PROVIDER_API_KEY`       | optional | Resend credential for the job email path. Falls back to `RESEND_API_KEY` when unset                                                                                                                                                             |
+| `RESEND_API_KEY`               | optional | Resend credential used by invitation/auth mail; also the job email adapter's fallback credential                                                                                                                                                |
+| `EMAIL_FROM`                   | optional | Sender address for invitation mail and job email. Must be on a Resend-verified domain; no safe default                                                                                                                                          |
+| `WEBHOOK_SIGNING_SECRET_<REF>` | optional | Deployment-level webhook signing secrets, one per `<REF>` named by a delivery's `signatureSecretRef`. An unconfigured ref refuses to send unsigned                                                                                              |
+
 ### Storage — not yet configured
 
 `.env.example` also lists `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and the
@@ -109,9 +126,8 @@ still fails, now as "missing" rather than "invalid URL".
 ## Secret handling rules
 
 - **Never commit `.env`.** It is gitignored; `.env.example` is the only env file that ships.
-- **Never put a database URL in a GitHub Actions secret.** CI derives connection strings at
-  runtime from the Neon API. The only Actions secrets are `NEON_API_KEY` and
-  `NEON_PROJECT_ID`.
+- **Never put a database URL in a GitHub Actions secret.** CI runs against an ephemeral
+  local Postgres container created per run and uses no Neon credentials at all (PR #66).
 - **Never print a connection string.** Passwords can contain `@`, so parse URLs with a real
   URL parser rather than a regex, and report role/host/branch instead of the value.
 - **Mask anything derived from a secret** in CI with `::add-mask::` before it can be echoed.

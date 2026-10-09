@@ -124,9 +124,9 @@ describe('resolveTemplates', () => {
 
 describe('executeAction: registry guards (never throws)', () => {
   it('rejects still-deferred actions with INVALID_REQUEST', async () => {
-    // Phase 8 implemented send_notification/send_email — only webhook and
-    // run_ai_action remain deferred.
-    for (const type of ['webhook', 'run_ai_action']) {
+    // Phase 8 implemented send_notification/send_email and Phase 10
+    // implemented webhook — only run_ai_action remains deferred.
+    for (const type of ['run_ai_action']) {
       const result = await executeAction(fakeAuth, event, action(type, {}), context);
       expect(result.ok).toBe(false);
       expect(result.errorCode).toBe('INVALID_REQUEST');
@@ -144,6 +144,15 @@ describe('executeAction: registry guards (never throws)', () => {
       expect(result.errorCode).toBe('INVALID_REQUEST');
       expect(result.errorMessage ?? '').not.toContain('not implemented in Phase 5');
     }
+  });
+
+  it('no longer rejects the Phase-10 implemented webhook action as deferred', async () => {
+    // Same shape as the Phase-8 pair: empty params fail the webhook param
+    // schema (exactly one of subscriptionId/url) before any DB is touched.
+    const result = await executeAction(fakeAuth, event, action('webhook', {}), context);
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe('INVALID_REQUEST');
+    expect(result.errorMessage ?? '').not.toContain('not implemented in Phase 5');
   });
 
   it('returns a failure envelope for an unknown action type', async () => {
@@ -275,7 +284,7 @@ describe('per-action param schemas (direct zod validation)', () => {
 });
 
 describe('action registry', () => {
-  it('documents exactly the 8 implemented actions (6 Phase-5 + 2 Phase-8)', () => {
+  it('documents exactly the 9 implemented actions (6 Phase-5 + 2 Phase-8 + 1 Phase-10)', () => {
     const implemented = Object.entries(ACTION_REGISTRY)
       .filter(([, entry]) => entry.implemented)
       .map(([type]) => type)
@@ -290,13 +299,14 @@ describe('action registry', () => {
         'send_notification',
         'update_deal',
         'update_task',
+        'webhook',
       ].sort(),
     );
   });
 
-  it('marks the 2 remaining deferred actions as not implemented', () => {
-    // Phase 8 implemented send_notification/send_email.
-    for (const type of ['webhook', 'run_ai_action']) {
+  it('marks the 1 remaining deferred action as not implemented', () => {
+    // Phase 8 implemented send_notification/send_email; Phase 10 webhook.
+    for (const type of ['run_ai_action']) {
       expect(ACTION_REGISTRY[type as keyof typeof ACTION_REGISTRY].implemented).toBe(false);
     }
   });
@@ -305,5 +315,9 @@ describe('action registry', () => {
     for (const type of ['send_notification', 'send_email']) {
       expect(ACTION_REGISTRY[type as keyof typeof ACTION_REGISTRY].implemented).toBe(true);
     }
+  });
+
+  it('marks the Phase-10 webhook action as implemented', () => {
+    expect(ACTION_REGISTRY.webhook.implemented).toBe(true);
   });
 });

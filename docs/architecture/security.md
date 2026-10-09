@@ -106,6 +106,8 @@ impersonation is a serious audit and consent question, not a convenience feature
 | `ai.use` | G | G | — | — | D | D | S | D | P | P | S | S | S |
 | `ai.usage.view` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `ai.usage.manage` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `integrations.view` | G | G | — | — | — | — | — | — | — | — | — | — | — |
+| `integrations.manage` | G | G | — | — | — | — | — | — | — | — | — | — | — |
 | `clients.view` | G | — | — | — | — | — | — | D | P | P | P | G⁴ | — |
 | `clients.edit` | G | — | — | — | — | — | — | D | — | — | — | — | — |
 | `projects.view` | G | G | — | — | D | D | S | D | P | P | P | G⁴ | — |

@@ -89,10 +89,11 @@ const optionalText = (max: number) =>
 // ── Trigger types (§9) ─────────────────────────────────────────────────────
 
 /**
- * Phase-5 trigger types (plus Phase 6+ contracts with no runtime: `webhook`,
- * `task.overdue` — a workflow using one can be saved as DRAFT but can never
+ * Phase-5 trigger types (plus the Phase 6+ contract with no runtime:
+ * `task.overdue` — a workflow using it can be saved as DRAFT but can never
  * be ACTIVATEd). `scheduled` moved to IMPLEMENTED in Phase 6 (§3.7) once the
- * scheduler exists.
+ * scheduler exists; `webhook` moved to IMPLEMENTED in Phase 10 (Wave W-in)
+ * once the inbound receiver exists.
  *
  * Canonical home (cycle-free): defined here, re-exported by events.ts.
  * Previously this lived in events.ts, which created the
@@ -115,8 +116,9 @@ export const WORKFLOW_TRIGGER_TYPES = [
 
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];
 
-/** The 9 trigger types with runtime (the Phase-5 engine matches 8; the
- *  Phase-6 scheduler fires `scheduled`). */
+/** The 10 trigger types with runtime (the Phase-5 engine matches 8; the
+ *  Phase-6 scheduler fires `scheduled`; the Phase-10 inbound receiver
+ *  fires `webhook`). */
 export const IMPLEMENTED_TRIGGER_TYPES = [
   'deal.created',
   'deal.updated',
@@ -128,14 +130,18 @@ export const IMPLEMENTED_TRIGGER_TYPES = [
   'manual',
   // Phase 6 §3.7: cron-triggered schedules now have runtime (the scheduler).
   'scheduled',
+  // Phase 10 (Wave W-in): inbound webhooks now have runtime — the receiver
+  // (src/lib/integrations/inbound.ts) dispatches `webhook` events to the
+  // engine under the connection's connected_by principal.
+  'webhook',
 ] as const;
 export type ImplementedTriggerType = (typeof IMPLEMENTED_TRIGGER_TYPES)[number];
 
-/** Phase 6+ contracts: schema-accepted, registry-documented, no Phase-5/6 runtime. */
-export const DEFERRED_TRIGGER_TYPES = ['webhook', 'task.overdue'] as const;
+/** Phase 6+ contracts: schema-accepted, registry-documented, no runtime yet. */
+export const DEFERRED_TRIGGER_TYPES = ['task.overdue'] as const;
 export type DeferredTriggerType = (typeof DEFERRED_TRIGGER_TYPES)[number];
 
-/** All 9 trigger types. Accepts every type in the canonical enum (§10):
+/** Accepts every type in the canonical enum (§10):
  *  activation blocking for deferred types is engine/API logic, not schema. */
 export const TriggerTypeSchema = z.enum(WORKFLOW_TRIGGER_TYPES);
 
@@ -405,6 +411,11 @@ export type ImplementedActionType = (typeof IMPLEMENTED_ACTION_TYPES)[number];
  * Record<(typeof DEFERRED_ACTION_TYPES)[number], string> label maps, so
  * membership here must stay stable.
  *
+ * Phase 10 (Wave W-out): webhook joins them — implemented at runtime and
+ * accepted by the save-time schema (WebhookActionSchema below); it likewise
+ * stays in this list for label-map stability. Only run_ai_action remains a
+ * contract for a later phase.
+ *
  * Nit-3: 'scheduled' used to sit in this list, but it is a *trigger* type
  * (DEFERRED_TRIGGER_TYPES), not an action — it never belonged here and is
  * no longer smuggled into the action-type union.
@@ -551,12 +562,42 @@ const SendEmailActionSchema = z.strictObject({
   key: actionKey,
 });
 
+// ── Phase 10: webhook save-time params ────────────────────────────────────────
+// Save-time contract, mirroring the executor params in
+// src/lib/workflows/actions.ts (same arrangement as the Phase 8 pair
+// above). Exactly one addressing mode: a subscriptionId (an org webhook
+// subscription — delivery is signed with its per-subscription secret,
+// resolved inside the worker) or a url (a deployment-level endpoint,
+// optionally signed via signatureSecretRef). `body` is the event body
+// sent as the request payload; its string values may carry templates.
+export const WebhookActionParamsSchema = z
+  .strictObject({
+    subscriptionId: templateOr(uuid).optional(),
+    url: templateOr(z.string().url()).optional(),
+    /** URL mode only: WEBHOOK_SIGNING_SECRET_<REF> env reference. */
+    signatureSecretRef: z.string().trim().min(1).max(128).optional(),
+    body: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((value) => (value.subscriptionId !== undefined) !== (value.url !== undefined), {
+    message: 'exactly one of subscriptionId or url is required',
+  })
+  .refine((value) => value.subscriptionId === undefined || value.signatureSecretRef === undefined, {
+    message: 'signatureSecretRef applies to url mode only',
+  });
+export type WebhookActionParams = z.infer<typeof WebhookActionParamsSchema>;
+
+const WebhookActionSchema = z.strictObject({
+  type: z.literal('webhook'),
+  params: WebhookActionParamsSchema,
+  key: actionKey,
+});
+
 /** Deferred action types match their registry shape but are rejected with a
  *  clear message — they are contracts for a later phase, not validatable for
  *  execution. Phase 8: send_notification / send_email are implemented (real
- *  schemas above), so only webhook and run_ai_action remain in the rejection
- *  path. */
-const STILL_DEFERRED_ACTION_TYPES = ['webhook', 'run_ai_action'] as const satisfies Readonly<
+ *  schemas above); Phase 10: webhook is implemented (real schema above), so
+ *  only run_ai_action remains in the rejection path. */
+const STILL_DEFERRED_ACTION_TYPES = ['run_ai_action'] as const satisfies Readonly<
   DeferredActionType[]
 >;
 const deferredActionSchemas = STILL_DEFERRED_ACTION_TYPES.map((deferredType) =>
@@ -590,6 +631,7 @@ export const ActionConfigSchema = z.union([
     LinkDealProjectActionSchema,
     SendNotificationActionSchema,
     SendEmailActionSchema,
+    WebhookActionSchema,
   ]),
   ...deferredActionSchemas,
 ]);

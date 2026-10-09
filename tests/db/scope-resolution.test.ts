@@ -179,15 +179,18 @@ const sweep = (ctx: Ctx) =>
   );
 
 const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], label: string) => {
-  // 126: the 109 counted before, plus the six Phase 5 workflow permissions
+  // 127: the 109 counted before, plus the six Phase 5 workflow permissions
   // (workflows.view/create/edit/delete/activate/execute) from migration 0044,
   // plus the five Phase 6 jobs permissions
   // (jobs.view/create/retry/cancel/delete) from migration 0045, plus the three
   // Phase 8 notification permissions
   // (notifications.view/notifications.preferences.manage/notifications.send)
   // from migration 0052, plus the three Phase 9 AI permissions
-  // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055.
-  expect(rows.length, `${label}: catalogue size`).toBe(126);
+  // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the one
+  // new Phase 10 integration permission (integrations.view) from migration
+  // 0057 (integrations.manage was already in the catalogue from migration
+  // 0008; 0057 re-homes and grants it).
+  expect(rows.length, `${label}: catalogue size`).toBe(127);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -930,7 +933,14 @@ describe('RLS', () => {
     // The Phase 9 migration (0054) adds six more: select/insert/update on each
     // of ai_usage_requests and ai_org_limits — none of them scope-driven
     // (they branch on authz.has), so with_scope below stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(89);
+    // The Phase 10 migration (0056) adds sixteen more: select/insert/update/
+    // delete on each of integration_connections and
+    // integration_webhook_subscriptions, select/insert on
+    // integration_webhook_deliveries, select/insert/update on each of
+    // integration_inbound_events and integration_sync_checkpoints — none of
+    // them scope-driven (they branch on authz.has), so with_scope below
+    // stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(105);
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM

@@ -110,13 +110,22 @@ export const ScheduledTriggerPayloadSchema = z.strictObject({
 });
 export type ScheduledTriggerPayload = z.infer<typeof ScheduledTriggerPayloadSchema>;
 
-/** `webhook` — outbound HTTP POST (SSRF rules enforced by the handler, §6). */
+/** `webhook` — outbound HTTP POST (SSRF rules enforced by the handler, §6).
+ *  Phase 10 (Wave W-out): `subscriptionId`/`deliveryId` mark an org
+ *  subscription delivery (fan-out or the workflow `webhook` action). The
+ *  payload carries ids and the event envelope (as `body`) only — the
+ *  subscription's signing secret is NEVER a payload field (contract §4.5);
+ *  the handler resolves and decrypts it inside the worker from the
+ *  subscriptionId. Deployment-level deliveries keep using
+ *  `signatureSecretRef` exactly as before. */
 export const WebhookPayloadSchema = z.strictObject({
   url: z.string().url(),
   method: z.enum(['POST', 'PUT', 'PATCH']).default('POST'),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.unknown().optional(),
   signatureSecretRef: z.string().max(128).optional(),
+  subscriptionId: z.string().regex(UUID, 'subscriptionId must be a uuid').optional(),
+  deliveryId: z.string().regex(UUID, 'deliveryId must be a uuid').optional(),
   timeoutMs: z.number().int().min(1000).max(30000).default(10000),
 });
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;

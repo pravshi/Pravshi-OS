@@ -66,6 +66,20 @@ const runtimeSchema = z.object({
   AI_BASE_URL: z.string().url().optional(),
   AI_TIMEOUT_MS: z.string().optional(),
   AI_MAX_OUTPUT_TOKENS: z.string().optional(),
+  /**
+   * Phase 10 Integrations credential vault (src/lib/integrations/secrets.ts).
+   * Optional: when unset, org-entered (Tier V) credentials are NOT_CONFIGURED —
+   * a typed error and a dedicated UI state — while the app boots normally and
+   * env-referenced (Tier E) integrations keep working. When present it must be
+   * base64 encoding exactly 32 bytes (an AES-256 key). Server-side secret only:
+   * never NEXT_PUBLIC_, never logged; read only through this parsed env.
+   */
+  INTEGRATIONS_ENCRYPTION_KEY: z
+    .string()
+    .refine((v) => /^[A-Za-z0-9+/]+={0,2}$/.test(v) && Buffer.from(v, 'base64').length === 32, {
+      message: 'INTEGRATIONS_ENCRYPTION_KEY must be base64 encoding exactly 32 bytes',
+    })
+    .optional(),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */

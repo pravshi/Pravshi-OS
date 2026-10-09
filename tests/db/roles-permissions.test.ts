@@ -303,9 +303,13 @@ describe('permission catalogue', () => {
     // from migration 0052,
     // plus the 3 Phase 9 AI permissions
     // (ai.use, ai.usage.view, ai.usage.manage)
-    // from migration 0055.
+    // from migration 0055,
+    // plus the 1 new Phase 10 integration permission
+    // (integrations.view) from migration 0057. integrations.manage is NOT
+    // new: migration 0008 already catalogued it (ungranted, module
+    // 'settings'); 0057 re-homes it to the integrations module and grants it.
     // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
-    expect(Number(rows[0]!.count)).toBe(126);
+    expect(Number(rows[0]!.count)).toBe(127);
   });
 
   it('holds every named key from each module', async () => {
@@ -446,6 +450,11 @@ describe('permission catalogue', () => {
       'ai.use',
       'ai.usage.view',
       'ai.usage.manage',
+      // Phase 10 (migration 0057): the one NEW Integrations Platform key.
+      // integrations.manage is deliberately not repeated here: it is the
+      // 0008 row in the settings block above — 0057 re-homes and grants
+      // that existing row rather than adding a second one.
+      'integrations.view',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -585,13 +594,14 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 126 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
-    // 6 Phase 5 workflow + 5 Phase 6 jobs + 3 Phase 8 notifications + 3 Phase 9 ai),
-    // minus users.impersonate
+    // 127 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow + 5 Phase 6 jobs + 3 Phase 8 notifications + 3 Phase 9 ai +
+    // 1 Phase 10 integration — integrations.view; integrations.manage was already
+    // among the 82 from migration 0008), minus users.impersonate
     // which is listed but granted to no role. Note: reports.view already existed from
     // migration 0008.
-    expect(Number(rows[0]!.total)).toBe(125);
-    expect(Number(rows[0]!.global)).toBe(125);
+    expect(Number(rows[0]!.total)).toBe(126);
+    expect(Number(rows[0]!.global)).toBe(126);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants plus two Phase 8 notification grants plus the Phase 9 ai.use grant', async () => {

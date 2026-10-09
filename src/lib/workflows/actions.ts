@@ -68,6 +68,11 @@ import { assignTask, createTask, updateTask } from '../work/tasks';
 import { createProject, linkProjectToDeal } from '../work/projects';
 import { updateDeal } from '../crm/deals';
 import { enqueueJob } from '../jobs/queue';
+import {
+  deliverToSubscription,
+  getSubscriptionTarget,
+  WORKFLOW_ACTION_EVENT_KEY,
+} from '../integrations/fanout';
 import { NOTIFICATION_EVENT_TYPES } from '../notifications/types';
 import {
   AssignTaskParamsSchema,
@@ -77,6 +82,7 @@ import {
   LinkDealProjectParamsSchema,
   UpdateDealParamsSchema,
   UpdateTaskParamsSchema,
+  WebhookActionParamsSchema,
   type ActionConfig,
   type AssignTaskParams,
   type CreateProjectParams,
@@ -86,6 +92,7 @@ import {
   type LinkDealProjectParams,
   type UpdateDealParams,
   type UpdateTaskParams,
+  type WebhookActionParams,
   templateOr,
 } from './schema';
 import type { WorkflowEvent } from './events';
@@ -98,11 +105,12 @@ import type { WorkflowEvent } from './events';
  * DEFERRED_ACTION_TYPES — it is a trigger type and no longer does.)
  *
  * Phase 8 (Workstream C): send_notification and send_email are IMPLEMENTED
- * (see the executors below) and no longer deferred — only webhook and
- * run_ai_action remain registry-documented stubs.
+ * (see the executors below) and no longer deferred.
+ * Phase 10 (Wave W-out): webhook is IMPLEMENTED (see the executor below)
+ * and enabled at save time in schema.ts — only run_ai_action remains a
+ * registry-documented stub.
  */
 export const REGISTRY_DEFERRED_ACTION_TYPES = [
-  'webhook',
   'run_ai_action',
 ] as const satisfies readonly DeferredActionType[];
 export type RegistryDeferredActionType = (typeof REGISTRY_DEFERRED_ACTION_TYPES)[number];
@@ -117,9 +125,21 @@ export type RegistryDeferredActionType = (typeof REGISTRY_DEFERRED_ACTION_TYPES)
 export const NEWLY_IMPLEMENTED_ACTION_TYPES = ['send_notification', 'send_email'] as const;
 export type NewlyImplementedActionType = (typeof NEWLY_IMPLEMENTED_ACTION_TYPES)[number];
 
-/** The action types the registry documents: 6 Phase-5 + 2 Phase-8 implemented + 2 deferred. */
+/**
+ * Phase 10 (Wave W-out) implemented the webhook action at runtime and at
+ * save time (schema.ts's WebhookActionSchema). Same arrangement as the
+ * Phase 8 pair: it stays outside IMPLEMENTED_ACTION_TYPES for UI-label
+ * compatibility and is admitted by the runtime guard through this set.
+ */
+export const PHASE10_IMPLEMENTED_ACTION_TYPES = ['webhook'] as const;
+export type Phase10ImplementedActionType = (typeof PHASE10_IMPLEMENTED_ACTION_TYPES)[number];
+
+/** The action types the registry documents: 6 Phase-5 + 2 Phase-8 + 1 Phase-10 implemented + 1 deferred. */
 export type RegistryActionType =
-  ImplementedActionType | NewlyImplementedActionType | RegistryDeferredActionType;
+  | ImplementedActionType
+  | NewlyImplementedActionType
+  | Phase10ImplementedActionType
+  | RegistryDeferredActionType;
 
 /** Compile-time pin: every deferred action type is documented in the registry. */
 type _MissingRegistryEntry = Exclude<DeferredActionType, RegistryDeferredActionType>;
@@ -173,9 +193,13 @@ export const ACTION_REGISTRY: Record<RegistryActionType, ActionRegistryEntry> = 
       'Delivery requires a wired email provider; otherwise the job dead-letters.',
   },
   webhook: {
-    implemented: false,
+    implemented: true,
     description:
-      'Phase 6+: outbound HTTP webhook. Registry contract only — not implemented in Phase 5.',
+      'Phase 10: enqueue an outbound webhook job — either to an org webhook ' +
+      'subscription (subscriptionId; signed with the subscription\u2019s own ' +
+      'secret, resolved inside the worker) or to a URL (url, optional ' +
+      'signatureSecretRef). Runs under the trigger actor\u2019s authority — ' +
+      'the actor needs jobs.create.',
   },
   run_ai_action: {
     implemented: false,
@@ -338,6 +362,9 @@ const PARAM_SCHEMAS: Record<string, z.ZodTypeAny> = {
   // schema.ts's save-time contract is unchanged (owned elsewhere).
   send_notification: SendNotificationParamsSchema,
   send_email: SendEmailParamsSchema,
+  // Phase 10: executable at runtime (see PHASE10_IMPLEMENTED_ACTION_TYPES);
+  // the executor and save-time contracts are the one schema in schema.ts.
+  webhook: WebhookActionParamsSchema,
 };
 
 /**
@@ -476,6 +503,12 @@ async function executeLinkDealProject(
 /** The still-deferred registry entries plus the Phase-8 runtime set, for the guard. */
 const NEWLY_IMPLEMENTED_TYPE_SET = new Set<string>(NEWLY_IMPLEMENTED_ACTION_TYPES);
 
+/** Phase 8 + Phase 10 runtime sets combined, for the guard. */
+const RUNTIME_IMPLEMENTED_TYPE_SET = new Set<string>([
+  ...NEWLY_IMPLEMENTED_TYPE_SET,
+  ...PHASE10_IMPLEMENTED_ACTION_TYPES,
+]);
+
 /**
  * Stable, content-addressed dedup key for workflow-emitted jobs: the same
  * workflow event re-executing the same action with the same content maps to
@@ -566,6 +599,79 @@ async function executeSendEmail(
   return { ok: true, output: { jobId: job.id } };
 }
 
+// ── Phase 10: webhook executor ────────────────────────────────────────────────
+
+/**
+ * Phase 10 (Wave W-out) implements the webhook action. Like the Phase 8
+ * pair it enqueues a Phase 6 job under the TRIGGER ACTOR's authority (D2):
+ * enqueueJob requires `jobs.create`, so an actor without it gets a
+ * FORBIDDEN step.
+ *
+ * Two addressing modes (schema-enforced exactly-one):
+ *  - subscriptionId: the org's webhook subscription is the endpoint. The
+ *    delivery goes through the fan-out link path (integrations/fanout),
+ *    so it is recorded in integration_webhook_deliveries and signed with
+ *    the subscription's own secret — resolved and decrypted inside the
+ *    worker at delivery time, never placed in the job payload (§4.5).
+ *    A disabled subscription fails the step (INVALID_REQUEST): the
+ *    workflow asked for a delivery the admin has paused.
+ *  - url: a deployment-level endpoint. The job payload is the legacy
+ *    shape (url + body + optional signatureSecretRef env reference) and
+ *    the handler's behaviour for it is unchanged.
+ */
+async function executeWebhook(
+  auth: Authorization,
+  event: WorkflowEvent,
+  params: WebhookActionParams,
+): Promise<ActionResult> {
+  const body = params.body ?? {};
+  if (params.subscriptionId !== undefined) {
+    const target = await getSubscriptionTarget(auth, params.subscriptionId);
+    if (!target.active) {
+      return {
+        ok: false,
+        errorCode: 'INVALID_REQUEST',
+        errorMessage: `webhook subscription '${params.subscriptionId}' is disabled`,
+      };
+    }
+    const dedupKey = workflowJobDedupKey(
+      event,
+      'webhook',
+      fingerprintParams({ subscriptionId: params.subscriptionId, body }),
+    );
+    const result = await deliverToSubscription(auth, target, {
+      body,
+      eventKey: WORKFLOW_ACTION_EVENT_KEY,
+      dedupKey,
+    });
+    return {
+      ok: true,
+      output: {
+        jobId: result.jobId,
+        deliveryId: result.deliveryId,
+        subscriptionId: params.subscriptionId,
+      },
+    };
+  }
+  const dedupKey = workflowJobDedupKey(
+    event,
+    'webhook',
+    fingerprintParams({ url: params.url, body }),
+  );
+  const job = await enqueueJob(auth, {
+    type: 'webhook',
+    payload: {
+      url: params.url as string,
+      body,
+      ...(params.signatureSecretRef !== undefined
+        ? { signatureSecretRef: params.signatureSecretRef }
+        : {}),
+    },
+    dedupKey,
+  });
+  return { ok: true, output: { jobId: job.id } };
+}
+
 /**
  * Executes one workflow action under the trigger actor's Authorization (D2).
  * Never throws: every failure mode returns an ActionResult the engine records
@@ -611,7 +717,8 @@ export async function executeActionResolved(
 /** Registry + stage guards shared by executeAction/executeActionResolved. */
 function guardActionType(type: string, rawParams: unknown): ActionResult | null {
   // Deferred registry entries (Phase 6+) are rejected, never executed.
-  // (Phase 8: send_notification/send_email left this set — they execute now.)
+  // (Phase 8: send_notification/send_email left this set — they execute now.
+  // Phase 10: webhook left it too.)
   if (REGISTRY_DEFERRED_TYPE_SET.has(type)) {
     return {
       ok: false,
@@ -619,7 +726,7 @@ function guardActionType(type: string, rawParams: unknown): ActionResult | null 
       errorMessage: `action '${type}' is not implemented in Phase 5`,
     };
   }
-  if (!IMPLEMENTED_TYPE_SET.has(type) && !NEWLY_IMPLEMENTED_TYPE_SET.has(type)) {
+  if (!IMPLEMENTED_TYPE_SET.has(type) && !RUNTIME_IMPLEMENTED_TYPE_SET.has(type)) {
     return {
       ok: false,
       errorCode: 'INTERNAL',
@@ -692,6 +799,8 @@ async function runResolvedAction(
         return await executeSendNotification(auth, event, parsed.data as SendNotificationParams);
       case 'send_email':
         return await executeSendEmail(auth, event, parsed.data as SendEmailParams);
+      case 'webhook':
+        return await executeWebhook(auth, event, parsed.data as WebhookActionParams);
       default:
         // Unreachable: the implemented/deferred checks above pin `type`.
         return {

@@ -37,6 +37,8 @@ import { isIP } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { env, webhookSigningSecret } from '@/env';
+import { sendViaResend } from '../integrations/providers/email/send';
+import { decryptSecret, IntegrationsVaultError } from '../integrations/secrets';
 import { withAuthorizedDb } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import {
@@ -397,25 +399,41 @@ export function buildEmailIdempotencyKey(job: Job): string {
  * Email provider abstraction.
  *
  * Behavior:
- * - No provider configured (EMAIL_PROVIDER / EMAIL_PROVIDER_API_KEY unset) →
- *   throws CONFIG_ERROR (code 'CONFIG_ERROR' → classifyError marks it
- *   NON-RETRYABLE: "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can
- *   never send is pointless, so this dead-letters immediately.
- * - Provider configured → ALSO FAILS CLOSED: throws CONFIG_ERROR
- *   ("EMAIL_PROVIDER_NOT_IMPLEMENTED", non-retryable). No real transmission
- *   is implemented yet, and a synthetic success would be a false-delivery
- *   integrity failure — the job must never transition to `succeeded` without
- *   an actual send.
- *
- * To wire a real provider: replace the fail-closed branch below with the
- * provider's HTTP API call, sending the `idempotencyKey` as the provider's
- * Idempotency-Key header, and return the provider's message id.
+ * - No provider configured (EMAIL_PROVIDER unset) → throws CONFIG_ERROR
+ *   (code 'CONFIG_ERROR' → classifyError marks it NON-RETRYABLE:
+ *   "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can never send is
+ *   pointless, so this dead-letters immediately.
+ * - EMAIL_PROVIDER=resend → the real adapter
+ *   (src/lib/integrations/providers/email/send.ts, Phase 10 §4.6): sends via
+ *   the Resend SDK with the job's idempotency key, resolving its credential
+ *   (EMAIL_PROVIDER_API_KEY, falling back to RESEND_API_KEY) and reporting
+ *   failures as normalised EmailSendError codes — the same CONFIG_ERROR /
+ *   VALIDATION_ERROR non-retryable + retryable PROVIDER_ERROR contract.
+ * - Any OTHER provider configured → STILL FAILS CLOSED: throws CONFIG_ERROR
+ *   ("EMAIL_PROVIDER_NOT_IMPLEMENTED", non-retryable). No adapter exists for
+ *   it yet, and a synthetic success would be a false-delivery integrity
+ *   failure — the job must never transition to `succeeded` without an
+ *   actual send.
  */
 export async function sendEmailViaProvider(
   input: EmailProviderInput,
 ): Promise<EmailProviderResult> {
   const provider = env.EMAIL_PROVIDER;
   const apiKey = env.EMAIL_PROVIDER_API_KEY;
+
+  // Phase 10 (Wave P): 'resend' is wired. The adapter resolves its own
+  // credential and sender, so this branch runs before the unconfigured
+  // gate below — a deployment that set only RESEND_API_KEY + EMAIL_FROM
+  // (the auth mailers' configuration) sends job email too.
+  if (provider === 'resend') {
+    return sendViaResend({
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
 
   if (!provider || !apiKey) {
     console.warn(
@@ -428,10 +446,10 @@ export async function sendEmailViaProvider(
     );
   }
 
-  // Phase 6 provides the queue/retry infrastructure; wire a real provider here.
-  // Fail closed (CONFIG_ERROR → non-retryable → dead-letter): EMAIL_PROVIDER is
-  // set but nothing actually transmits — returning a synthetic messageId would
-  // let the job "succeed" without any email being sent.
+  // Fail closed (CONFIG_ERROR → non-retryable → dead-letter): EMAIL_PROVIDER
+  // names a provider with no adapter — nothing actually transmits, and
+  // returning a synthetic messageId would let the job "succeed" without any
+  // email being sent.
   console.warn(
     `[jobs] email provider not implemented job=${input.job.id} provider=${provider} ` +
       `to_count=${input.to.length} idempotency_key=${input.idempotencyKey}`,
@@ -475,6 +493,23 @@ export const WEBHOOK_MAX_RESPONSE_BYTES = 1_048_576; // 1 MiB
 /** Max redirects followed; every hop is re-validated through the SSRF guard. */
 export const WEBHOOK_MAX_REDIRECTS = 2;
 
+/**
+ * Phase 10 (Wave W-out) signing header set — fixed here as the §4.5
+ * contract note, and documented for receivers in the webhook security
+ * guide (Wave M):
+ *   x-pravshi-signature   `sha256=<hex>` HMAC-SHA256 over the raw body
+ *   x-pravshi-timestamp   unix seconds when this attempt was sent; the
+ *                         receiver enforces its replay window against it
+ *                         (the signature covers the body only — the
+ *                         timestamp is routing metadata, not signed
+ *                         content, so legacy env-ref deliveries verify
+ *                         exactly as before)
+ *   x-pravshi-webhook-id  the job id (per-attempt correlation)
+ * The envelope body additionally carries the delivery id (`id`), the
+ * receiver's stable dedup key across retries of the same delivery.
+ */
+export const WEBHOOK_TIMESTAMP_HEADER = 'x-pravshi-timestamp';
+
 export interface SsrfCheck {
   allowed: boolean;
   reason?: string;
@@ -497,7 +532,11 @@ export function parseIpv4Aton(host: string): [number, number, number, number] | 
     if (p.length === 0 || p.length > 10) return null;
     let n: number;
     if (/^0[xX][0-9a-fA-F]+$/.test(p)) n = parseInt(p, 16);
-    else if (/^0[0-9]+$/.test(p)) n = parseInt(p, 8);
+    else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+    // A leading-zero part containing 8/9 is invalid octal: WHATWG's IPv4
+    // parser and inet_aton both reject it outright. Never let parseInt
+    // silently truncate it into a different address ('08' → 0).
+    else if (/^0[0-9]/.test(p)) return null;
     else if (/^[0-9]+$/.test(p)) n = parseInt(p, 10);
     else return null;
     if (!Number.isSafeInteger(n) || n < 0 || n > 0xffffffff) return null;
@@ -550,8 +589,83 @@ const BLOCKED_V4: Array<[[number, number, number, number], number, string]> = [
 ];
 
 /**
+ * True when a host string is composed solely of inet_aton characters
+ * (digits, hex letters a–f, the 0x prefix marker, dots) and contains at
+ * least one digit. Such a string is an IP-literal ATTEMPT, never a plausible
+ * public DNS name: every character in it is meaningful to an IPv4 parser,
+ * so when the strict parsers (WHATWG URL, parseIpv4Aton) refuse it, it sits
+ * exactly in the parser-differential gap this guard exists to close.
+ */
+export function looksLikeIpv4Literal(host: string): boolean {
+  if (!/^[0-9a-fA-FxX.]+$/.test(host)) return false;
+  if (!/[0-9]/.test(host)) return false;
+  return host.split('.').every((label) => label.length > 0);
+}
+
+/**
+ * Parse an IPv6 literal (brackets, zone id, and dotted-quad tail all
+ * tolerated) into its 16 bytes. Returns null when the input is not a valid
+ * IPv6 address. Range checks run on the bytes, never on the textual form:
+ * `new URL()` serializes [::ffff:127.0.0.1] as [::ffff:7f00:1], so any
+ * text-pattern check for the dotted tail silently misses the mapped form.
+ */
+export function parseIpv6Bytes(host: string): number[] | null {
+  let h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+  const zone = h.indexOf('%');
+  if (zone !== -1) h = h.slice(0, zone);
+  if (isIP(h) !== 6) return null;
+
+  // Rewrite a dotted-quad tail as its two hex groups, then parse uniformly.
+  if (h.includes('.')) {
+    const lastColon = h.lastIndexOf(':');
+    if (lastColon === -1) return null;
+    const tail = h.slice(lastColon + 1);
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(tail)) return null;
+    const quad = tail.split('.').map(Number);
+    if (quad.some((n) => n > 255)) return null;
+    const hi = (((quad[0] as number) << 8) | (quad[1] as number)).toString(16);
+    const lo = (((quad[2] as number) << 8) | (quad[3] as number)).toString(16);
+    h = `${h.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const halves = h.split('::');
+  if (halves.length > 2) return null;
+  const parseGroups = (s: string): number[] | null => {
+    if (s === '') return [];
+    const out: number[] = [];
+    for (const g of s.split(':')) {
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+      out.push(parseInt(g, 16));
+    }
+    return out;
+  };
+  const head = parseGroups(halves[0] as string);
+  if (head === null) return null;
+  let groups: number[];
+  if (halves.length === 2) {
+    const tailGroups = parseGroups(halves[1] as string);
+    if (tailGroups === null) return null;
+    const missing = 8 - head.length - tailGroups.length;
+    if (missing < 1) return null; // '::' must compress at least one group
+    groups = [...head, ...new Array<number>(missing).fill(0), ...tailGroups];
+  } else {
+    if (head.length !== 8) return null;
+    groups = head;
+  }
+  const bytes: number[] = [];
+  for (const g of groups) bytes.push((g >> 8) & 0xff, g & 0xff);
+  return bytes;
+}
+
+/**
  * True when an IPv4 literal (any inet_aton form) or IPv6 literal is blocked.
- * IPv4-mapped IPv6 (::ffff:a.b.c.d) is unwrapped and checked as IPv4.
+ * IPv4-mapped (::ffff:0:0/96) and IPv4-compatible (::/96) IPv6 forms are
+ * unwrapped and judged by their embedded IPv4 address. A string that is not
+ * a valid literal but is composed purely of inet_aton characters (see
+ * looksLikeIpv4Literal) is a malformed IP literal and fails closed: e.g.
+ * 0x7f.0x0.0x0x1, whose final part defeats WHATWG's ends-in-a-number
+ * heuristic, so `new URL()` leaves it un-normalized, masquerading as a DNS
+ * hostname that no IP range check would ever engage on.
  */
 export function isBlockedIpLiteral(host: string): boolean {
   const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
@@ -561,16 +675,28 @@ export function isBlockedIpLiteral(host: string): boolean {
     return BLOCKED_V4.some(([base, bits]) => inCidr(v4, base, bits));
   }
 
-  if (isIP(h) === 6) {
-    const lower = h.toLowerCase();
-    if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true; // loopback
-    if (/^(::|0(:0){7})$/.test(lower)) return true; // unspecified
-    if (lower.startsWith('fe80:')) return true; // link-local
-    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
-    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped && mapped[1]) return isBlockedIpLiteral(mapped[1]);
+  if (h.includes(':')) {
+    const b = parseIpv6Bytes(h);
+    if (!b) return true; // colon-bearing but not parseable IPv6: fail closed
+    const byte = (i: number): number => b[i] as number;
+    // :: (unspecified) and ::1 (loopback)
+    if (b.slice(0, 15).every((x) => x === 0) && (byte(15) === 0 || byte(15) === 1)) return true;
+    if (byte(0) === 0xfe && (byte(1) & 0xc0) === 0x80) return true; // fe80::/10 link-local
+    if ((byte(0) & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+    // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible ::/96 embed an IPv4
+    // address in the last 32 bits; judge that address by the IPv4 ranges.
+    const embedded = `${byte(12)}.${byte(13)}.${byte(14)}.${byte(15)}`;
+    if (b.slice(0, 10).every((x) => x === 0) && byte(10) === 0xff && byte(11) === 0xff) {
+      return isBlockedIpLiteral(embedded);
+    }
+    if (b.slice(0, 12).every((x) => x === 0)) {
+      return isBlockedIpLiteral(embedded);
+    }
     return false;
   }
+
+  // Malformed IP literal (see header): fail closed.
+  if (looksLikeIpv4Literal(h)) return true;
   return false;
 }
 
@@ -750,6 +876,10 @@ export interface NormalizedWebhook {
   /** Resolved signing secret (never logged). Undefined = no signature. */
   signatureSecret?: string;
   timeoutMs: number;
+  /** Phase 10: org subscription this delivery belongs to (ids only — safe
+   *  to log; the secret itself is never a payload or log field, §4.5). */
+  subscriptionId?: string;
+  deliveryId?: string;
 }
 
 /**
@@ -798,7 +928,8 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
   const headers: Record<string, string> = { ...(p.headers ?? {}) };
   // Never allow caller-supplied signature headers to spoof ours.
   for (const k of Object.keys(headers)) {
-    if (k.toLowerCase() === 'x-pravshi-signature') delete headers[k];
+    const lower = k.toLowerCase();
+    if (lower === 'x-pravshi-signature' || lower === WEBHOOK_TIMESTAMP_HEADER) delete headers[k];
   }
   const signatureSecret =
     typeof inlineSecret === 'string' && inlineSecret.length > 0
@@ -811,7 +942,72 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
     body: serializeWebhookBody(p.body),
     signatureSecret,
     timeoutMs: p.timeoutMs,
+    subscriptionId: p.subscriptionId,
+    deliveryId: p.deliveryId,
   };
+}
+
+/**
+ * Phase 10 (Wave W-out): resolve an org subscription's signing secret on
+ * the worker plane. The payload carries only the subscriptionId (§4.5
+ * [DECISION] — secrets never ride in jobs.payload); the org comes from
+ * the JOB ROW (ctx.job.orgId, §3.6), never from the payload.
+ *
+ * The worker runs as the nil-UUID system actor, which cannot satisfy the
+ * subscriptions SELECT policy (integrations.view), so the read goes
+ * through the bounded SECURITY DEFINER from migration 0059 —
+ * integration_webhook_resolve_delivery(org, subscription) — the
+ * notifications_insert / notifications_recipient_exists pattern. It
+ * returns the row's active flag and signing-secret CIPHERTEXT only;
+ * decryption happens here, with the env-held vault key, and the
+ * plaintext exists only for the duration of the send.
+ *
+ * Returns the plaintext secret, or null when the subscription was
+ * disabled after enqueue (the delivery is dropped, not attempted — a
+ * state the admin chose, so the job completes). Missing/cross-org →
+ * NOT_FOUND; an active subscription without a readable secret →
+ * CONFIG_ERROR (refusing to send unsigned, the env-ref doctrine).
+ */
+async function resolveSubscriptionSigningSecret(
+  ctx: JobExecutionContext,
+  subscriptionId: string,
+): Promise<string | null> {
+  const orgId = ctx.job.orgId;
+  const rows = await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+    tx.execute<{ is_active: boolean; signing_secret_ciphertext: string | null }>(sql`
+      select r.is_active, r.signing_secret_ciphertext
+      from public.integration_webhook_resolve_delivery(
+        ${orgId}::uuid,
+        ${subscriptionId}::uuid
+      ) as r
+    `),
+  );
+  const row = rows.rows[0];
+  if (!row) {
+    failNotFound(`webhook subscription ${subscriptionId} not found in org ${orgId}`);
+  }
+  if (!row.is_active) return null;
+  if (row.signing_secret_ciphertext === null) {
+    failConfig(
+      `webhook subscription ${subscriptionId} has no signing secret configured; ` +
+        'refusing to send unsigned.',
+    );
+  }
+  try {
+    return decryptSecret(row.signing_secret_ciphertext as string);
+  } catch (error) {
+    if (error instanceof IntegrationsVaultError) {
+      // VAULT_NOT_CONFIGURED (key unset) and DECRYPT_FAILED (tampered /
+      // wrong key) alike: retrying this job cannot fix deployment state,
+      // and sending unsigned is never an option — CONFIG_ERROR, and the
+      // static message carries no ciphertext or key material.
+      failConfig(
+        `webhook subscription ${subscriptionId} signing secret could not be resolved ` +
+          `(${error.code}); refusing to send unsigned.`,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -823,9 +1019,32 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
  * - HMAC-SHA256 signature header when a secret is configured (never logged).
  * - Non-2xx: 4xx → non-retryable, 5xx → retryable (via classifyError on
  *   the attached statusCode).
+ * - Phase 10: a payload carrying `subscriptionId` is an org subscription
+ *   delivery — its signing secret is resolved + decrypted inside the
+ *   worker (resolveSubscriptionSigningSecret) and takes precedence over
+ *   any env-ref; a subscription disabled after enqueue drops the delivery
+ *   (job succeeds, nothing is sent). Deployment-level payloads (env-ref
+ *   or inline secret, no subscriptionId) behave exactly as before.
  */
 export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
-  const w = normalizeWebhookPayload(ctx.job.payload);
+  const rawSubscriptionId = ctx.job.payload['subscriptionId'];
+  let w: NormalizedWebhook;
+  if (typeof rawSubscriptionId === 'string' && rawSubscriptionId.length > 0) {
+    const subscriptionSecret = await resolveSubscriptionSigningSecret(ctx, rawSubscriptionId);
+    if (subscriptionSecret === null) {
+      console.info(
+        `[jobs] webhook dropped job=${ctx.job.id} subscription=${rawSubscriptionId} ` +
+          'reason=subscription_disabled',
+      );
+      return;
+    }
+    // Inject as the inline-secret alias: normalizeWebhookPayload gives it
+    // precedence over any signatureSecretRef, and strips it before the
+    // schema parse — the plaintext never lands in the stored payload.
+    w = normalizeWebhookPayload({ ...ctx.job.payload, signatureSecret: subscriptionSecret });
+  } else {
+    w = normalizeWebhookPayload(ctx.job.payload);
+  }
 
   const headers: Record<string, string> = { ...w.headers };
   const hasHeader = (name: string): boolean =>
@@ -836,6 +1055,7 @@ export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
   if (w.signatureSecret) {
     headers['x-pravshi-signature'] = signWebhookBody(w.body, w.signatureSecret);
   }
+  headers[WEBHOOK_TIMESTAMP_HEADER] = String(Math.floor(Date.now() / 1000));
   headers['x-pravshi-webhook-id'] = ctx.job.id;
 
   let current = await assertWebhookTargetAllowed(w.url);

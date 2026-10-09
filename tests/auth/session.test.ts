@@ -434,8 +434,13 @@ describe('the authorization boundary is unmoved', () => {
     // notification_preferences.
     // The Phase 9 migration (0054) adds six more — select/insert/update on
     // each of ai_usage_requests and ai_org_limits.
+    // The Phase 10 migration (0056) adds sixteen more — select/insert/
+    // update/delete on each of integration_connections and
+    // integration_webhook_subscriptions, select/insert on
+    // integration_webhook_deliveries, select/insert/update on each of
+    // integration_inbound_events and integration_sync_checkpoints.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(89);
+    expect(Number(policies.rows[0]!.n)).toBe(105);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

@@ -4,6 +4,7 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
 import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
+import { emitIntegrationEvent } from '@/lib/integrations/fanout';
 import {
   CreatePipelineSchema,
   CreatePipelineStageSchema,
@@ -743,6 +744,32 @@ export async function moveDealToStage(
         dealValue: dealRow?.value ?? null,
       },
     });
+    // Phase 10 (Wave W-out): outbound webhook fan-out for the close events
+    // (deal.won / deal.lost). Same post-commit point and the same won/lost
+    // flags as the dispatch above; the fan-out instance id reuses the
+    // stage-change dedup basis, so a re-emission of this move dedups in
+    // the queue. emitIntegrationEvent never throws.
+    if (result.to_is_won || result.to_is_lost) {
+      await emitIntegrationEvent(
+        auth,
+        result.to_is_won ? 'deal.won' : 'deal.lost',
+        {
+          deal_id: dealId,
+          title: dealRow?.title ?? null,
+          value: dealRow?.value ?? null,
+          from_stage_id: result.from_stage_id,
+          to_stage_id: result.to_stage_id,
+          from_stage_name: fromStageRes.rows[0]?.stage_name ?? null,
+          to_stage_name: result.stage_name,
+        },
+        {
+          eventInstanceId:
+            result.history_id !== null
+              ? buildDedupKey('deal_stage_history', result.history_id)
+              : buildDedupKey('deal_stage', dealId, result.to_stage_id, new Date().toISOString()),
+        },
+      );
+    }
   }
 
   if (!result.noop) {
