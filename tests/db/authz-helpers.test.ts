@@ -83,7 +83,7 @@ beforeAll(async () => {
   inactive = await mkPerson(orgA, 'Inactive', 'INACTIVE');
   deleted = await mkPerson(orgA, 'Deleted');
   await owner.query(`update public.people set deleted_at = now() where id = $1`, [deleted]);
-});
+}, 120_000); // 120s: setup can queue behind the Phase 12 perf seed + ANALYZE under CI parallel load (PR #70 round 4; PR #71 rounds 1-2).
 
 afterAll(async () => {
   await owner.end().catch(() => undefined);
