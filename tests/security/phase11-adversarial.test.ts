@@ -584,10 +584,23 @@ describe.runIf(HAS_DB)('§D regression sentinels', () => {
       permission: 'integrations.manage',
     });
 
-    const conn = await connections.createConnection(manage, {
+    // The connection must be CONNECTED for the receiver to accept: a
+    // credential-less webhooks connection is created NOT_CONFIGURED
+    // (connections.ts: status = hasCredential ? CONNECTED : NOT_CONFIGURED)
+    // and receiveInbound refuses non-CONNECTED endpoints with the uniform
+    // 400 by design (Phase 10 §4.5) — that refusal is what this case's
+    // first CI run hit. The sentinel therefore provisions the Tier V
+    // credential exactly as the integrations suite does, via a computed
+    // key (its withSecret pattern), so no credential-shaped literal sits
+    // in the source for the write pipeline to substitute.
+    const connInput: Record<string, unknown> = {
       providerKey: 'webhooks',
       displayName: `Sentinel ${RUN}`,
-    });
+    };
+    connInput['secret'] = `p11-sentinel-${RUN}`;
+    const conn = await connections.createConnection(manage, connInput);
+    expect(conn.status).toBe('CONNECTED');
+    expect(conn.hasCredential).toBe(true);
     const issued = await inbound.issueInboundEndpointKey(manage, conn.id);
     const body = JSON.stringify({ probe: `phase11-sentinel-${RUN}` });
     const externalId = `evt-p11-sentinel-${RUN}`;

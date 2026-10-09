@@ -17,10 +17,31 @@
  * drives the job-scoped definers deterministically instead (the claim
  * state is arranged by the owner, exactly the state jobs_claim_next
  * would have produced).
+ *
+ * ACTOR CONSTRUCTION (CI fix wave, PR #69 run 1): the actors are built
+ * with tests/workflows/helpers (mkOrg / mkPerson / mkRoleFor) — the
+ * construction every passing RLS suite uses (tests/jobs/jobs-rls.test.ts
+ * in particular, whose alice updates jobs rows and whose org-move probe
+ * receives this same freeze's 23514). mkPerson mirrors provisioning
+ * (full people row + ACTIVE engagement created with the person) and
+ * mkRoleFor FAILS LOUDLY when a grant key is not in the catalogue. The
+ * first version of this file built its operator through
+ * tests/authz/fixtures.mkCustomRole — whose grant inserts are
+ * insert-selects with NO row-count check, so a grant that does not land
+ * is invisible at setup — and every direct UPDATE by that operator then
+ * matched zero rows under the UPDATE policies (org + is_active +
+ * has(...)): the frozen-column probes completed with 'SUCCEEDED' (zero
+ * rows, no error, the freeze trigger never reached) and the legitimate
+ * updates reported rowCount 0, while the caller-agnostic worker
+ * definers kept passing and masked the defect. The suite now also opens
+ * with an actor-capability precondition that resolves org_id /
+ * is_active / has() for both probe contexts explicitly, so an actor
+ * regression can never again masquerade as a freeze failure.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
+import { mkOrg, mkPerson, mkRoleFor, mkWorkflow } from '../workflows/helpers';
 
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 
@@ -80,7 +101,7 @@ async function expectFrozen(ctx: Ctx, text: string, params: unknown[]): Promise<
 describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
   let orgA = '';
   let orgB = '';
-  let alice = ''; // orgA operator: jobs.retry/cancel/create, workflows.edit, ai.use
+  let alice = ''; // orgA operator: jobs.view/create/retry/cancel, workflows.view/edit, ai.use
   let empA = ''; // orgA requester: ai.use (owns the usage row)
   let workflowA = '';
   let workflowA2 = '';
@@ -121,39 +142,30 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
     );
 
   beforeAll(async () => {
-    const fixtures = await import('../authz/fixtures');
-    orgA = await fixtures.mkOrg(owner, `p11fz-a-${RUN.toLowerCase()}`);
-    orgB = await fixtures.mkOrg(owner, `p11fz-b-${RUN.toLowerCase()}`);
-    const deptA = await fixtures.mkDept(owner, orgA, `FZA${RUN}`);
-    alice = await fixtures.mkPerson(owner, orgA, 'Freeze Operator A');
-    empA = await fixtures.mkPerson(owner, orgA, 'Freeze Requester A');
-    await fixtures.mkEngagement(owner, orgA, alice, deptA);
-    await fixtures.mkEngagement(owner, orgA, empA, deptA);
-    const opsRole = await fixtures.mkCustomRole(owner, orgA, `P11FZOPS${RUN}`, [
-      ['jobs.retry', 'GLOBAL'],
-      ['jobs.cancel', 'GLOBAL'],
-      ['jobs.create', 'GLOBAL'],
-      ['workflows.edit', 'GLOBAL'],
-      ['ai.use', 'GLOBAL'],
+    orgA = await mkOrg(owner, `p11fz-a-${RUN.toLowerCase()}`);
+    orgB = await mkOrg(owner, `p11fz-b-${RUN.toLowerCase()}`);
+    // mkPerson creates the ACTIVE engagement (and its department) with the
+    // person — the state authz.is_active() and every policy read.
+    alice = await mkPerson(owner, orgA, 'Freeze Operator A');
+    empA = await mkPerson(owner, orgA, 'Freeze Requester A');
+    // mkRoleFor throws if any key is missing from the catalogue, so the
+    // operator's grants are proven at setup, not inferred from failures.
+    // jobs.view / workflows.view ride along (production operators hold
+    // them, and the SELECT policies gate this file's RETURNING probes).
+    await mkRoleFor(owner, orgA, alice, `P11FZOPS${RUN}`, [
+      'jobs.view',
+      'jobs.create',
+      'jobs.retry',
+      'jobs.cancel',
+      'workflows.view',
+      'workflows.edit',
+      'ai.use',
     ]);
-    await fixtures.assignRoleId(owner, alice, orgA, opsRole);
-    const empRole = await fixtures.mkCustomRole(owner, orgA, `P11FZEMP${RUN}`, [
-      ['ai.use', 'GLOBAL'],
-    ]);
-    await fixtures.assignRoleId(owner, empA, orgA, empRole);
+    await mkRoleFor(owner, orgA, empA, `P11FZEMP${RUN}`, ['ai.use']);
 
-    const wf = await owner.query<{ id: string }>(
-      `insert into public.workflows (org_id, name, trigger, created_by)
-       values ($1, 'Freeze workflow', '{"type":"manual"}'::jsonb, $2) returning id`,
-      [orgA, alice],
-    );
-    workflowA = wf.rows[0]!.id;
-    const wf2 = await owner.query<{ id: string }>(
-      `insert into public.workflows (org_id, name, trigger, created_by)
-       values ($1, 'Freeze workflow 2', '{"type":"manual"}'::jsonb, $2) returning id`,
-      [orgA, alice],
-    );
-    workflowA2 = wf2.rows[0]!.id;
+    workflowA = (await mkWorkflow(owner, orgA, { name: 'Freeze workflow', createdBy: alice })).id;
+    workflowA2 = (await mkWorkflow(owner, orgA, { name: 'Freeze workflow 2', createdBy: alice }))
+      .id;
     const sc = await owner.query<{ id: string }>(
       `insert into public.schedules (org_id, workflow_id, name, cron, created_by)
        values ($1, $2, 'Freeze schedule', '0 9 * * *', $3) returning id`,
@@ -180,6 +192,49 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
     await asUser.end();
   });
 
+  it('actor preconditions: both probe contexts resolve org, liveness and grants', async () => {
+    // The UPDATE policies below gate on org_id = authz.org_id() AND
+    // authz.is_active() AND authz.has(<key>) (has() itself resolves
+    // through scope_for, which also requires is_active). If an actor
+    // ever stops resolving these, its UPDATEs match zero rows and the
+    // freeze probes would report 'SUCCEEDED' instead of 23514 — this
+    // precondition names that failure directly instead of letting it
+    // masquerade as a freeze regression (PR #69 run 1).
+    type Probe = {
+      org: string | null;
+      active: boolean;
+      retry: boolean;
+      cancel: boolean;
+      createk: boolean;
+      wfedit: boolean;
+      aiuse: boolean;
+    };
+    const probe = async (ctx: Ctx): Promise<Probe> =>
+      (
+        await inCtx<Probe>(
+          ctx,
+          `select authz.org_id() as org, authz.is_active() as active,
+                  authz.has('jobs.retry') as retry, authz.has('jobs.cancel') as cancel,
+                  authz.has('jobs.create') as createk, authz.has('workflows.edit') as wfedit,
+                  authz.has('ai.use') as aiuse`,
+        )
+      ).rows[0]!;
+
+    const a = await probe(aliceCtx());
+    expect(a.org).toBe(orgA);
+    expect(a.active).toBe(true);
+    expect(a.retry).toBe(true);
+    expect(a.cancel).toBe(true);
+    expect(a.createk).toBe(true);
+    expect(a.wfedit).toBe(true);
+    expect(a.aiuse).toBe(true);
+
+    const e = await probe(empCtx());
+    expect(e.org).toBe(orgA);
+    expect(e.active).toBe(true);
+    expect(e.aiuse).toBe(true);
+  });
+
   it('jobs: every identity column refuses with 23514, even for a jobs.retry holder', async () => {
     const ctx = aliceCtx();
     await expectFrozen(ctx, `update public.jobs set org_id = $2 where id = $1`, [jobA, orgB]);
@@ -201,12 +256,13 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
   });
 
   it('jobs: service-shaped direct updates (cancel) still land', async () => {
-    const res = await inCtx(
+    const res = await inCtx<{ id: string }>(
       aliceCtx(),
-      `update public.jobs set status = 'cancelled' where id = $1`,
+      `update public.jobs set status = 'cancelled' where id = $1 returning id`,
       [jobA],
     );
     expect(res.rowCount).toBe(1);
+    expect(res.rows).toHaveLength(1);
   });
 
   it('jobs: the worker definers run the lifecycle — start, heartbeat, fail, backoff, retry', async () => {
@@ -237,16 +293,17 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
     );
     expect(backedOff.rows[0]!.ok).toBe(true);
     // The retryJob service shape: every lifecycle column at once.
-    const retried = await inCtx(
+    const retried = await inCtx<{ id: string }>(
       aliceCtx(),
       `update public.jobs
           set status = 'pending', attempts = 0, next_run_at = now(),
               claimed_by = null, claimed_at = null, heartbeat_at = null,
               error_code = null, error_message = null, updated_at = now()
-        where id = $1`,
+        where id = $1 returning id`,
       [jobFail],
     );
     expect(retried.rowCount).toBe(1);
+    expect(retried.rows).toHaveLength(1);
   });
 
   it('jobs: the worker definers complete and release jobs', async () => {
@@ -291,15 +348,16 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
       randomUUID(),
     ]);
     // pause / resume / tick / re-point shapes — workflow_id is a product edit.
-    const edited = await inCtx(
+    const edited = await inCtx<{ id: string }>(
       ctx,
       `update public.schedules
           set name = 'Freeze schedule (renamed)', is_active = false,
               last_run_at = now(), next_run_at = now(), workflow_id = $2, updated_at = now()
-        where id = $1`,
+        where id = $1 returning id`,
       [scheduleA, workflowA2],
     );
     expect(edited.rowCount).toBe(1);
+    expect(edited.rows).toHaveLength(1);
   });
 
   it('workflows: identity columns refuse with 23514; edits and status changes still land', async () => {
@@ -319,17 +377,21 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
       workflowA,
       randomUUID(),
     ]);
-    const edited = await inCtx(
+    const edited = await inCtx<{ id: string }>(
       ctx,
       `update public.workflows
           set name = 'Freeze workflow (edited)', description = 'edited',
               trigger = '{"type":"manual"}'::jsonb, status = 'ACTIVE',
               updated_by = $2, updated_at = now()
-        where id = $1`,
+        where id = $1 returning id`,
       [workflowA, alice],
     );
     expect(edited.rowCount).toBe(1);
+    expect(edited.rows).toHaveLength(1);
     // Soft-delete last: the UPDATE policy hides deleted rows afterwards.
+    // (No RETURNING here: the SELECT policy's deleted_at-is-null predicate
+    // applies to the NEW row's output, so a returning probe would report
+    // zero rows for a delete that landed — rowCount is the honest signal.)
     const deleted = await inCtx(
       ctx,
       `update public.workflows set deleted_at = now() where id = $1`,

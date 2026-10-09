@@ -194,7 +194,7 @@ describe.runIf(HAS_DB)('F-11-04: single recording on both sign-in paths', () => 
     expect(await countEvents(email, 'LOGIN_FAILURE')).toBe(0);
     const row = (
       await owner!.query<{ ip_address: string | null; user_agent: string | null }>(
-        `select ip_address::text, user_agent from public.login_events
+        `select host(ip_address) as ip_address, user_agent from public.login_events
           where email = $1::citext and event_type = 'LOGIN_SUCCESS'`,
         [email],
       )
