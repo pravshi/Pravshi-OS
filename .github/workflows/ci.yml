@@ -89,6 +89,15 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
 
+      # A branch inherits its parent's database state at cut time, so extensions
+      # that roles.sql added after the parent was provisioned (pg_trgm, Phase 8)
+      # are missing on the child. Ensure them here, on the child only, with the
+      # same idempotent statements roles.sql uses.
+      - name: Ensure branch extensions
+        env:
+          DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
+        run: node scripts/ci/ensure-extensions.mjs
+
       # Migrations run as app_owner on the DIRECT host. app_owner owns the schema;
       # this is the only step that uses an owner connection.
       - name: Run migrations
