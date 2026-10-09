@@ -36,7 +36,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const [projectRes, tasksRes, held] = await Promise.all([
     getProjectAction(id),
-    listProjectTasksAction(id, { limit: 500, offset: 0 }),
+    listProjectTasksAction(id, { limit: 100, offset: 0 }),
     getWorkPermissions(),
   ]);
 
@@ -53,6 +53,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
   const project = projectRes;
   const tasksUnavailable = isErrorEnvelope(tasksRes);
+  // Only a FORBIDDEN envelope means the viewer lacks tasks.view; every other
+  // failure (validation, internal) must not claim a permission cause.
+  const tasksForbidden =
+    tasksUnavailable &&
+    (tasksRes.error.code === 'FORBIDDEN' || tasksRes.error.code === 'SCOPE_DENIED');
   const tasks = tasksUnavailable ? [] : toRows(tasksRes);
 
   const canEditProject = held.has(WORK_PERMISSIONS.projects.edit);
@@ -126,7 +131,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       {tasksUnavailable ? (
         <p className="rounded-lg border border-line bg-ground px-4 py-3 text-sm text-ink-muted">
-          Task cards are hidden because you don&apos;t hold <code>tasks.view</code>.
+          {tasksForbidden ? (
+            <>
+              Task cards are hidden because you don&apos;t hold <code>tasks.view</code>.
+            </>
+          ) : (
+            'Tasks couldn’t be loaded. Try refreshing the page.'
+          )}
         </p>
       ) : (
         <TaskBoard
