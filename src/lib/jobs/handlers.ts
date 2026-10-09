@@ -37,6 +37,8 @@ import { isIP } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { env, webhookSigningSecret } from '@/env';
+import { sendViaResend } from '../integrations/providers/email/send';
+import { decryptSecret, IntegrationsVaultError } from '../integrations/secrets';
 import { withAuthorizedDb } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import {
@@ -397,25 +399,41 @@ export function buildEmailIdempotencyKey(job: Job): string {
  * Email provider abstraction.
  *
  * Behavior:
- * - No provider configured (EMAIL_PROVIDER / EMAIL_PROVIDER_API_KEY unset) →
- *   throws CONFIG_ERROR (code 'CONFIG_ERROR' → classifyError marks it
- *   NON-RETRYABLE: "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can
- *   never send is pointless, so this dead-letters immediately.
- * - Provider configured → ALSO FAILS CLOSED: throws CONFIG_ERROR
- *   ("EMAIL_PROVIDER_NOT_IMPLEMENTED", non-retryable). No real transmission
- *   is implemented yet, and a synthetic success would be a false-delivery
- *   integrity failure — the job must never transition to `succeeded` without
- *   an actual send.
- *
- * To wire a real provider: replace the fail-closed branch below with the
- * provider's HTTP API call, sending the `idempotencyKey` as the provider's
- * Idempotency-Key header, and return the provider's message id.
+ * - No provider configured (EMAIL_PROVIDER unset) → throws CONFIG_ERROR
+ *   (code 'CONFIG_ERROR' → classifyError marks it NON-RETRYABLE:
+ *   "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can never send is
+ *   pointless, so this dead-letters immediately.
+ * - EMAIL_PROVIDER=resend → the real adapter
+ *   (src/lib/integrations/providers/email/send.ts, Phase 10 §4.6): sends via
+ *   the Resend SDK with the job's idempotency key, resolving its credential
+ *   (EMAIL_PROVIDER_API_KEY, falling back to RESEND_API_KEY) and reporting
+ *   failures as normalised EmailSendError codes — the same CONFIG_ERROR /
+ *   VALIDATION_ERROR non-retryable + retryable PROVIDER_ERROR contract.
+ * - Any OTHER provider configured → STILL FAILS CLOSED: throws CONFIG_ERROR
+ *   ("EMAIL_PROVIDER_NOT_IMPLEMENTED", non-retryable). No adapter exists for
+ *   it yet, and a synthetic success would be a false-delivery integrity
+ *   failure — the job must never transition to `succeeded` without an
+ *   actual send.
  */
 export async function sendEmailViaProvider(
   input: EmailProviderInput,
 ): Promise<EmailProviderResult> {
   const provider = env.EMAIL_PROVIDER;
   const apiKey = env.EMAIL_PROVIDER_API_KEY;
+
+  // Phase 10 (Wave P): 'resend' is wired. The adapter resolves its own
+  // credential and sender, so this branch runs before the unconfigured
+  // gate below — a deployment that set only RESEND_API_KEY + EMAIL_FROM
+  // (the auth mailers' configuration) sends job email too.
+  if (provider === 'resend') {
+    return sendViaResend({
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
 
   if (!provider || !apiKey) {
     console.warn(
@@ -428,10 +446,10 @@ export async function sendEmailViaProvider(
     );
   }
 
-  // Phase 6 provides the queue/retry infrastructure; wire a real provider here.
-  // Fail closed (CONFIG_ERROR → non-retryable → dead-letter): EMAIL_PROVIDER is
-  // set but nothing actually transmits — returning a synthetic messageId would
-  // let the job "succeed" without any email being sent.
+  // Fail closed (CONFIG_ERROR → non-retryable → dead-letter): EMAIL_PROVIDER
+  // names a provider with no adapter — nothing actually transmits, and
+  // returning a synthetic messageId would let the job "succeed" without any
+  // email being sent.
   console.warn(
     `[jobs] email provider not implemented job=${input.job.id} provider=${provider} ` +
       `to_count=${input.to.length} idempotency_key=${input.idempotencyKey}`,
@@ -474,6 +492,23 @@ export const handleEmail: JobHandler = async (ctx: JobExecutionContext) => {
 export const WEBHOOK_MAX_RESPONSE_BYTES = 1_048_576; // 1 MiB
 /** Max redirects followed; every hop is re-validated through the SSRF guard. */
 export const WEBHOOK_MAX_REDIRECTS = 2;
+
+/**
+ * Phase 10 (Wave W-out) signing header set — fixed here as the §4.5
+ * contract note, and documented for receivers in the webhook security
+ * guide (Wave M):
+ *   x-pravshi-signature   `sha256=<hex>` HMAC-SHA256 over the raw body
+ *   x-pravshi-timestamp   unix seconds when this attempt was sent; the
+ *                         receiver enforces its replay window against it
+ *                         (the signature covers the body only — the
+ *                         timestamp is routing metadata, not signed
+ *                         content, so legacy env-ref deliveries verify
+ *                         exactly as before)
+ *   x-pravshi-webhook-id  the job id (per-attempt correlation)
+ * The envelope body additionally carries the delivery id (`id`), the
+ * receiver's stable dedup key across retries of the same delivery.
+ */
+export const WEBHOOK_TIMESTAMP_HEADER = 'x-pravshi-timestamp';
 
 export interface SsrfCheck {
   allowed: boolean;
@@ -750,6 +785,10 @@ export interface NormalizedWebhook {
   /** Resolved signing secret (never logged). Undefined = no signature. */
   signatureSecret?: string;
   timeoutMs: number;
+  /** Phase 10: org subscription this delivery belongs to (ids only — safe
+   *  to log; the secret itself is never a payload or log field, §4.5). */
+  subscriptionId?: string;
+  deliveryId?: string;
 }
 
 /**
@@ -798,7 +837,8 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
   const headers: Record<string, string> = { ...(p.headers ?? {}) };
   // Never allow caller-supplied signature headers to spoof ours.
   for (const k of Object.keys(headers)) {
-    if (k.toLowerCase() === 'x-pravshi-signature') delete headers[k];
+    const lower = k.toLowerCase();
+    if (lower === 'x-pravshi-signature' || lower === WEBHOOK_TIMESTAMP_HEADER) delete headers[k];
   }
   const signatureSecret =
     typeof inlineSecret === 'string' && inlineSecret.length > 0
@@ -811,7 +851,72 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
     body: serializeWebhookBody(p.body),
     signatureSecret,
     timeoutMs: p.timeoutMs,
+    subscriptionId: p.subscriptionId,
+    deliveryId: p.deliveryId,
   };
+}
+
+/**
+ * Phase 10 (Wave W-out): resolve an org subscription's signing secret on
+ * the worker plane. The payload carries only the subscriptionId (§4.5
+ * [DECISION] — secrets never ride in jobs.payload); the org comes from
+ * the JOB ROW (ctx.job.orgId, §3.6), never from the payload.
+ *
+ * The worker runs as the nil-UUID system actor, which cannot satisfy the
+ * subscriptions SELECT policy (integrations.view), so the read goes
+ * through the bounded SECURITY DEFINER from migration 0059 —
+ * integration_webhook_resolve_delivery(org, subscription) — the
+ * notifications_insert / notifications_recipient_exists pattern. It
+ * returns the row's active flag and signing-secret CIPHERTEXT only;
+ * decryption happens here, with the env-held vault key, and the
+ * plaintext exists only for the duration of the send.
+ *
+ * Returns the plaintext secret, or null when the subscription was
+ * disabled after enqueue (the delivery is dropped, not attempted — a
+ * state the admin chose, so the job completes). Missing/cross-org →
+ * NOT_FOUND; an active subscription without a readable secret →
+ * CONFIG_ERROR (refusing to send unsigned, the env-ref doctrine).
+ */
+async function resolveSubscriptionSigningSecret(
+  ctx: JobExecutionContext,
+  subscriptionId: string,
+): Promise<string | null> {
+  const orgId = ctx.job.orgId;
+  const rows = await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+    tx.execute<{ is_active: boolean; signing_secret_ciphertext: string | null }>(sql`
+      select r.is_active, r.signing_secret_ciphertext
+      from public.integration_webhook_resolve_delivery(
+        ${orgId}::uuid,
+        ${subscriptionId}::uuid
+      ) as r
+    `),
+  );
+  const row = rows.rows[0];
+  if (!row) {
+    failNotFound(`webhook subscription ${subscriptionId} not found in org ${orgId}`);
+  }
+  if (!row.is_active) return null;
+  if (row.signing_secret_ciphertext === null) {
+    failConfig(
+      `webhook subscription ${subscriptionId} has no signing secret configured; ` +
+        'refusing to send unsigned.',
+    );
+  }
+  try {
+    return decryptSecret(row.signing_secret_ciphertext as string);
+  } catch (error) {
+    if (error instanceof IntegrationsVaultError) {
+      // VAULT_NOT_CONFIGURED (key unset) and DECRYPT_FAILED (tampered /
+      // wrong key) alike: retrying this job cannot fix deployment state,
+      // and sending unsigned is never an option — CONFIG_ERROR, and the
+      // static message carries no ciphertext or key material.
+      failConfig(
+        `webhook subscription ${subscriptionId} signing secret could not be resolved ` +
+          `(${error.code}); refusing to send unsigned.`,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -823,9 +928,32 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
  * - HMAC-SHA256 signature header when a secret is configured (never logged).
  * - Non-2xx: 4xx → non-retryable, 5xx → retryable (via classifyError on
  *   the attached statusCode).
+ * - Phase 10: a payload carrying `subscriptionId` is an org subscription
+ *   delivery — its signing secret is resolved + decrypted inside the
+ *   worker (resolveSubscriptionSigningSecret) and takes precedence over
+ *   any env-ref; a subscription disabled after enqueue drops the delivery
+ *   (job succeeds, nothing is sent). Deployment-level payloads (env-ref
+ *   or inline secret, no subscriptionId) behave exactly as before.
  */
 export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
-  const w = normalizeWebhookPayload(ctx.job.payload);
+  const rawSubscriptionId = ctx.job.payload['subscriptionId'];
+  let w: NormalizedWebhook;
+  if (typeof rawSubscriptionId === 'string' && rawSubscriptionId.length > 0) {
+    const subscriptionSecret = await resolveSubscriptionSigningSecret(ctx, rawSubscriptionId);
+    if (subscriptionSecret === null) {
+      console.info(
+        `[jobs] webhook dropped job=${ctx.job.id} subscription=${rawSubscriptionId} ` +
+          'reason=subscription_disabled',
+      );
+      return;
+    }
+    // Inject as the inline-secret alias: normalizeWebhookPayload gives it
+    // precedence over any signatureSecretRef, and strips it before the
+    // schema parse — the plaintext never lands in the stored payload.
+    w = normalizeWebhookPayload({ ...ctx.job.payload, signatureSecret: subscriptionSecret });
+  } else {
+    w = normalizeWebhookPayload(ctx.job.payload);
+  }
 
   const headers: Record<string, string> = { ...w.headers };
   const hasHeader = (name: string): boolean =>
@@ -836,6 +964,7 @@ export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
   if (w.signatureSecret) {
     headers['x-pravshi-signature'] = signWebhookBody(w.body, w.signatureSecret);
   }
+  headers[WEBHOOK_TIMESTAMP_HEADER] = String(Math.floor(Date.now() / 1000));
   headers['x-pravshi-webhook-id'] = ctx.job.id;
 
   let current = await assertWebhookTargetAllowed(w.url);

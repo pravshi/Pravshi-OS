@@ -409,6 +409,38 @@
       "tag": "0055_ai_permissions",
       "breakpoints": true,
       "hash": "6d0096ffaefb73640fc081f375f01bb81f05e65b2654199b910c37d430b43acd"
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1791343891091,
+      "tag": "0056_integrations_schema",
+      "breakpoints": true,
+      "hash": "f835af1e10b9ea682f3cd13d482596b098fe95064f79bf95eb1e32c413a17735"
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791343891092,
+      "tag": "0057_integrations_permissions",
+      "breakpoints": true,
+      "hash": "a38f79d92f0469b21102f813c1e1d85fd39044084fc233c908ac2dfec494a052"
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1791343891093,
+      "tag": "0058_inbound_endpoint_key",
+      "breakpoints": true,
+      "hash": "81eb63bfa9c2b14959f3f8afb640474c75fcc4c1b54a0c13384ce3807c25d3b0"
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1791343891094,
+      "tag": "0059_webhook_delivery_resolution",
+      "breakpoints": true,
+      "hash": "e7175a7bdc41fbf3d26f772c01850abd04892a738d755c9e17d9f068a07b5cfd"
     }
   ]
 }

@@ -3,6 +3,7 @@ import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
+import { emitIntegrationEvent } from '@/lib/integrations/fanout';
 import { isPgCode, parseRequest } from './errors';
 import {
   CreateTaskSchema,
@@ -482,6 +483,25 @@ export async function updateTask(auth: Authorization, id: string, input: unknown
         projectId: task.projectId,
       },
     });
+    // Phase 10 (Wave W-out): outbound webhook fan-out for task.completed.
+    // Same post-commit point as the status_changed dispatch above; the
+    // fan-out instance id reuses its dedup basis. A task created directly
+    // in 'done' does not pass through here (it emits task.created only,
+    // mirroring the workflow events) and does not fan out.
+    // emitIntegrationEvent never throws.
+    if (data.status === 'done') {
+      await emitIntegrationEvent(
+        auth,
+        'task.completed',
+        {
+          task_id: id,
+          title: task.title,
+          project_id: task.projectId,
+          status: 'done',
+        },
+        { eventInstanceId: buildDedupKey('task_status', id, data.status, task.updatedAt) },
+      );
+    }
   }
   if (data.assigneePersonId !== undefined) {
     await dispatchWorkflowEvent(auth, {
@@ -574,6 +594,22 @@ export async function moveTask(
         projectId: moved.projectId,
       },
     });
+    // Phase 10 (Wave W-out): outbound webhook fan-out for task.completed —
+    // same post-commit point and dedup basis as the dispatch above.
+    // emitIntegrationEvent never throws.
+    if (result.toStatus === 'done') {
+      await emitIntegrationEvent(
+        auth,
+        'task.completed',
+        {
+          task_id: id,
+          title: moved.title,
+          project_id: moved.projectId,
+          status: 'done',
+        },
+        { eventInstanceId: buildDedupKey('task_status', id, result.toStatus, moved.updatedAt) },
+      );
+    }
   }
   return { ok: true, taskId: id, fromStatus: result.fromStatus, toStatus: result.toStatus };
 }

@@ -760,8 +760,13 @@ describe('nothing already approved has moved', () => {
     // migrations 0045/0047, plus the 3 Phase 8 policies
     // (select/insert/update × notification_preferences) from migration 0052,
     // plus the 6 Phase 9 policies (select/insert/update × ai_usage_requests,
-    // ai_org_limits) from migration 0054.
-    expect(Number(policies.rows[0]!.n)).toBe(89);
+    // ai_org_limits) from migration 0054, plus the 16 Phase 10 policies
+    // (select/insert/update/delete × integration_connections,
+    // integration_webhook_subscriptions; select/insert ×
+    // integration_webhook_deliveries; select/insert/update ×
+    // integration_inbound_events, integration_sync_checkpoints) from
+    // migration 0056.
+    expect(Number(policies.rows[0]!.n)).toBe(105);
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

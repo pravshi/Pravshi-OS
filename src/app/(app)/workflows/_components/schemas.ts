@@ -49,10 +49,10 @@ export const TRIGGER_TYPE_LABELS: Record<ImplementedTriggerType, string> = {
   'project.created': 'Project created',
   manual: 'Manual run',
   scheduled: 'Scheduled',
+  webhook: 'Webhook',
 };
 
 export const DEFERRED_TRIGGER_LABELS: Record<(typeof DEFERRED_TRIGGER_TYPES)[number], string> = {
-  webhook: 'Webhook',
   'task.overdue': 'Task overdue',
 };
 
@@ -281,6 +281,18 @@ export const TRIGGER_TEMPLATE_PATHS: Record<ImplementedTriggerType, string[]> = 
     '{{event.payload.cron}}',
     '{{event.payload.timezone}}',
     '{{event.payload.windowStart}}',
+  ],
+  // Phase 10 (Wave W-in): webhook events carry no entity — only the receipt
+  // facts the inbound receiver put in the event payload
+  // (src/lib/integrations/inbound.ts); `data` is the sender's parsed body.
+  webhook: [
+    '{{event.type}}',
+    '{{event.occurredAt}}',
+    '{{event.actorPersonId}}',
+    '{{event.payload.providerKey}}',
+    '{{event.payload.connectionId}}',
+    '{{event.payload.externalEventId}}',
+    '{{event.payload.data}}',
   ],
 };
 

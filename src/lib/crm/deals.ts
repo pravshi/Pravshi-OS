@@ -5,6 +5,7 @@ import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { assertDealReferences } from './refs';
 import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
+import { emitIntegrationEvent } from '@/lib/integrations/fanout';
 import {
   CreateDealSchema,
   ListDealsQuerySchema,
@@ -430,6 +431,34 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
         dealValue: deal.value,
       },
     });
+    // Phase 10 (Wave W-out): outbound webhook fan-out for the close events
+    // (deal.won / deal.lost). Same post-commit point and the same won/lost
+    // flags as the dispatch above; the fan-out instance id reuses the
+    // stage-change dedup basis, so a re-emission of this stage change
+    // dedups in the queue. emitIntegrationEvent never throws.
+    const stageIsWon = toStageId !== null ? toStage.isWon : nextStage === 'WON';
+    const stageIsLost = toStageId !== null ? toStage.isLost : nextStage === 'LOST';
+    if (stageIsWon || stageIsLost) {
+      await emitIntegrationEvent(
+        auth,
+        stageIsWon ? 'deal.won' : 'deal.lost',
+        {
+          deal_id: deal.id,
+          title: deal.title,
+          value: deal.value,
+          from_stage_id: fromStageId,
+          to_stage_id: toStageId,
+          from_stage_name: fromStage.name,
+          to_stage_name: toStage.name ?? nextStage,
+        },
+        {
+          eventInstanceId:
+            txResult.historyId !== null
+              ? buildDedupKey('deal_stage_history', txResult.historyId)
+              : buildDedupKey('deal_stage', deal.id, toStageId ?? nextStage, deal.updatedAt),
+        },
+      );
+    }
   }
   return deal;
 }

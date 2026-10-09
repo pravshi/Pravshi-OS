@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  *   Server Action  the first statement of every exported function awaits requirePermission(),
  *                  and Server Actions live only in modules that start with 'use server'
  *
- * The only exceptions are the eight routes below, each of which is pre-authentication or gated
+ * The only exceptions are the routes below, each of which is pre-authentication or gated
  * by its own credential. The list is exact: a new entry is a reviewed change to this file, there
  * is no annotation or comment that exempts a file, and a stale entry fails the build.
  *
@@ -47,6 +47,11 @@ const PRE_AUTH_ROUTES = [
   'src/app/health/route.ts',
   // Database reachability for CI and humans, gated by HEALTH_CHECK_TOKEN.
   'src/app/health/db/route.ts',
+  // Phase 10 (Wave W-in): the inbound webhook endpoint key is the credential;
+  // no session exists. The handler resolves the org ONLY from the hashed key
+  // (contract §4.4) and answers one uniform, unrevealing shape to unknown
+  // keys and refused deliveries alike.
+  'src/app/api/integrations/inbound/[endpointKey]/route.ts',
 ] as const;
 
 const METHODS = 'GET|HEAD|OPTIONS|POST|PUT|PATCH|DELETE';
@@ -276,7 +281,7 @@ describe('the analysers themselves', () => {
 
 describe('every protected entry point authorizes first', () => {
   it('keeps the pre-authentication allow-list exact, and every entry real', () => {
-    expect(PRE_AUTH_ROUTES).toHaveLength(10);
+    expect(PRE_AUTH_ROUTES).toHaveLength(11);
     for (const file of PRE_AUTH_ROUTES) expect(existsSync(file), file).toBe(true);
   });
 

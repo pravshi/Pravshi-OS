@@ -303,9 +303,12 @@ describe('permission catalogue', () => {
     // from migration 0052,
     // plus the 3 Phase 9 AI permissions
     // (ai.use, ai.usage.view, ai.usage.manage)
-    // from migration 0055.
+    // from migration 0055,
+    // plus the 2 Phase 10 integration permissions
+    // (integrations.view, integrations.manage)
+    // from migration 0057.
     // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
-    expect(Number(rows[0]!.count)).toBe(126);
+    expect(Number(rows[0]!.count)).toBe(128);
   });
 
   it('holds every named key from each module', async () => {
@@ -446,6 +449,9 @@ describe('permission catalogue', () => {
       'ai.use',
       'ai.usage.view',
       'ai.usage.manage',
+      // Phase 10 (migration 0057): the Integrations Platform permissions.
+      'integrations.view',
+      'integrations.manage',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -585,13 +591,13 @@ describe('system roles', () => {
        where r.org_id=$1 and r.key='SUPER_ADMIN'`,
       [orgA],
     );
-    // 126 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
-    // 6 Phase 5 workflow + 5 Phase 6 jobs + 3 Phase 8 notifications + 3 Phase 9 ai),
-    // minus users.impersonate
+    // 128 in the catalogue (82 pre-CRM + 14 CRM + 8 Track B + 5 Phase 3 pipeline +
+    // 6 Phase 5 workflow + 5 Phase 6 jobs + 3 Phase 8 notifications + 3 Phase 9 ai +
+    // 2 Phase 10 integrations), minus users.impersonate
     // which is listed but granted to no role. Note: reports.view already existed from
     // migration 0008.
-    expect(Number(rows[0]!.total)).toBe(125);
-    expect(Number(rows[0]!.global)).toBe(125);
+    expect(Number(rows[0]!.total)).toBe(127);
+    expect(Number(rows[0]!.global)).toBe(127);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants plus two Phase 8 notification grants plus the Phase 9 ai.use grant', async () => {

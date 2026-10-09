@@ -56,6 +56,7 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
+import { emitIntegrationEvent } from '../integrations/fanout';
 import { getDeal } from '@/lib/crm/deals';
 import type { Deal } from '@/lib/crm/schema';
 import { getTask } from '@/lib/work/tasks';
@@ -196,6 +197,41 @@ async function finishExecutionSafely(
     // Already reporting the original failure; a stuck RUNNING row is the
     // lesser evil versus masking the root cause.
   }
+}
+
+/**
+ * Phase 10 (Wave W-out): outbound webhook fan-out for terminal runs —
+ * workflow.completed / workflow.failed (contract §4.5 catalogue). Called
+ * AFTER the execution row is closed, at every terminal point of
+ * processWorkflow. emitIntegrationEvent never throws (fan-out contains
+ * its own failures), so this hook can never change a run's outcome or
+ * break the originating mutation (D3). The execution id is the event
+ * instance id: a run finishes exactly once, and any re-emission for the
+ * same execution dedups in the queue.
+ */
+async function emitRunTerminalFanout(
+  auth: Authorization,
+  workflow: MatchedWorkflow,
+  event: WorkflowEvent,
+  executionId: string,
+  status: 'SUCCEEDED' | 'FAILED',
+  errorCode?: string,
+  decision?: string,
+): Promise<void> {
+  await emitIntegrationEvent(
+    auth,
+    status === 'SUCCEEDED' ? 'workflow.completed' : 'workflow.failed',
+    {
+      workflow_id: workflow.id,
+      execution_id: executionId,
+      trigger_type: event.type,
+      entity_type: event.entityType,
+      entity_id: event.entityId,
+      ...(errorCode !== undefined ? { error_code: errorCode } : {}),
+      ...(decision !== undefined ? { decision } : {}),
+    },
+    { eventInstanceId: executionId },
+  );
 }
 
 async function recordStep(
@@ -388,6 +424,15 @@ async function processWorkflow(
           error.code,
           error.message,
         );
+        await emitRunTerminalFanout(
+          auth,
+          workflow,
+          event,
+          executionId,
+          'FAILED',
+          error.code,
+          'snapshot_failed',
+        );
         return executionId;
       }
       throw error;
@@ -404,6 +449,15 @@ async function processWorkflow(
       await finishExecution(auth, executionId, 'SUCCEEDED', {
         decision: 'skipped_conditions',
       });
+      await emitRunTerminalFanout(
+        auth,
+        workflow,
+        event,
+        executionId,
+        'SUCCEEDED',
+        undefined,
+        'skipped_conditions',
+      );
       return executionId;
     }
 
@@ -434,6 +488,15 @@ async function processWorkflow(
           failure.errorCode,
           failure.errorMessage,
         );
+        await emitRunTerminalFanout(
+          auth,
+          workflow,
+          event,
+          executionId,
+          'FAILED',
+          failure.errorCode,
+          'template_failed',
+        );
         return executionId;
       }
 
@@ -456,12 +519,21 @@ async function processWorkflow(
           result.errorCode ?? 'INTERNAL',
           result.errorMessage ?? 'action failed',
         );
+        await emitRunTerminalFanout(
+          auth,
+          workflow,
+          event,
+          executionId,
+          'FAILED',
+          result.errorCode ?? 'INTERNAL',
+        );
         return executionId;
       }
     }
 
     // (e) All steps ok.
     await finishExecution(auth, executionId, 'SUCCEEDED', { steps: completedSteps });
+    await emitRunTerminalFanout(auth, workflow, event, executionId, 'SUCCEEDED');
     return executionId;
   } catch (error) {
     await finishExecutionSafely(
@@ -470,6 +542,15 @@ async function processWorkflow(
       { steps: completedSteps, decision: 'processing_failed' },
       'INTERNAL',
       'workflow processing failed unexpectedly',
+    );
+    await emitRunTerminalFanout(
+      auth,
+      workflow,
+      event,
+      executionId,
+      'FAILED',
+      'INTERNAL',
+      'processing_failed',
     );
     reportEngineFailure(error, {
       workflowId: workflow.id,

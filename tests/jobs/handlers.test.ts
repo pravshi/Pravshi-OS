@@ -19,6 +19,16 @@ vi.mock('../../src/lib/db/authorized', () => ({
   withAuthorizedDb: vi.fn(),
 }));
 
+// Phase 10 (Wave P): the Resend SDK is stubbed so the wired email adapter
+// path can be asserted without network access or a real provider account.
+const resendMocks = vi.hoisted(() => ({ send: vi.fn() }));
+
+vi.mock('resend', () => ({
+  Resend: class {
+    emails = { send: resendMocks.send };
+  },
+}));
+
 import type { JobExecutionContext } from '../../src/lib/jobs/worker';
 import {
   assertValidEmailAddress,
@@ -214,6 +224,8 @@ describe('handleEmail', () => {
     process.env = { ...OLD_ENV };
     delete process.env.EMAIL_PROVIDER;
     delete process.env.EMAIL_PROVIDER_API_KEY;
+    resendMocks.send.mockReset();
+    resendMocks.send.mockResolvedValue({ data: { id: 'msg-test' }, error: null });
   });
 
   afterEach(() => {
@@ -244,12 +256,75 @@ describe('handleEmail', () => {
     }
   });
 
-  it('throws EMAIL_PROVIDER_NOT_IMPLEMENTED (non-retryable) when a provider is configured but not wired', async () => {
-    // The email stub must fail closed: a configured provider with no real
-    // transmission must never let the job report success.
+  it('sends through the Resend adapter when EMAIL_PROVIDER=resend is configured', async () => {
     const prevProvider = env.EMAIL_PROVIDER;
     const prevKey = env.EMAIL_PROVIDER_API_KEY;
+    const prevFrom = env.EMAIL_FROM;
     env.EMAIL_PROVIDER = 'resend';
+    env.EMAIL_PROVIDER_API_KEY = 'test-api-key';
+    env.EMAIL_FROM = 'no-reply@example.com';
+    try {
+      const job = makeJob({
+        type: 'email',
+        payload: { to: 'ops@example.com', subject: 'S', text: 'hello' },
+      });
+      await expect(handleEmail(makeCtx(job))).resolves.toBeUndefined();
+      expect(resendMocks.send).toHaveBeenCalledTimes(1);
+      expect(resendMocks.send).toHaveBeenCalledWith(
+        { from: 'no-reply@example.com', to: ['ops@example.com'], subject: 'S', text: 'hello' },
+        { idempotencyKey: buildEmailIdempotencyKey(job) },
+      );
+    } finally {
+      env.EMAIL_PROVIDER = prevProvider;
+      env.EMAIL_PROVIDER_API_KEY = prevKey;
+      env.EMAIL_FROM = prevFrom;
+    }
+  });
+
+  it('normalises a Resend transport failure to a retryable PROVIDER_ERROR', async () => {
+    const prevProvider = env.EMAIL_PROVIDER;
+    const prevKey = env.EMAIL_PROVIDER_API_KEY;
+    const prevFrom = env.EMAIL_FROM;
+    env.EMAIL_PROVIDER = 'resend';
+    env.EMAIL_PROVIDER_API_KEY = 'test-api-key';
+    env.EMAIL_FROM = 'no-reply@example.com';
+    resendMocks.send.mockResolvedValueOnce({
+      data: null,
+      error: {
+        name: 'application_error',
+        statusCode: null,
+        message: 'Unable to fetch data. The request could not be resolved.',
+      },
+    });
+    try {
+      const ctx = makeCtx(
+        makeJob({
+          type: 'email',
+          payload: { to: 'ops@example.com', subject: 'S', text: 'hello' },
+        }),
+      );
+      try {
+        await handleEmail(ctx);
+        throw new Error('expected throw');
+      } catch (err) {
+        expect((err as Error).message).toContain('EMAIL_SEND_FAILED');
+        expect((err as Error).message).not.toContain('EMAIL_PROVIDER_NOT_IMPLEMENTED');
+        expect((err as { code?: string }).code).toBe('PROVIDER_ERROR');
+        expect(classifyError(err).retryable).toBe(true);
+      }
+    } finally {
+      env.EMAIL_PROVIDER = prevProvider;
+      env.EMAIL_PROVIDER_API_KEY = prevKey;
+      env.EMAIL_FROM = prevFrom;
+    }
+  });
+
+  it('throws EMAIL_PROVIDER_NOT_IMPLEMENTED (non-retryable) for an unknown provider', async () => {
+    // Fail closed: a provider name with no adapter must never let the job
+    // report success without an actual transmission.
+    const prevProvider = env.EMAIL_PROVIDER;
+    const prevKey = env.EMAIL_PROVIDER_API_KEY;
+    env.EMAIL_PROVIDER = 'smtp';
     env.EMAIL_PROVIDER_API_KEY = 'test-api-key';
     try {
       const ctx = makeCtx(
@@ -266,6 +341,7 @@ describe('handleEmail', () => {
         expect((err as { code?: string }).code).toBe('CONFIG_ERROR');
         expect(classifyError(err).retryable).toBe(false);
       }
+      expect(resendMocks.send).not.toHaveBeenCalled();
     } finally {
       env.EMAIL_PROVIDER = prevProvider;
       env.EMAIL_PROVIDER_API_KEY = prevKey;
