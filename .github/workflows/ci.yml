@@ -14,15 +14,10 @@ on:
 permissions:
   contents: read
 
-# One ephemeral database branch per ref, not one per push.
+# One run per ref: a new push cancels the run it supersedes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  # A fixed, derivable name so cleanup can find the branch even if the job that
-  # created it was cancelled.
-  CI_BRANCH_NAME: ci/${{ github.event.number && format('pr-{0}', github.event.number) || format('ref-{0}', github.run_id) }}
 
 jobs:
   # Static checks that need no database and no secrets. Fast, and they fail first.
@@ -48,9 +43,51 @@ jobs:
       - run: pnpm format:check
       - run: pnpm audit --audit-level=high
 
+  # ── The database never comes from Neon in CI ─────────────────────────────────────
+  #
+  # CI used to cut a Neon branch from production for every run. With many pull requests a
+  # day that exhausted the project's monthly Neon storage allowance, and it copied real
+  # production data into every run. Now every run gets its own empty Postgres, built from
+  # zero by scripts/db/roles.sql and every migration, and thrown away with the job:
+  #
+  #   * no Neon storage or compute is used by CI at all, however many runs there are;
+  #   * no production data ever reaches CI, and CI holds no Neon credential;
+  #   * every run proves the full migration history applies to an empty database.
+  #
+  # The code under test still uses the real @neondatabase/serverless driver. Neon's own
+  # wsproxy tunnels its WebSocket to Postgres byte-for-byte, with no authentication of its
+  # own, so every connection logs in as its own role (app_user, app_owner) with that role's
+  # own password, and RLS applies exactly as on Neon. scripts/ci/neon-local.mjs points the
+  # driver at the proxy, and does nothing unless NEON_LOCAL_WSPROXY is set.
   ci:
     runs-on: ubuntu-latest
     needs: guards
+    services:
+      postgres:
+        # Neon runs Postgres 18. Pinned by digest: CI must not change underneath us.
+        image: postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+        env:
+          # Throwaway superuser for a database that lives only as long as this job, is
+          # reachable only from the runner, and holds no data until the tests create it.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neondb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d neondb"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      wsproxy:
+        image: ghcr.io/neondatabase/wsproxy:latest@sha256:7f2e2149aa6a57ba382a140102fba44f5053f3e44389ccc18adcecf896054efb
+        env:
+          # The proxy's default allowlist is *.neon.tech. Here it may reach exactly one
+          # address: this job's Postgres.
+          ALLOW_ADDR_REGEX: '^postgres:5432$'
+          LOG_CONN_INFO: 'false'
+        ports: ['8080:80']
+    env:
+      NEON_LOCAL_WSPROXY: localhost:8080
+      NEON_LOCAL_PG_ADDRESS: postgres:5432
+      # src/env.ts validates the runtime environment at import time, and CI has no .env.
+      APP_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -59,84 +96,100 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
 
-      # Ephemeral Neon branch cut from the NON-PRODUCTION parent, with branch-only
-      # credentials. The script refuses to branch from the default (production) branch.
-      - name: Create ephemeral Neon branch
-        id: neon
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-          NEON_PARENT_BRANCH: production
-        run: node scripts/ci/provision-branch-role.mjs create
-
       # Task 1.12 made BETTER_AUTH_SECRET a required runtime variable, and src/env.ts
       # validates the environment at import time — so every step that loads the app needs
-      # one. It is generated per run rather than stored as a repository secret:
-      #
-      #   * the secret only signs session cookies, and a CI job's sessions are created and
-      #     consumed inside that same job, so nothing needs continuity across runs;
-      #   * it keeps the repository's Actions secrets at exactly two, NEON_API_KEY and
-      #     NEON_PROJECT_ID, which is the rule Task 11 established;
-      #   * no long-lived signing key exists in Actions to be leaked or to go stale.
-      #
-      # Masked before it is written, so it cannot surface in a log line.
+      # one. It is generated per run rather than stored as a repository secret: a CI job's
+      # sessions are created and consumed inside that same job, so nothing needs
+      # continuity across runs, and no long-lived signing key exists in Actions to be
+      # leaked or to go stale. Masked before it is written, so it cannot surface in a log.
       - name: Generate an ephemeral session signing secret
         run: |
           SECRET=$(openssl rand -base64 32)
           echo "::add-mask::$SECRET"
           echo "BETTER_AUTH_SECRET=$SECRET" >> "$GITHUB_ENV"
 
+      # Per-run passwords for the two roles CI logs in as. Generated here, masked, and gone
+      # with the job: no database credential exists anywhere outside this run.
+      #
+      # The hostnames are never resolved — scripts/ci/neon-local.mjs sends every connection
+      # to the job's Postgres. They exist to keep src/env.ts's rules intact: the runtime URL
+      # must name a pooled ("-pooler.") host and the migration URL must not.
+      - name: Generate per-run database credentials
+        run: |
+          OWNER_PW=$(openssl rand -hex 24)
+          USER_PW=$(openssl rand -hex 24)
+          echo "::add-mask::$OWNER_PW"
+          echo "::add-mask::$USER_PW"
+          {
+            echo "CI_OWNER_PW=$OWNER_PW"
+            echo "CI_USER_PW=$USER_PW"
+            echo "DATABASE_URL=postgresql://app_user:${USER_PW}@ci-pooler.local/neondb"
+            echo "DATABASE_URL_TEST=postgresql://app_user:${USER_PW}@ci-pooler.local/neondb"
+            echo "DATABASE_URL_MIGRATE=postgresql://app_owner:${OWNER_PW}@ci.local/neondb"
+          } >> "$GITHUB_ENV"
+
       - run: pnpm typecheck
       - run: pnpm lint
 
-      # A branch inherits its parent's database state at cut time, so extensions
-      # that roles.sql added after the parent was provisioned (pg_trgm, Phase 8)
-      # are missing on the child. Ensure them here, on the child only, with the
-      # same idempotent statements roles.sql uses.
-      - name: Ensure branch extensions
+      # On Neon the app reaches Postgres through Neon's pooler, which accepts thousands of
+      # client connections, and the suite is written against that: test files run in
+      # parallel and some deliberately open 50 connections at once. Plain Postgres stops at
+      # 100. max_connections only takes effect on restart, and a service container cannot be
+      # given a command line, so it is set with ALTER SYSTEM and the container restarted.
+      - name: Raise the connection limit to match Neon's pooler
         env:
-          DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
-        run: node scripts/ci/ensure-extensions.mjs
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: neondb
+        run: |
+          psql -v ON_ERROR_STOP=1 -q -c "alter system set max_connections = 500"
+          docker restart ${{ job.services.postgres.id }}
+          for i in $(seq 1 60); do pg_isready -q && break; sleep 1; done
+          psql -tAc "show max_connections"
 
-      # Migrations run as app_owner on the DIRECT host. app_owner owns the schema;
-      # this is the only step that uses an owner connection.
-      - name: Run migrations
+      # The same roles.sql every Neon branch is provisioned with, run as the database owner,
+      # then the per-run passwords. roles.sql asserts the roles hold no BYPASSRLS,
+      # SUPERUSER, CREATEROLE or CREATEDB and stops if they do.
+      - name: Provision roles on the fresh database
         env:
-          DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
-        # The repo's own runner: replicates drizzle-kit migrate semantics
-        # (same journal, per-migration transaction) but prints the failing
-        # statement's error — drizzle-kit exits silently in non-TTY logs —
-        # and does not depend on direct-TCP reachability.
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: neondb
+        run: |
+          psql -v ON_ERROR_STOP=1 -q -f scripts/db/roles.sql
+          psql -v ON_ERROR_STOP=1 -q -v owner_pw="$CI_OWNER_PW" -v user_pw="$CI_USER_PW" <<'SQL'
+          alter role app_owner password :'owner_pw';
+          alter role app_user password :'user_pw';
+          SQL
+
+      # Proves the plumbing before anything depends on it: through the proxy, each URL
+      # must log in as its own role, and the runtime role must be unable to bypass RLS.
+      # If the proxy ever connected as a superuser instead, this stops the run here.
+      - name: Verify each role connects as itself
+        run: |
+          node --input-type=module -e "
+          import './scripts/ci/neon-local.mjs';
+          import { Pool } from '@neondatabase/serverless';
+          for (const [name, want] of [['DATABASE_URL','app_user'],['DATABASE_URL_MIGRATE','app_owner']]) {
+            const pool = new Pool({ connectionString: process.env[name] });
+            const { rows: [r] } = await pool.query(
+              'select current_user as u, (select rolsuper or rolbypassrls from pg_roles where rolname = current_user) as bypass');
+            await pool.end();
+            if (r.u !== want || r.bypass) throw new Error(name + ' connected as ' + r.u + ' (bypass=' + r.bypass + ')');
+            console.log(name + ': ' + r.u + ', no superuser, no BYPASSRLS');
+          }"
+
+      # Migrations run as app_owner, through the same driver the app uses. This is the only
+      # step that uses an owner connection.
+      - name: Run migrations from zero
         run: node scripts/migrate-ws.mjs
 
-      # Tests run as app_user on the POOLED host — the role that cannot bypass RLS.
-      # APP_URL is required because src/env.ts validates the runtime environment at
-      # import time, and CI has no .env file.
+      # Tests run as app_user — the role that cannot bypass RLS.
       - name: Test
-        env:
-          DATABASE_URL: ${{ steps.neon.outputs.db_url_app }}
-          DATABASE_URL_TEST: ${{ steps.neon.outputs.db_url_app }}
-          DATABASE_URL_MIGRATE: ${{ steps.neon.outputs.db_url_migrate }}
-          APP_URL: http://localhost:3000
         run: pnpm test
 
-      - name: Build
-        env:
-          DATABASE_URL: ${{ steps.neon.outputs.db_url_app }}
-          APP_URL: http://localhost:3000
-        run: pnpm build
-
-  # always(): the branch must die even when ci is cancelled or fails, on every event.
-  cleanup:
-    runs-on: ubuntu-latest
-    needs: [ci]
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version-file: .nvmrc }
-      - name: Delete ephemeral Neon branch
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-        run: node scripts/ci/provision-branch-role.mjs delete
+      - run: pnpm build

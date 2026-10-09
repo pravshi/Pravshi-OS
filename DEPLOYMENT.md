@@ -50,8 +50,10 @@ The database topology that a deployment would map onto:
 ```
 production          Vercel Production would use this, as app_user, pooled
 └── staging         Vercel Preview would use this, as app_user, pooled
-    └── ci/pr-<n>   ephemeral, created and destroyed per CI run
 ```
+
+CI does not use Neon at all: each run starts its own throwaway Postgres container. See
+CONTRIBUTING.md, "Databases in CI".
 
 ## Future deployment procedure
 

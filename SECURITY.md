@@ -236,8 +236,9 @@ transcript. Treat "it was only briefly visible" as compromised.
 6. **Check whether the credential lived anywhere else** — GitHub Actions secrets, CI logs,
    Vercel. Database URLs are deliberately absent from Actions, so usually there is nothing.
 
-Rotating an ephemeral CI credential is never necessary: CI resets the role password on each
-throwaway branch, and the branch is destroyed at the end of the run.
+Rotating a CI credential is never necessary: CI runs against its own throwaway Postgres
+service container, generates every role password per run, and discards the database with
+the job. CI holds no Neon credential at all.
 
 ## Reporting a security problem
 
