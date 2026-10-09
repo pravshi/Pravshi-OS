@@ -175,7 +175,9 @@ describe('routes and pages', () => {
   it('both pages exist and the login page links to forgot-password', () => {
     expect(existsSync(root('src/app/(auth)/forgot-password/page.tsx'))).toBe(true);
     expect(existsSync(root('src/app/(auth)/reset-password/page.tsx'))).toBe(true);
-    const login = readFileSync(root('src/app/(auth)/login/page.tsx'), 'utf8');
+    // The link lives in the client form the page renders (P1c split page.tsx
+    // into a server wrapper + login-form.tsx for the signed-in redirect).
+    const login = readFileSync(root('src/app/(auth)/login/login-form.tsx'), 'utf8');
     expect(login).toMatch(/href="\/forgot-password"/);
   });
 

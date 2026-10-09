@@ -18,7 +18,13 @@ const HELPER = readFileSync(root('src/lib/auth/mfa-enforcement.ts'), 'utf8');
 const LOGIN_ROUTE = readFileSync(root('src/app/api/auth/login/route.ts'), 'utf8');
 const AUTH_SERVER = readFileSync(root('src/lib/auth/server.ts'), 'utf8');
 const ADMIN_LAYOUT = readFileSync(root('src/app/(app)/admin/layout.tsx'), 'utf8');
-const LOGIN_PAGE = readFileSync(root('src/app/(auth)/login/page.tsx'), 'utf8');
+// The login page is a server wrapper (page.tsx) rendering the client form
+// (login-form.tsx) since P1c split them for the signed-in redirect; the page
+// as rendered is both files.
+const LOGIN_PAGE = [
+  readFileSync(root('src/app/(auth)/login/page.tsx'), 'utf8'),
+  readFileSync(root('src/app/(auth)/login/login-form.tsx'), 'utf8'),
+].join('\n');
 const SECURITY_PAGE = readFileSync(root('src/app/(app)/me/security/page.tsx'), 'utf8');
 const AUDIT_LIB = readFileSync(root('src/lib/admin/audit.ts'), 'utf8');
 

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Sidebar } from './sidebar';
 import { MobileTabBar } from './mobile-tab-bar-server';
 import { ThemeToggle } from './theme-toggle';
+import { UserMenu } from './user-menu';
 import { GlobalSearch } from '@/components/search/GlobalSearch';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 
@@ -24,6 +25,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 slot — do not remove or reorder the other workstream's element. */}
             <NotificationBell />
             <ThemeToggle />
+            {/* AUD-03: the account menu — identity and sign-out — closes the
+                right cluster. */}
+            <UserMenu />
           </div>
         </header>
         {/* pb-20 on mobile clears the fixed bottom tab bar; removed at md+ */}

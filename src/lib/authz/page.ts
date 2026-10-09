@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { resolveAuthContext } from '@/lib/auth/session';
+import { loginPathForNext } from '@/lib/auth/next-path';
 import { isAuthorizationError } from './errors';
 import { requirePermission, type Authorization } from './require-permission';
 import type { AuthContext } from '@/lib/db/context';
@@ -17,10 +18,19 @@ import type { AuthContext } from '@/lib/db/context';
  * permission was missing or what lies behind the boundary.
  */
 
-/** Redirects to /login when the request carries no PRAVSHI OS identity. */
+/**
+ * Redirects to /login when the request carries no PRAVSHI OS identity.
+ *
+ * The redirect carries the intended page as a `next` parameter (AUD-21), so
+ * sign-in can return the user to the deep link they asked for. The path comes
+ * from the x-pathname header middleware stamps on the request; the target is
+ * built by loginPathForNext(), which admits only same-origin relative paths,
+ * and the login flow validates the value again before honouring it.
+ */
 export async function requireAuthenticated(): Promise<AuthContext> {
-  const ctx = await resolveAuthContext(await headers());
-  if (!ctx) redirect('/login');
+  const hdrs = await headers();
+  const ctx = await resolveAuthContext(hdrs);
+  if (!ctx) redirect(loginPathForNext(hdrs.get('x-pathname')));
   return ctx;
 }
 

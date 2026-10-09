@@ -8,10 +8,15 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/auth/mfa/verify — the server-mediated second-factor check.
  *
- * The browser posts the TOTP code here (not to Better Auth directly) so MFA_FAILURE is
- * recorded like every other authentication outcome. The code check itself is delegated
- * to auth.api.verifyTOTP — this route invents no TOTP logic. On success the aal2 session
- * is created by the library (sessionAssuranceFor stamps it) and its cookies are forwarded.
+ * The browser posts the code here (not to Better Auth directly) so MFA_FAILURE is
+ * recorded like every other authentication outcome. The check itself is delegated —
+ * to auth.api.verifyTOTP for an authenticator code, or to auth.api.verifyBackupCode
+ * when the body names method 'backup-code' (AUD-21) — this route invents no factor
+ * logic. Backup codes are the library's: issued at enrolment, stored encrypted, and
+ * single-use because the library removes the spent code from the stored set as it
+ * verifies. On success the aal2 session is created by the library
+ * (sessionAssuranceFor stamps it — '/two-factor/verify-' covers both endpoints)
+ * and its cookies are forwarded.
  *
  * The email in the body is a logging hint, not an authentication input: the pending
  * two-factor session (carried in the forwarded cookies) identifies the user. A client
@@ -24,7 +29,9 @@ export const dynamic = 'force-dynamic';
 
 const MAX_BODY_CHARS = 4096;
 const Body = z.strictObject({
-  code: z.string().trim().min(6).max(10),
+  code: z.string().trim().min(6).max(32),
+  /** Which second factor the code belongs to. Absent means the authenticator code. */
+  method: z.enum(['totp', 'backup-code']).optional(),
   /** Logging hint only — see above. */
   email: z.string().trim().email().max(254).optional(),
 });
@@ -71,14 +78,21 @@ export async function POST(req: Request) {
 
   const ip = clientIp(req);
   const userAgent = req.headers.get('user-agent');
+  const viaBackupCode = body.method === 'backup-code';
 
   let res: Response;
   try {
-    res = await auth.api.verifyTOTP({
-      body: { code: body.code },
-      headers: req.headers,
-      asResponse: true,
-    });
+    res = viaBackupCode
+      ? await auth.api.verifyBackupCode({
+          body: { code: body.code },
+          headers: req.headers,
+          asResponse: true,
+        })
+      : await auth.api.verifyTOTP({
+          body: { code: body.code },
+          headers: req.headers,
+          asResponse: true,
+        });
   } catch {
     const orgId = body.email ? await resolveLoginOrg(body.email) : null;
     await recordLoginEvent({
@@ -126,7 +140,7 @@ export async function POST(req: Request) {
     authUserId: data.user.id,
     ip,
     userAgent,
-    metadata: { via: 'mfa' },
+    metadata: { via: viaBackupCode ? 'backup-code' : 'mfa' },
   });
   return forward(res, bodyText);
 }

@@ -5,6 +5,10 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  INVITE_PASSWORD_GUIDANCE,
+  inviteAcceptErrorMessage,
+} from '@/lib/invitations/error-messages';
 
 /**
  * /invite — the invitation-acceptance page. The link in the invitation email is
@@ -83,11 +87,11 @@ export default function InvitePage() {
       });
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       if (!res.ok) {
-        setError(
-          data?.error === 'PASSWORD_TOO_SHORT'
-            ? 'The password is too short.'
-            : 'This invitation link is invalid, expired, or already used.',
-        );
+        // Every server code maps to an accurate, distinct message (AUD-02):
+        // a breached or common password is a password problem, never reported
+        // as an invitation problem. Only INVITATION_INVALID switches the page
+        // to the invalid-link state — the token itself is what failed there.
+        setError(inviteAcceptErrorMessage(data?.error));
         if (data?.error === 'INVITATION_INVALID') setPhase({ kind: 'invalid' });
         return;
       }
@@ -160,10 +164,12 @@ export default function InvitePage() {
             type="password"
             autoComplete="new-password"
             required
+            minLength={12}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={pending}
           />
+          <p className="text-xs text-ink-muted">{INVITE_PASSWORD_GUIDANCE}</p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="confirm">Confirm password</Label>
