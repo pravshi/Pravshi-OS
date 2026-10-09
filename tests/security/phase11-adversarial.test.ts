@@ -93,6 +93,22 @@ import { POST as authAllPOST } from '@/app/api/auth/[...all]/route';
 import type { Authorization } from '@/lib/authz/require-permission';
 import type { Account } from '../authz/fixtures';
 
+// Test-only vault key (32 bytes, base64) — the same provisioning the
+// integrations suite uses (tests/integrations/security.test.ts): §D's
+// Phase 10 sentinel stores a Tier V credential through createConnection,
+// and CI sets no INTEGRATIONS_ENCRYPTION_KEY, so without this the vault
+// reads NOT_CONFIGURED and the connection refuses (PR #69 run 2). The
+// key must be in process.env BEFORE any application module is imported —
+// src/env.ts snapshots process.env once at module load — and unlike the
+// integrations suite this file statically imports application modules
+// (@/lib/auth/server pulls in @/env), so the assignment runs in
+// vi.hoisted, which vitest evaluates ahead of the file's imports. The
+// key only configures the integrations vault; no other section's cases
+// touch it.
+vi.hoisted(() => {
+  process.env.INTEGRATIONS_ENCRYPTION_KEY = Buffer.alloc(32, 0x51).toString('base64');
+});
+
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 
 const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE }) : null;

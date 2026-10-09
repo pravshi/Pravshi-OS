@@ -37,6 +37,22 @@
  * with an actor-capability precondition that resolves org_id /
  * is_active / has() for both probe contexts explicitly, so an actor
  * regression can never again masquerade as a freeze failure.
+ *
+ * WORKFLOWS SOFT-DELETE (CI fix wave, PR #69 run 2): the workflows case
+ * originally ended with a direct `set deleted_at = now()` UPDATE as
+ * app_user, expected to land. The server log showed it raising "new row
+ * violates row-level security policy": PostgreSQL checks an UPDATE's
+ * new row against the SELECT policy as well as the UPDATE policy's
+ * WITH CHECK (the updated row must remain visible to its updater), and
+ * workflows_select requires deleted_at is null — so the refusal comes
+ * from the policy layer, not the freeze (deleted_at is deliberately
+ * mutable). That is precisely why production soft-deletes workflows
+ * through the two-step in src/lib/workflows/service.ts (a no-op probe
+ * UPDATE as app_user, then the crm_soft_delete definer). The case now
+ * pins the 42501 refusal, mirrors the production two-step, and also
+ * probes the frozen columns as the owner — RLS-exempt, so a 23514 there
+ * is the trigger alone — pinning the policy and trigger layers
+ * separately.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -98,10 +114,21 @@ async function expectFrozen(ctx: Ctx, text: string, params: unknown[]): Promise<
   expect(await sqlstateOf(inCtx(ctx, text, params))).toBe('23514');
 }
 
+/**
+ * The same probe as the owner. The owner is RLS-exempt (workflows &
+ * friends carry an owner policy of using (true) / with check (true)),
+ * but BEFORE UPDATE triggers fire for the owner exactly as for app_user
+ * — so a 23514 here can only be the freeze trigger itself, never the
+ * policy stack. This pins the trigger layer independently of RLS.
+ */
+async function expectFrozenAsOwner(text: string, params: unknown[]): Promise<void> {
+  expect(await sqlstateOf(owner.query(text, params))).toBe('23514');
+}
+
 describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
   let orgA = '';
   let orgB = '';
-  let alice = ''; // orgA operator: jobs.view/create/retry/cancel, workflows.view/edit, ai.use
+  let alice = ''; // orgA operator: jobs.view/create/retry/cancel, workflows.view/edit/delete, ai.use
   let empA = ''; // orgA requester: ai.use (owns the usage row)
   let workflowA = '';
   let workflowA2 = '';
@@ -159,6 +186,7 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
       'jobs.cancel',
       'workflows.view',
       'workflows.edit',
+      'workflows.delete',
       'ai.use',
     ]);
     await mkRoleFor(owner, orgA, empA, `P11FZEMP${RUN}`, ['ai.use']);
@@ -207,6 +235,7 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
       cancel: boolean;
       createk: boolean;
       wfedit: boolean;
+      wfdelete: boolean;
       aiuse: boolean;
     };
     const probe = async (ctx: Ctx): Promise<Probe> =>
@@ -216,7 +245,7 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
           `select authz.org_id() as org, authz.is_active() as active,
                   authz.has('jobs.retry') as retry, authz.has('jobs.cancel') as cancel,
                   authz.has('jobs.create') as createk, authz.has('workflows.edit') as wfedit,
-                  authz.has('ai.use') as aiuse`,
+                  authz.has('workflows.delete') as wfdelete, authz.has('ai.use') as aiuse`,
         )
       ).rows[0]!;
 
@@ -227,12 +256,16 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
     expect(a.cancel).toBe(true);
     expect(a.createk).toBe(true);
     expect(a.wfedit).toBe(true);
+    // The workflows case ends with the production soft-delete two-step,
+    // whose definer half (crm_soft_delete) fail-closes without this key.
+    expect(a.wfdelete).toBe(true);
     expect(a.aiuse).toBe(true);
 
     const e = await probe(empCtx());
     expect(e.org).toBe(orgA);
     expect(e.active).toBe(true);
     expect(e.aiuse).toBe(true);
+    expect(e.wfdelete).toBe(false);
   });
 
   it('jobs: every identity column refuses with 23514, even for a jobs.retry holder', async () => {
@@ -362,6 +395,11 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
 
   it('workflows: identity columns refuse with 23514; edits and status changes still land', async () => {
     const ctx = aliceCtx();
+    // Layer 1, in the real policy context: the BEFORE UPDATE freeze
+    // trigger fires before the policy's WITH CHECK stage, so each probe
+    // surfaces the trigger's 23514 — including the org_id probe, whose
+    // new row would ALSO fail WITH CHECK (org) had the trigger not
+    // raised first.
     await expectFrozen(ctx, `update public.workflows set org_id = $2 where id = $1`, [
       workflowA,
       orgB,
@@ -377,6 +415,26 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
       workflowA,
       randomUUID(),
     ]);
+    // Layer 1 again, isolated: as the owner, row security cannot refuse
+    // anything (owner policy: using (true) / with check (true)), yet the
+    // same four probes still raise 23514 — that refusal is the trigger
+    // alone, a property of the table rather than of the app_user policy
+    // stack.
+    await expectFrozenAsOwner(`update public.workflows set org_id = $2 where id = $1`, [
+      workflowA,
+      orgB,
+    ]);
+    await expectFrozenAsOwner(`update public.workflows set created_by = $2 where id = $1`, [
+      workflowA,
+      empA,
+    ]);
+    await expectFrozenAsOwner(`update public.workflows set created_at = now() where id = $1`, [
+      workflowA,
+    ]);
+    await expectFrozenAsOwner(`update public.workflows set id = $2 where id = $1`, [
+      workflowA,
+      randomUUID(),
+    ]);
     const edited = await inCtx<{ id: string }>(
       ctx,
       `update public.workflows
@@ -388,16 +446,39 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
     );
     expect(edited.rowCount).toBe(1);
     expect(edited.rows).toHaveLength(1);
-    // Soft-delete last: the UPDATE policy hides deleted rows afterwards.
-    // (No RETURNING here: the SELECT policy's deleted_at-is-null predicate
-    // applies to the NEW row's output, so a returning probe would report
-    // zero rows for a delete that landed — rowCount is the honest signal.)
-    const deleted = await inCtx(
+    // Soft-delete last. deleted_at is NOT frozen — the trigger passes a
+    // direct `set deleted_at` UPDATE — but the statement is still
+    // refused, by layer 2 (the policy stack): PostgreSQL checks an
+    // UPDATE's new row against the SELECT policy too (the updated row
+    // must remain visible to its updater), and workflows_select
+    // requires deleted_at is null, so the new row fails that check with
+    // 42501. Pin the refusal as the documented reason the direct path
+    // is not the production path…
+    expect(
+      await sqlstateOf(
+        inCtx(ctx, `update public.workflows set deleted_at = now() where id = $1`, [workflowA]),
+      ),
+    ).toBe('42501');
+    // …then soft-delete the production way (src/lib/workflows/service.ts
+    // deleteWorkflow runs both steps in ONE transaction; nothing in the
+    // definer depends on the probe's lock, so the two statements here
+    // run back-to-back in alice's context): a no-op probe UPDATE as
+    // app_user under the real UPDATE policy, then the crm_soft_delete
+    // definer, whose M1 probe requires the workflows.delete key alice
+    // holds. The freeze must not block either step.
+    const probe = await inCtx<{ id: string }>(
       ctx,
-      `update public.workflows set deleted_at = now() where id = $1`,
+      `update public.workflows set updated_at = updated_at where id = $1 returning id`,
       [workflowA],
     );
-    expect(deleted.rowCount).toBe(1);
+    expect(probe.rowCount).toBe(1);
+    expect(probe.rows).toHaveLength(1);
+    await inCtx(ctx, `select public.crm_soft_delete('workflow', $1::uuid)`, [workflowA]);
+    const afterDelete = await owner.query<{ deleted_at: Date | null }>(
+      `select deleted_at from public.workflows where id = $1`,
+      [workflowA],
+    );
+    expect(afterDelete.rows[0]!.deleted_at).not.toBeNull();
   });
 
   it('ai_usage_requests: identity columns refuse with 23514; the finalize set still lands', async () => {
