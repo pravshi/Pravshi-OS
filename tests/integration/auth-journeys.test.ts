@@ -82,9 +82,11 @@ let inviterId = '';
 
 const digestOf = (token: string) => createHash('sha256').update(token).digest('hex');
 const newToken = () => randomBytes(32).toString('hex');
-let personSeq = 0;
-const personCode = () =>
-  `P-J${RUN.slice(0, 3)}${String((personSeq += 1)).padStart(3, '0')}`.toUpperCase();
+// Identifier codes are NEVER hand-built: people.code is format-checked
+// (people_code_format, '^[A-Z]{2,8}-[0-9]{4}-[0-9]{4,}$') and invitation codes
+// are allocated by the same generator — see authz.next_identity_code usage in
+// tests/auth/session.test.ts ('EMP') and tests/db/admin-services.test.ts ('INV').
+// The generator needs the org, so it is queried inline at each insert site.
 
 let ipSeq = 100;
 const nextIp = () => `198.51.100.${(ipSeq += 1)}`;
@@ -111,7 +113,11 @@ async function inviteAndAccept(
 ): Promise<{ email: string; authUserId: string; personId: string }> {
   const email = `${label}.${RUN}@example.test`;
   const token = newToken();
-  const code = `INV-${RUN}-${label}`.toUpperCase().slice(0, 24);
+  const code = (
+    await owner!.query<{ c: string }>(`select authz.next_identity_code($1::uuid,'INV','2026') c`, [
+      orgId,
+    ])
+  ).rows[0]!.c;
   await owner!.query(
     `insert into public.invitations
        (org_id, code, email, token_hash, invited_by, expires_at,
@@ -197,11 +203,16 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
         [orgId, `JRN${RUN.slice(0, 4).toUpperCase()}`, `Journey Dept ${RUN}`],
       )
     ).rows[0]!.id;
+    const inviterCode = (
+      await owner.query<{ c: string }>(`select authz.next_identity_code($1::uuid,'EMP','2026') c`, [
+        orgId,
+      ])
+    ).rows[0]!.c;
     inviterId = (
       await owner.query<{ id: string }>(
         `insert into public.people (org_id, code, full_legal_name, person_status)
          values ($1, $2, $3, 'ACTIVE') returning id`,
-        [orgId, personCode(), 'Journey Inviter'],
+        [orgId, inviterCode, 'Journey Inviter'],
       )
     ).rows[0]!.id;
     const superAdmin = (
@@ -224,7 +235,12 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
   it('invite accept: a breached password is reported as breached, and the same token then succeeds', async () => {
     const email = `breached.${RUN}@example.test`;
     const token = newToken();
-    const code = `INV-${RUN}-BREACHED`.slice(0, 24);
+    const code = (
+      await owner!.query<{ c: string }>(
+        `select authz.next_identity_code($1::uuid,'INV','2026') c`,
+        [orgId],
+      )
+    ).rows[0]!.c;
     await owner!.query(
       `insert into public.invitations
            (org_id, code, email, token_hash, invited_by, expires_at,
