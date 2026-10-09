@@ -747,8 +747,9 @@ describe('has() and scope_for() can never disagree', () => {
         expect(held, `${key} holds nothing`).toBe(0);
       } else if (key === 'MANAGER') {
         // Phase 4 (0042): MANAGER holds six work grants at DEPARTMENT plus
-        // policies.acknowledge at SELF.
-        expect(held, `${key} holds the seven Phase 4 grants`).toBe(7);
+        // policies.acknowledge at SELF. Phase 8 (0052) adds notifications.view
+        // and notifications.preferences.manage, both at SELF — nine in total.
+        expect(held, `${key} holds the seven Phase 4 grants plus two Phase 8 grants`).toBe(9);
       } else {
         expect(held, `${key} holds something`).toBeGreaterThan(0);
       }

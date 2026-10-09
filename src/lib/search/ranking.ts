@@ -20,8 +20,18 @@ export const SCORE_NONE = 0.0;
 /** Upper bound of the trigram tier: it must never outrank a prefix match. */
 export const SCORE_TRIGRAM_MAX = SCORE_TRIGRAM_SCALE; // 0.7 < 0.8 = SCORE_PREFIX
 
-/** pg_trgm's default similarity threshold: below it, a row is not a trigram hit. */
-export const TRIGRAM_SIMILARITY_THRESHOLD = 0.3;
+/**
+ * Trigram acceptance threshold — deliberately stricter than pg_trgm's 0.3
+ * default. Measured on the live database (Phase 8 DB verification,
+ * 2026-10-09): at 0.3, per-column similarity produces false positives on
+ * short strings — a one-character-different lookup code scores 0.571, a
+ * title sharing one word with the query scores 0.591, and a query padded
+ * with a repeated character scores 0.733 against the embedded token. At 0.6
+ * those are all rejected while genuine typos still match (word_similarity
+ * 'Alica' -> 'Alicia' = 0.667). Precision wins over recall here: a CRM
+ * search that returns the wrong records destroys trust in the results.
+ */
+export const TRIGRAM_SIMILARITY_THRESHOLD = 0.6;
 
 const norm = (s: string): string => s.toLocaleLowerCase();
 

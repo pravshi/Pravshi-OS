@@ -77,6 +77,25 @@ const mkPerson = async (org: string, name: string, workEmail: string | null = nu
   ).rows[0]!.id;
 };
 
+const mkDept = async (org: string, code: string) =>
+  (
+    await owner.query<{ id: string }>(
+      `insert into public.departments (org_id, code, name) values ($1,$2,$3) returning id`,
+      [org, code, `Dept ${code}`],
+    )
+  ).rows[0]!.id;
+
+const mkEngagement = async (org: string, person: string, dept: string) =>
+  (
+    await owner.query<{ id: string }>(
+      `insert into public.engagements
+         (org_id, person_id, department_id, engagement_type, status, start_date)
+       values ($1,$2,$3,'EMPLOYEE','ACTIVE'::public.engagement_status, current_date)
+       returning id`,
+      [org, person, dept],
+    )
+  ).rows[0]!.id;
+
 const mkRoleFor = async (
   org: string,
   person: string,
@@ -153,6 +172,17 @@ describe.skipIf(!HAS_DB)('search integration (§41)', () => {
     bob = await mkPerson(orgB, `Bob ${TOK_B}`, `bob.${RUN}@example.test`);
     charlie = await mkPerson(orgA, `Charlie ${TOK_A}`);
     selfScoped = await mkPerson(orgA, `Selfy ${TOK_A}`);
+
+    // authz.scope_for()/has() resolve NO scope without a live engagement
+    // (authz.is_active() reads engagements, 0005/0009) — every other suite's
+    // fixtures create one per person; these must too, or RLS fails closed
+    // and every positive search returns zero rows.
+    const deptA = await mkDept(orgA, 'S8A');
+    const deptB = await mkDept(orgB, 'S8B');
+    await mkEngagement(orgA, alice, deptA);
+    await mkEngagement(orgB, bob, deptB);
+    await mkEngagement(orgA, charlie, deptA);
+    await mkEngagement(orgA, selfScoped, deptA);
 
     await mkRoleFor(orgA, alice, `s8a_${RUN}`, ALL_VIEW_PERMS);
     await mkRoleFor(orgB, bob, `s8b_${RUN}`, ALL_VIEW_PERMS);

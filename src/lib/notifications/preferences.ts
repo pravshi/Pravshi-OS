@@ -123,6 +123,15 @@ export async function getEffectivePreferences(auth: Authorization): Promise<Effe
 /**
  * Whether a channel is enabled for (personId, eventType). Used by the service
  * before enqueueing in-app/email jobs. Pure default: enabled.
+ *
+ * This runs under the CREATOR's identity while the preference rows belong to
+ * the RECIPIENT, and notification_preferences_select is own-rows only — a
+ * direct table read here can only ever see the creator's own rows, so the
+ * gate silently defaulted to enabled for every cross-user notification
+ * (proven in Phase 8 DB verification). The read therefore goes through the
+ * bounded SECURITY DEFINER function from migration 0052, which answers this
+ * one boolean for the exact (org, person, event, channel) tuple with the
+ * same resolution semantics as resolveEffectiveEnabled().
  */
 export async function isChannelEnabled(
   auth: Authorization,
@@ -130,12 +139,17 @@ export async function isChannelEnabled(
   eventType: NotificationEventType,
   channel: NotificationChannel,
 ): Promise<boolean> {
-  const rows = await getStoredPreferences(auth, personId);
-  return resolveEffectiveEnabled(
-    rows.map((r) => ({ eventType: r.event_type, channel: r.channel, enabled: r.enabled })),
-    eventType,
-    channel,
-  ).enabled;
+  const rows = await withAuthorizedDb(auth.ctx, (tx) =>
+    tx.execute<{ enabled: boolean }>(sql`
+      select public.notification_channel_enabled(
+        ${auth.ctx.orgId}::uuid,
+        ${personId}::uuid,
+        ${eventType},
+        ${channel}
+      ) as enabled
+    `),
+  );
+  return rows.rows[0]?.enabled === true;
 }
 
 /**

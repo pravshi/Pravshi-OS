@@ -83,6 +83,22 @@ export function jobFail(code: string, message: string, extra?: Record<string, un
   throw err;
 }
 
+/**
+ * The SQLSTATE of a database error, following the repository convention
+ * (auth/bootstrap-setup.ts, authz/require-permission.ts): drizzle wraps the
+ * driver error, so the code may live on the error or on its `cause`. Reading
+ * only the outer error silently disables every SQLSTATE branch below — the
+ * Phase 8 DB verification proved the 23505 dedupe catch never fired against
+ * the real driver for exactly that reason.
+ */
+export function sqlstateOf(e: unknown): string | null {
+  for (const candidate of [e, (e as { cause?: unknown } | null)?.cause]) {
+    const code = (candidate as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+}
+
 /** Non-retryable: caller/config/data problem — retrying cannot help. */
 export function failConfig(message: string): never {
   jobFail('CONFIG_ERROR', message);
@@ -193,16 +209,20 @@ async function assertPersonInOrg(
   orgId: string,
   personId: string,
 ): Promise<void> {
+  // The worker runs as the nil-UUID system actor, which is not a person row
+  // and therefore cannot see the recipient through people_select RLS. Ask the
+  // bounded SECURITY DEFINER check added by migration 0052 instead of reading
+  // public.people directly: it returns only whether this exact person is a
+  // non-deleted member of the job row's organization.
   const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-    tx.execute<{ id: string }>(
-      sql`select id from public.people
-          where id = ${personId}::uuid
-            and org_id = ${orgId}::uuid
-            and deleted_at is null
-          limit 1`,
+    tx.execute<{ recipient_exists: boolean }>(
+      sql`select public.notifications_recipient_exists(
+            ${orgId}::uuid,
+            ${personId}::uuid
+          ) as recipient_exists`,
     ),
   );
-  if (rows.rows.length === 0) {
+  if (rows.rows[0]?.recipient_exists !== true) {
     failNotFound(`notification recipient ${personId} is not an active person in org ${orgId}`);
   }
 }
@@ -251,7 +271,7 @@ export const handleNotification: JobHandler = async (ctx: JobExecutionContext) =
         ),
       );
     } catch (extendedErr) {
-      if ((extendedErr as { code?: unknown }).code !== '42883') throw extendedErr;
+      if (sqlstateOf(extendedErr) !== '42883') throw extendedErr;
       console.warn(
         `[jobs] extended notifications_insert() unavailable job=${ctx.job.id} ` +
           '— falling back to the 5-argument signature (type/event_id defaulted)',
@@ -272,7 +292,7 @@ export const handleNotification: JobHandler = async (ctx: JobExecutionContext) =
     // 42P01 = undefined_table, 42883 = undefined_function: migration 0047
     // has not been applied yet (see module header). Fail closed and loud —
     // non-retryable.
-    const code = (err as { code?: unknown }).code;
+    const code = sqlstateOf(err);
     if (code === '42P01' || code === '42883') {
       failConfig(
         'NOTIFICATIONS_TABLE_MISSING: public.notifications / notifications_insert() ' +

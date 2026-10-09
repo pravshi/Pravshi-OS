@@ -43,6 +43,12 @@ const tryImport = async <T>(path: string): Promise<T | null> => {
 
 type ServiceModule = typeof import('@/lib/notifications/service');
 type PrefsModule = typeof import('@/lib/notifications/preferences');
+type HandlersModule = typeof import('@/lib/jobs/handlers');
+type WorkerModule = typeof import('@/lib/jobs/worker');
+type RetryModule = typeof import('@/lib/jobs/retry');
+type Job = import('@/lib/jobs/types').Job;
+type CreateInput = import('@/lib/notifications/service').CreateNotificationInput;
+type CreateResult = import('@/lib/notifications/service').CreateNotificationResult;
 
 /* ── fixtures (owner connection) ─────────────────────────────────────────── */
 
@@ -70,6 +76,25 @@ const mkPerson = async (org: string, name: string) => {
     )
   ).rows[0]!.id;
 };
+
+const mkDept = async (org: string, code: string) =>
+  (
+    await owner.query<{ id: string }>(
+      `insert into public.departments (org_id, code, name) values ($1,$2,$3) returning id`,
+      [org, code, `Dept ${code}`],
+    )
+  ).rows[0]!.id;
+
+const mkEngagement = async (org: string, person: string, dept: string) =>
+  (
+    await owner.query<{ id: string }>(
+      `insert into public.engagements
+         (org_id, person_id, department_id, engagement_type, status, start_date)
+       values ($1,$2,$3,'EMPLOYEE','ACTIVE'::public.engagement_status, current_date)
+       returning id`,
+      [org, person, dept],
+    )
+  ).rows[0]!.id;
 
 const mkRoleFor = async (
   org: string,
@@ -111,6 +136,9 @@ const makeAuth = (personId: string, orgId: string, permission: string): Authoriz
 describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   let svc: ServiceModule | null = null;
   let prefs: PrefsModule | null = null;
+  let handlers: HandlersModule | null = null;
+  let worker: WorkerModule | null = null;
+  let retry: RetryModule | null = null;
 
   let orgA = '';
   let orgB = '';
@@ -124,7 +152,10 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   beforeAll(async () => {
     svc = await tryImport<ServiceModule>('@/lib/notifications/service');
     prefs = await tryImport<PrefsModule>('@/lib/notifications/preferences');
-    if (!svc || !prefs) return;
+    handlers = await tryImport<HandlersModule>('@/lib/jobs/handlers');
+    worker = await tryImport<WorkerModule>('@/lib/jobs/worker');
+    retry = await tryImport<RetryModule>('@/lib/jobs/retry');
+    if (!svc || !prefs || !handlers || !worker || !retry) return;
 
     orgA = await mkOrg('A');
     orgB = await mkOrg('B');
@@ -132,15 +163,36 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     bob = await mkPerson(orgA, `Bob ${RUN}`);
     carol = await mkPerson(orgB, `Carol ${RUN}`);
 
+    // authz.scope_for()/has() resolve NO scope without a live engagement
+    // (authz.is_active() reads engagements, 0005/0009) — every other suite's
+    // fixtures create one per person; these must too, or RLS and the
+    // jobs.create gate fail closed for every caller.
+    const deptA = await mkDept(orgA, 'N8A');
+    const deptB = await mkDept(orgB, 'N8B');
+    await mkEngagement(orgA, alice, deptA);
+    await mkEngagement(orgA, bob, deptA);
+    await mkEngagement(orgB, carol, deptB);
+
     // alice: can receive + read notifications, enqueue jobs, see people (recipient check).
     await mkRoleFor(orgA, alice, `n_a_${RUN}`, [
       'notifications.view',
+      'notifications.preferences.manage',
+      // jobs.view accompanies jobs.create in every seeded system role
+      // (0045 matrix): enqueueJob's INSERT ... RETURNING is only visible
+      // under the jobs SELECT policy, which keys on jobs.view.
+      'jobs.view',
       'jobs.create',
       'people.view',
     ]);
-    // bob: a plain recipient.
-    await mkRoleFor(orgA, bob, `n_b_${RUN}`, ['notifications.view']);
-    await mkRoleFor(orgB, carol, `n_c_${RUN}`, ['notifications.view']);
+    // bob: a plain recipient (who manages his own preferences, per 0052 RLS).
+    await mkRoleFor(orgA, bob, `n_b_${RUN}`, [
+      'notifications.view',
+      'notifications.preferences.manage',
+    ]);
+    await mkRoleFor(orgB, carol, `n_c_${RUN}`, [
+      'notifications.view',
+      'notifications.preferences.manage',
+    ]);
 
     authAlice = makeAuth(alice, orgA, 'notifications.view');
     authBob = makeAuth(bob, orgA, 'notifications.view');
@@ -151,8 +203,64 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     await owner.end().catch(() => undefined);
   });
 
+  /* ── worker-plane drain ──────────────────────────────────────────────────
+   * createNotification only ENQUEUES a 'notification' job; the row appears
+   * when the worker-plane handler runs. These helpers execute exactly the
+   * enqueued job through the real path — buildJobAuthorization() (the
+   * nil-UUID system actor) + handleNotification() — never a global claim,
+   * so unrelated pending jobs are never touched. */
+  const toIso = (v: unknown): string =>
+    v instanceof Date ? v.toISOString() : new Date(String(v)).toISOString();
+
+  const loadJob = async (jobId: string): Promise<Job> => {
+    const rows = await owner.query<Record<string, unknown>>(
+      `select id, org_id, type, status, priority, payload, attempts, max_attempts,
+              next_run_at, claimed_by, claimed_at, heartbeat_at, dedup_key,
+              error_code, error_message, created_at, updated_at
+       from public.jobs where id = $1`,
+      [jobId],
+    );
+    const row = rows.rows[0];
+    if (!row) throw new Error(`drain: job ${jobId} not found`);
+    return {
+      id: String(row.id),
+      orgId: String(row.org_id),
+      type: row.type as Job['type'],
+      status: row.status as Job['status'],
+      priority: Number(row.priority),
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      attempts: Number(row.attempts),
+      maxAttempts: Number(row.max_attempts),
+      nextRunAt: toIso(row.next_run_at),
+      claimedBy: row.claimed_by == null ? null : String(row.claimed_by),
+      claimedAt: row.claimed_at == null ? null : toIso(row.claimed_at),
+      heartbeatAt: row.heartbeat_at == null ? null : toIso(row.heartbeat_at),
+      dedupKey: row.dedup_key == null ? null : String(row.dedup_key),
+      errorCode: row.error_code == null ? null : String(row.error_code),
+      errorMessage: row.error_message == null ? null : String(row.error_message),
+      createdAt: toIso(row.created_at),
+      updatedAt: toIso(row.updated_at),
+    };
+  };
+
+  const runNotificationJob = async (job: Job): Promise<void> => {
+    const auth = worker!.buildJobAuthorization(job);
+    await handlers!.handleNotification({ job, auth, signal: new AbortController().signal });
+  };
+
+  const drainJob = async (jobId: string): Promise<void> => {
+    await runNotificationJob(await loadJob(jobId));
+  };
+
+  /** createNotification + immediate worker-plane delivery of its exact job. */
+  const createAndDrain = async (auth: Authorization, input: CreateInput): Promise<CreateResult> => {
+    const res = await svc!.createNotification(auth, input);
+    if (res.jobId) await drainJob(res.jobId);
+    return res;
+  };
+
   it('creates a notification for an event (in-app queued)', async () => {
-    const res = await svc!.createNotification(authAlice, {
+    const res = await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'TASK_ASSIGNED',
       recipientUserId: alice,
@@ -169,9 +277,12 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     expect(found!.type).toBe('TASK_ASSIGNED');
   });
 
-  it('retrieves own notifications newest-first with pagination', async () => {
+  // Five sequential create+drain cycles against a remote database: each
+  // create is several authorized transactions plus a worker-plane delivery.
+  // The 30s default is an environment-latency limit here, not a logic bound.
+  it('retrieves own notifications newest-first with pagination', { timeout: 120_000 }, async () => {
     for (let i = 0; i < 5; i++) {
-      await svc!.createNotification(authAlice, {
+      await createAndDrain(authAlice, {
         eventId: newEid(),
         type: 'MENTION',
         recipientUserId: alice,
@@ -197,7 +308,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
 
   it('tracks the unread count', async () => {
     const before = await svc!.getUnreadCount(authBob);
-    await svc!.createNotification(authAlice, {
+    await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'TASK_DUE',
       recipientUserId: bob,
@@ -208,7 +319,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   });
 
   it('marks one notification read, unread, and all read', async () => {
-    await svc!.createNotification(authAlice, {
+    await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'SYSTEM_ALERT',
       recipientUserId: bob,
@@ -234,14 +345,14 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
 
   it('dedupes on event_id (idempotent redelivery)', async () => {
     const dupEid = newEid();
-    const first = await svc!.createNotification(authAlice, {
+    const first = await createAndDrain(authAlice, {
       eventId: dupEid,
       type: 'DEAL_UPDATED',
       recipientUserId: alice,
       title: `Deal update ${RUN}`,
       body: 'stage changed',
     });
-    const second = await svc!.createNotification(authAlice, {
+    const second = await createAndDrain(authAlice, {
       eventId: dupEid,
       type: 'DEAL_UPDATED',
       recipientUserId: alice,
@@ -250,7 +361,14 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     });
     expect(first.status).toBe('queued');
     expect(second.status).toBe('duplicate');
-    expect(second.notification!.id).toBe(first.notification!.id);
+    // The service contract returns `notification` only on the duplicate path;
+    // the first call's delivered row is the one the duplicate must point at.
+    const delivered = await owner.query<{ id: string }>(
+      `select id from public.notifications where org_id=$1 and event_id=$2`,
+      [orgA, dupEid],
+    );
+    expect(delivered.rows).toHaveLength(1);
+    expect(second.notification!.id).toBe(delivered.rows[0]!.id);
 
     const rows = await owner.query<{ c: string }>(
       `select count(*) c from public.notifications where org_id=$1 and event_id=$2`,
@@ -260,7 +378,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   });
 
   it('isolates users: alice cannot see or touch bob (§35 IDOR)', async () => {
-    await svc!.createNotification(authAlice, {
+    await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'MENTION',
       recipientUserId: bob,
@@ -283,7 +401,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   });
 
   it('isolates tenants: carol (org B) cannot see org A notifications (§35)', async () => {
-    await svc!.createNotification(authAlice, {
+    await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'MENTION',
       recipientUserId: alice,
@@ -320,7 +438,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     await prefs!.upsertPreferences(authBob, [
       { eventType: 'TASK_ASSIGNED', channel: 'in_app', enabled: false },
     ]);
-    const res = await svc!.createNotification(authAlice, {
+    const res = await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'TASK_ASSIGNED',
       recipientUserId: bob,
@@ -354,7 +472,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   });
 
   it('handles concurrent reads consistently', async () => {
-    await svc!.createNotification(authAlice, {
+    await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'SYSTEM_ALERT',
       recipientUserId: alice,
@@ -382,7 +500,7 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   it('preserves notifications whose target record was deleted (§43 scenario 7)', async () => {
     // A notification referencing a soft-deleted deal id still lists fine —
     // the notification is the durable record, not a live join.
-    const res = await svc!.createNotification(authAlice, {
+    const res = await createAndDrain(authAlice, {
       eventId: newEid(),
       type: 'DEAL_UPDATED',
       recipientUserId: alice,
@@ -394,5 +512,101 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     expect(res.status).toBe('queued');
     const listed = await svc!.listNotifications(authAlice, {});
     expect(listed.notifications.some((n) => n.title === `Deleted deal ${RUN}`)).toBe(true);
+  });
+
+  /* ── worker plane (regression: system-actor recipient check) ─────────────
+   * The handler runs as the nil-UUID system actor from buildJobAuthorization,
+   * which is not a people row and cannot see recipients through people_select
+   * RLS. Migration 0052's notifications_recipient_exists() SECURITY DEFINER
+   * check is what lets a real recipient through; these tests pin that path
+   * with real recipients and no mocks. */
+  const fabricatedJob = (orgId: string, payload: Record<string, unknown>): Job => ({
+    id: randomUUID(),
+    orgId,
+    type: 'notification',
+    status: 'running',
+    priority: 0,
+    payload,
+    attempts: 1,
+    maxAttempts: 5,
+    nextRunAt: new Date().toISOString(),
+    claimedBy: 'integration-worker',
+    claimedAt: new Date().toISOString(),
+    heartbeatAt: new Date().toISOString(),
+    dedupKey: null,
+    errorCode: null,
+    errorMessage: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  it('worker plane: system actor delivers, and redelivery stays idempotent', async () => {
+    const eid = newEid();
+    const res = await svc!.createNotification(authAlice, {
+      eventId: eid,
+      type: 'MENTION',
+      recipientUserId: alice,
+      title: `Worker-delivered ${RUN}`,
+      body: 'via the real handler',
+    });
+    expect(res.status).toBe('queued');
+    const job = await loadJob(res.jobId!);
+    await runNotificationJob(job);
+    // At-least-once delivery: running the same job again must not duplicate.
+    await runNotificationJob(job);
+    const rows = await owner.query<{ id: string; type: string; person_id: string }>(
+      `select id, type, person_id from public.notifications where org_id=$1 and event_id=$2`,
+      [orgA, eid],
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]!.type).toBe('MENTION');
+    expect(rows.rows[0]!.person_id).toBe(alice);
+  });
+
+  it('worker plane: cross-org recipient fails NOT_FOUND (non-retryable), writes nothing', async () => {
+    const eid = newEid();
+    // Org A job naming carol (org B) — e.g. a corrupted or replayed payload.
+    const job = fabricatedJob(orgA, {
+      personId: carol,
+      title: `Cross-org worker ${RUN}`,
+      message: 'must never deliver',
+      data: { type: 'MENTION', eventId: eid },
+    });
+    let caught: unknown = null;
+    try {
+      await runNotificationJob(job);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ code: 'NOT_FOUND' });
+    expect(retry!.classifyError(caught).retryable).toBe(false);
+    const rows = await owner.query<{ c: string }>(
+      `select count(*) c from public.notifications where event_id=$1`,
+      [eid],
+    );
+    expect(Number(rows.rows[0]!.c)).toBe(0);
+  });
+
+  it('worker plane: nonexistent recipient fails NOT_FOUND (non-retryable), writes nothing', async () => {
+    const eid = newEid();
+    const job = fabricatedJob(orgA, {
+      personId: randomUUID(),
+      title: `Ghost worker ${RUN}`,
+      message: 'must never deliver',
+      data: { type: 'MENTION', eventId: eid },
+    });
+    let caught: unknown = null;
+    try {
+      await runNotificationJob(job);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ code: 'NOT_FOUND' });
+    expect(retry!.classifyError(caught).retryable).toBe(false);
+    const rows = await owner.query<{ c: string }>(
+      `select count(*) c from public.notifications where event_id=$1`,
+      [eid],
+    );
+    expect(Number(rows.rows[0]!.c)).toBe(0);
   });
 });

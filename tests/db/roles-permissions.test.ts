@@ -1202,6 +1202,9 @@ describe('direct SQL attacks from app_user', () => {
       'documents.upload',
       'documents.view',
       'hr.sensitive.view',
+      // Phase 8 (0052): EMPLOYEE holds both notification permissions at SELF.
+      'notifications.preferences.manage',
+      'notifications.view',
       'people.edit',
       'people.view',
       'policies.acknowledge',

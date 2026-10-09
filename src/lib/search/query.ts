@@ -14,9 +14,10 @@
  * - SQL injection: all user input travels as bound parameters. Table/column
  *   names come only from the trusted entity registry (entities.ts) and pass
  *   through ident(), which rejects anything but [a-z_][a-z0-9_]*.
- * - pg_trgm: relevance uses the trigram `similarity()`/``%`` operator when the
- *   extension is present (migration 0053 indexes accelerate it); otherwise the
- *   ILIKE fallback still answers correctly, just without trigram ranking.
+ * - pg_trgm: when the extension is present (migration 0053), fuzzy term
+ *   matching uses `word_similarity()` at the strict threshold from
+ *   ranking.ts and relevance adds whole-query `similarity()`; without it the
+ *   ILIKE term matching still answers correctly, just without fuzzy hits.
  */
 import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
@@ -87,18 +88,68 @@ function buildEntityQuery(
     sql` or `,
   );
 
-  const trigramSim: SQL = hasTrgm
+  // Matching semantics (tightened during Phase 8 DB verification, 2026-10-09):
+  //
+  // 1. Term-AND: the query splits into whitespace terms and EVERY term must
+  //    match at least one searchable column (different terms may match
+  //    different columns). A query that pads a real token with garbage terms
+  //    therefore matches nothing — the whole-query trigram comparison used
+  //    before scored such a query 0.733 against the bare token and returned
+  //    rows the user never asked for.
+  // 2. A term matches literally (escaped ILIKE substring) or, when fuzzy
+  //    matching is enabled, by word_similarity() at the strict threshold in
+  //    ranking.ts: at pg_trgm's loose 0.3 default a one-character-different
+  //    code scored 0.571 and "found" the other tenant's token shape in the
+  //    caller's own rows (§35 tests pin this to zero results).
+  // 3. A query containing LIKE wildcards (`%`, `_`) or the escape character
+  //    disables fuzzy matching entirely and is matched purely literally, so
+  //    wildcard-shaped input can never widen a search (§35).
+  const terms = q.split(/\s+/).filter((t) => t.length > 0);
+  const fuzzy = hasTrgm && !/[%_\\]/.test(q);
+
+  const termSubstring = (term: string): SQL => {
+    const like = escapeLikePattern(term);
+    return sql.join(
+      cols.map((c) => sql`e.${c} ilike '%' || ${like} || '%' escape '\'`),
+      sql` or `,
+    );
+  };
+  const termFuzzy = (term: string): SQL =>
+    sql.join(
+      cols.map(
+        (c) => sql`word_similarity(${term}, e.${c}) >= ${TRIGRAM_SIMILARITY_THRESHOLD}::float8`,
+      ),
+      sql` or `,
+    );
+  const termMatch = (term: string): SQL =>
+    fuzzy ? sql`(${termSubstring(term)} or ${termFuzzy(term)})` : sql`(${termSubstring(term)})`;
+  const allTermsMatch = sql.join(terms.map(termMatch), sql` and `);
+
+  // Per-term score: best column for that term — substring tier when literal,
+  // scaled word similarity when fuzzy — and the row's term score is the
+  // WEAKEST term's score (least), so every term pulls its weight.
+  const termScore = (term: string): SQL => {
+    const like = escapeLikePattern(term);
+    const perCol = cols.map((c) =>
+      fuzzy
+        ? sql`case
+                when e.${c} ilike '%' || ${like} || '%' escape '\' then ${SCORE_SUBSTRING}::float8
+                when word_similarity(${term}, e.${c}) >= ${TRIGRAM_SIMILARITY_THRESHOLD}::float8
+                  then word_similarity(${term}, e.${c}) * ${SCORE_TRIGRAM_SCALE}::float8
+                else 0::float8
+              end`
+        : sql`case when e.${c} ilike '%' || ${like} || '%' escape '\' then ${SCORE_SUBSTRING}::float8 else 0::float8 end`,
+    );
+    return sql`greatest(${sql.join(perCol, sql`, `)})`;
+  };
+  const termsScore = sql`least(${sql.join(terms.map(termScore), sql`, `)})`;
+
+  const trigramSim: SQL = fuzzy
     ? sql`greatest(${sql.join(
         cols.map((c) => sql`similarity(e.${c}, ${q})`),
         sql`, `,
       )})`
     : sql`0`;
-  const trigramWhere: SQL = hasTrgm
-    ? sql` or ${sql.join(
-        cols.map((c) => sql`e.${c} % ${q}`),
-        sql` or `,
-      )}`
-    : sql``;
 
   // Deterministic tiers, mirroring ranking.ts:
   // exact (1.0) > prefix (0.8) > trigram (similarity * 0.7, max 0.7) > substring (0.5).
@@ -112,7 +163,8 @@ function buildEntityQuery(
           then (${trigramSim} * ${SCORE_TRIGRAM_SCALE}::float8)
           else 0::float8
         end,
-        case when ${substring} then ${SCORE_SUBSTRING}::float8 else 0::float8 end
+        case when ${substring} then ${SCORE_SUBSTRING}::float8 else 0::float8 end,
+        ${termsScore}
       )
     end
   )`;
@@ -139,7 +191,7 @@ function buildEntityQuery(
       and e.deleted_at is null
       ${statusWhere}
       ${ownerWhere}
-      and (${substring}${trigramWhere})
+      and (${allTermsMatch})
     order by relevance desc, title asc, e.id asc
     limit ${fetchLimit} offset ${filters.offset}
   `;

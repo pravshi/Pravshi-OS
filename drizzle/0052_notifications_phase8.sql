@@ -228,8 +228,8 @@ create trigger notification_preferences_person_org_guard
 insert into public.permissions (key, resource, action, module, description, is_sensitive)
 select
   c.key,
-  substring(c.key from '^(.*)\\.[^.]+$'),
-  substring(c.key from '\\.([^.]+)$'),
+  substring(c.key from '^(.*)\.[^.]+$'),
+  substring(c.key from '\.([^.]+)$'),
   c.module,
   c.description,
   c.is_sensitive
@@ -735,6 +735,90 @@ grant execute on function public.notifications_insert(uuid, uuid, text, text, js
 
 --> statement-breakpoint
 
+-- The handler runs on the worker plane as the nil-UUID system actor. A direct
+-- SELECT from public.people under that identity is correctly invisible under
+-- people_select: the system actor is not the recipient and has no people.view
+-- scope. This bounded SECURITY DEFINER check answers only whether the named
+-- recipient is a non-deleted person in the job row's organization, following
+-- the person_holds_protected_role() precedent (0030). It exposes no person row
+-- or profile field. The person_org guard trigger remains the insert-time
+-- backstop if this check and the write ever race.
+create or replace function public.notifications_recipient_exists(
+  p_org_id uuid,
+  p_person_id uuid
+) returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.people p
+    where p.id = p_person_id
+      and p.org_id = p_org_id
+      and p.deleted_at is null
+  )
+$$;
+
+comment on function public.notifications_recipient_exists(uuid, uuid) is
+  'True when the named person is a non-deleted member of the given organization. '
+  'SECURITY DEFINER because the notification worker''s system actor cannot see '
+  'the recipient through people_select RLS. Returns one boolean and no person data.';
+
+revoke all on function public.notifications_recipient_exists(uuid, uuid) from public;
+grant execute on function public.notifications_recipient_exists(uuid, uuid) to app_user;
+
+--> statement-breakpoint
+
+-- createNotification runs under the CREATOR's identity, but the preference
+-- rows belong to the RECIPIENT and notification_preferences_select is
+-- own-rows only — so a creator can never see whether the recipient muted an
+-- event, and the preference gate silently falls back to "enabled" for every
+-- cross-user notification (proven in Phase 8 DB verification). This bounded
+-- SECURITY DEFINER check answers the one bit the gate needs for an exact
+-- (org, person, event_type, channel) tuple, with the service's resolution
+-- semantics: a specific row wins, then the '*' wildcard row, then the
+-- opt-out default (enabled). It exposes no other preference rows.
+create or replace function public.notification_channel_enabled(
+  p_org_id uuid,
+  p_person_id uuid,
+  p_event_type text,
+  p_channel text
+) returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    (select np.enabled
+       from public.notification_preferences np
+      where np.org_id = p_org_id
+        and np.person_id = p_person_id
+        and np.event_type = p_event_type
+        and np.channel = p_channel),
+    (select np.enabled
+       from public.notification_preferences np
+      where np.org_id = p_org_id
+        and np.person_id = p_person_id
+        and np.event_type = '*'
+        and np.channel = p_channel),
+    true
+  )
+$$;
+
+comment on function public.notification_channel_enabled(uuid, uuid, text, text) is
+  'Effective enabled flag for one (org, person, event_type, channel) preference: '
+  'specific row, then ''*'' wildcard row, then default true. SECURITY DEFINER '
+  'because preference rows are own-rows under RLS while the delivery gate runs '
+  'under the notification creator''s identity. Returns one boolean only.';
+
+revoke all on function public.notification_channel_enabled(uuid, uuid, text, text) from public;
+grant execute on function public.notification_channel_enabled(uuid, uuid, text, text) to app_user;
+
+--> statement-breakpoint
+
 -- ═════════════════════════════════════════════════════════════════════════════════
 -- PART 8 — verification: fail the migration rather than leave a half-built schema
 -- ═════════════════════════════════════════════════════════════════════════════════
@@ -824,11 +908,41 @@ begin
       coalesce((select p.prosecdef from pg_proc p
                 join pg_namespace n on n.oid = p.pronamespace
                 where n.nspname = 'public' and p.proname = 'notifications_insert'
-                  and p.oid::regprocedure::text like '%text, text)'), false)),
+                  and p.pronargs = 7), false)),
     ('notifications_insert not executable by app_user',
       exists (select 1 from pg_proc p
               join pg_namespace n on n.oid = p.pronamespace
               where n.nspname = 'public' and p.proname = 'notifications_insert'
+                and has_function_privilege('app_user', p.oid, 'EXECUTE'))),
+    ('notifications_recipient_exists missing',
+      exists (select 1 from pg_proc p
+              join pg_namespace n on n.oid = p.pronamespace
+              where n.nspname = 'public' and p.proname = 'notifications_recipient_exists'
+                and p.pronargs = 2)),
+    ('notifications_recipient_exists not security-definer',
+      coalesce((select p.prosecdef from pg_proc p
+                join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'notifications_recipient_exists'
+                  and p.pronargs = 2), false)),
+    ('notifications_recipient_exists not executable by app_user',
+      exists (select 1 from pg_proc p
+              join pg_namespace n on n.oid = p.pronamespace
+              where n.nspname = 'public' and p.proname = 'notifications_recipient_exists'
+                and has_function_privilege('app_user', p.oid, 'EXECUTE'))),
+    ('notification_channel_enabled missing',
+      exists (select 1 from pg_proc p
+              join pg_namespace n on n.oid = p.pronamespace
+              where n.nspname = 'public' and p.proname = 'notification_channel_enabled'
+                and p.pronargs = 4)),
+    ('notification_channel_enabled not security-definer',
+      coalesce((select p.prosecdef from pg_proc p
+                join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'notification_channel_enabled'
+                  and p.pronargs = 4), false)),
+    ('notification_channel_enabled not executable by app_user',
+      exists (select 1 from pg_proc p
+              join pg_namespace n on n.oid = p.pronamespace
+              where n.nspname = 'public' and p.proname = 'notification_channel_enabled'
                 and has_function_privilege('app_user', p.oid, 'EXECUTE'))),
     ('notification_preferences guard triggers missing',
       exists (select 1 from pg_trigger where tgname = 'notification_preferences_org_guard')
