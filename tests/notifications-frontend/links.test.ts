@@ -55,8 +55,8 @@ describe('buildEntityLink', () => {
 });
 
 describe('EVENT_TYPE_META', () => {
-  it('covers all 11 event types with non-empty labels and descriptions', () => {
-    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(11);
+  it('covers all 12 event types with non-empty labels and descriptions', () => {
+    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(12);
     for (const t of NOTIFICATION_EVENT_TYPES) {
       const meta = EVENT_TYPE_META[t];
       expect(meta, `missing meta for ${t}`).toBeDefined();

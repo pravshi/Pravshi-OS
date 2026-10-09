@@ -21,9 +21,12 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
  *    then returns rows pinned to the caller)
  *  - remind_at must be a future instant (checked at the boundary; a CHECK
  *    constraint can't use now(), which is not immutable)
- *  - is_sent is write-only-for-the-future: V1 never sets it; the Phase 6
- *    automation sweep will. The column exists so delivery has somewhere to
- *    record itself
+ *  - is_sent records delivery: the worker-plane reminder sweep
+ *    (src/lib/jobs/reminder-sweep.ts, claim definer in migration 0064)
+ *    flips it atomically at claim time when a due reminder is delivered
+ *    as a TASK_DUE notification to the reminder's owner (person_id —
+ *    reminders are self-reminders, so the owner is the recipient). This
+ *    service never sets it; the sweep is the only writer
  *
  * ── COLUMN CONTRACT WITH MIGRATION 0043 ─────────────────────────────────────
  *

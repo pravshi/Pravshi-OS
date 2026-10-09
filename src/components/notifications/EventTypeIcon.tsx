@@ -2,6 +2,7 @@ import {
   AlarmClock,
   AtSign,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   FolderKanban,
   GitBranch,
@@ -17,6 +18,7 @@ import type { NotificationEventType } from '@/lib/notifications/types';
 
 const ICONS: Record<NotificationEventType, LucideIcon> = {
   TASK_ASSIGNED: UserPlus,
+  TASK_COMPLETED: ClipboardCheck,
   TASK_DUE: Clock,
   TASK_OVERDUE: AlarmClock,
   PROJECT_UPDATED: FolderKanban,

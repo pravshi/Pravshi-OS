@@ -23,9 +23,18 @@
  */
 import { z } from 'zod';
 
-/** The 11 notification event types (§16.4, binding). */
+/**
+ * The notification event types (§16.4, binding). The original 11 are the
+ * Phase 8 contract set; TASK_COMPLETED was added by P1b (AUD-05) when
+ * built-in domain emission was wired — task completion notifying the
+ * task's creator had no honest key in the original set (TASK_ASSIGNED
+ * would mislabel it in the bell, the settings screen, and the recipient's
+ * preference toggles), so the set grew by exactly one, following the
+ * existing TASK_* naming.
+ */
 export const NOTIFICATION_EVENT_TYPES = [
   'TASK_ASSIGNED',
+  'TASK_COMPLETED',
   'TASK_DUE',
   'TASK_OVERDUE',
   'PROJECT_UPDATED',

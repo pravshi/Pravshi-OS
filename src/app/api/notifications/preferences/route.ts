@@ -11,7 +11,7 @@ import { getEffectivePreferences, upsertPreferences } from '@/lib/notifications/
  * Permission: notifications.preferences.manage (SELF).
  *
  * GET  → 200 { preferences: [{ eventType, channel, enabled, customized }] }
- *        the full effective matrix (11 types × 2 channels); `customized` is
+ *        the full effective matrix (12 types × 2 channels); `customized` is
  *        false when the entry is the opt-out default rather than a stored row.
  * PUT  → { preferences: [{ eventType, channel, enabled }] } (1–24 entries;
  *        eventType may be '*' for the wildcard) → 200 { ok: true, updated }

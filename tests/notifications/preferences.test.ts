@@ -62,9 +62,9 @@ describe('resolveEffectiveEnabled', () => {
 });
 
 describe('buildEffectivePreferences', () => {
-  it('builds the full 11×2 matrix, all enabled by default', () => {
+  it('builds the full 12×2 matrix, all enabled by default', () => {
     const matrix = buildEffectivePreferences([]);
-    expect(matrix).toHaveLength(22);
+    expect(matrix).toHaveLength(24);
     expect(matrix.every((p) => p.enabled && !p.customized)).toBe(true);
     const channels = new Set(matrix.map((p) => p.channel));
     expect(channels).toEqual(new Set(['in_app', 'email']));

@@ -47,7 +47,10 @@
  * 0049), and releaseClaim()/applyRetryBackoff() run through
  * public.jobs_release_claim() and public.jobs_apply_backoff() (migration
  * 0050): a raw UPDATE would be fail-closed against the FORCED RLS on
- * public.jobs and match zero rows forever.
+ * public.jobs and match zero rows forever. The task-reminder sweep
+ * (P1b, AUD-04) runs on the same model through
+ * public.claim_due_task_reminders() (migration 0064) — see
+ * reminder-sweep.ts for its claim/delivery contract.
  *
  * The synthesized Authorization is built directly per the §3.6 actor authority
  * rule (org from the job row, system actor); it is not issued by
@@ -64,6 +67,7 @@ import type { Tx } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from './queue';
 import { sweepRetryableJobs } from './retry-sweeper';
+import { sweepDueTaskReminders } from './reminder-sweep';
 import { backoffDelayMs, classifyError } from './retry';
 import { JOB_TYPE_SET, type Job, type JobType } from './types';
 
@@ -109,6 +113,15 @@ export interface WorkerConfig {
    * claim.
    */
   reapIntervalMs?: number;
+  /**
+   * Task-reminder sweep cadence (P1b, AUD-04): every this many ms, due
+   * task reminders are claimed (migration 0064) and delivered as TASK_DUE
+   * notifications (reminder-sweep.ts). Reminders are minute-granularity
+   * user data, so the cadence matches the scheduler tick. Default 60000;
+   * 0 or negative disables the sweep. The first sweep fires one interval
+   * after worker start.
+   */
+  reminderSweepIntervalMs?: number;
 }
 
 export type JobHandler = (ctx: JobExecutionContext) => Promise<void>;
@@ -356,6 +369,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 30000;
   const retrySweepIntervalMs = config.retrySweepIntervalMs ?? 30000;
   const reapIntervalMs = config.reapIntervalMs ?? 300000;
+  const reminderSweepIntervalMs = config.reminderSweepIntervalMs ?? 60000;
 
   let settled = false;
   let settle!: () => void;
@@ -408,6 +422,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
     try {
       let nextRetrySweepMs = Date.now() + retrySweepIntervalMs;
       let nextReapMs = Date.now() + reapIntervalMs;
+      let nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
       // Adaptive idle poll (Phase 12, F-12-04): the sleep after an empty
       // claim starts at pollIntervalMs and doubles up to maxIdleSleepMs;
       // any claimed job resets it to pollIntervalMs.
@@ -425,6 +440,15 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // as the retry sweep — a DB blip must never kill the worker.
           nextReapMs = Date.now() + reapIntervalMs;
           await reapStaleJobs().catch(() => undefined);
+        }
+        if (reminderSweepIntervalMs > 0 && Date.now() >= nextReminderSweepMs) {
+          // Task reminders (P1b, AUD-04): claim due reminders and deliver
+          // them as TASK_DUE notifications (0064 claim definer). Same
+          // failure posture as the sweeps above — a DB blip must never
+          // kill the worker; per-reminder errors are isolated inside the
+          // sweep itself.
+          nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
+          await sweepDueTaskReminders().catch(() => undefined);
         }
         let job: Job | null;
         try {

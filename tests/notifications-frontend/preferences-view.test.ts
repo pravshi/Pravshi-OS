@@ -9,9 +9,9 @@ import { buildPreferenceViewModel } from '@/components/notifications/notificatio
 import { NOTIFICATION_EVENT_TYPES } from '@/lib/notifications/types';
 
 describe('buildPreferenceViewModel', () => {
-  it('returns 12 rows: wildcard first, then the 11 event types', () => {
+  it('returns 13 rows: wildcard first, then the 12 event types', () => {
     const rows = buildPreferenceViewModel([], []);
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(13);
     expect(rows[0]!.key).toBe('*');
     expect(rows[0]!.label).toBe('All event types');
     expect(rows.slice(1).map((r) => r.key)).toEqual([...NOTIFICATION_EVENT_TYPES]);

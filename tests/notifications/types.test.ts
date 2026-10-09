@@ -29,8 +29,8 @@ function row(overrides: Partial<NotificationRow> = {}): NotificationRow {
 }
 
 describe('NotificationEventTypeSchema', () => {
-  it('accepts all 11 contract event types', () => {
-    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(11);
+  it('accepts all 12 contract event types', () => {
+    expect(NOTIFICATION_EVENT_TYPES).toHaveLength(12);
     for (const type of NOTIFICATION_EVENT_TYPES) {
       expect(NotificationEventTypeSchema.safeParse(type).success).toBe(true);
     }
