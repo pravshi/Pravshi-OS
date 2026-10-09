@@ -18,7 +18,9 @@ import type { PersonOption } from '../_types';
  * the server re-checks the permission on every write.
  *
  * The person picker is a plain select over candidatePeople — the server page
- * passes the people visible on this project's tasks (denormalized assignees).
+ * passes the org people the viewer may pick (their people.view scope,
+ * resolved server-side; see src/lib/work/people-candidates.ts), including
+ * people on no project yet, so a project's first member can be added here.
  * Candidates already on the project are filtered out of the select.
  */
 export function ProjectMembers({

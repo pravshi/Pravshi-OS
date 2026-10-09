@@ -9,7 +9,12 @@ import { SubtaskList } from '@/components/work/subtask-list';
 import { TaskReminders } from '@/components/work/task-reminders';
 import { DetailField, DetailLink } from '@/components/crm/detail-fields';
 import { formatDate, formatDateTime } from '@/components/crm/format';
-import { deleteTaskAction, getTaskAction, updateTaskAction } from '../../_actions';
+import {
+  deleteTaskAction,
+  getTaskAction,
+  listTaskPeopleCandidatesAction,
+  updateTaskAction,
+} from '../../_actions';
 import { listSubtasksAction } from '../../subtasks/actions';
 import { WORK_PERMISSIONS, getWorkPermissions } from '../../_permissions';
 import {
@@ -39,10 +44,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   await requirePagePermission(WORK_PERMISSIONS.tasks.view);
   const { id } = await params;
 
-  const [taskRes, held, aiAllowed] = await Promise.all([
+  const [taskRes, held, aiAllowed, candidatesRes] = await Promise.all([
     getTaskAction(id),
     getWorkPermissions(),
     canUseAi(),
+    listTaskPeopleCandidatesAction(),
   ]);
 
   if (isErrorEnvelope(taskRes)) {
@@ -67,12 +73,21 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const subtasksRes = await listSubtasksAction(task.id, {});
   const initialSubtasks = isErrorEnvelope(subtasksRes) ? [] : toRows(subtasksRes);
 
-  // Keep the current assignee selectable even when they appear on no other
-  // visible task.
+  // Assignee options are the org people this viewer may pick: their
+  // people.view scope, resolved server-side by people_select RLS. A failed
+  // candidates load degrades to an empty picker, never a broken page.
+  const candidateOptions: PersonOption[] = isErrorEnvelope(candidatesRes)
+    ? []
+    : candidatesRes.map((c) => ({ id: c.personId, displayName: c.displayName }));
+
+  // Keep the current assignee selectable even when they fall outside the
+  // viewer's people scope — their name already appears on this task.
   const assignees: PersonOption[] =
-    task.assigneePersonId && task.assigneeName
-      ? [{ id: task.assigneePersonId, displayName: task.assigneeName }]
-      : [];
+    task.assigneePersonId &&
+    task.assigneeName &&
+    !candidateOptions.some((c) => c.id === task.assigneePersonId)
+      ? [...candidateOptions, { id: task.assigneePersonId, displayName: task.assigneeName }]
+      : candidateOptions;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

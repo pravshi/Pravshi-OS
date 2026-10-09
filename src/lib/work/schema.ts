@@ -246,6 +246,17 @@ export type ProjectMember = {
   addedAt: string;
 };
 
+/**
+ * One row of the org people picker (member add / task assignment). The set
+ * is exactly the caller's people_select-visible ACTIVE people — see
+ * src/lib/work/people-candidates.ts for the visibility contract.
+ */
+export type PersonCandidate = {
+  personId: string;
+  displayName: string;
+  workEmail: string | null;
+};
+
 export type MoveTaskResult = {
   ok: true;
   taskId: string;
