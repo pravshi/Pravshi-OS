@@ -278,8 +278,8 @@ export async function unarchiveProject(auth: Authorization, id: string): Promise
 
 const MEMBER_COLUMNS = sql`
   pm.person_id as "personId",
-  coalesce(per.preferred_name, per.full_legal_name) as name,
-  per.work_email as "workEmail",
+  dir.display_name as name,
+  dir.work_email as "workEmail",
   pm.role_in_project as "roleInProject",
   pm.added_by as "addedBy",
   pm.added_at as "addedAt"
@@ -302,11 +302,16 @@ export async function listProjectMembers(
 ): Promise<ProjectMember[]> {
   return withAuthorizedDb(auth.ctx, async (tx) => {
     await assertProjectVisible(tx, auth, projectId);
+    // Display fields come from the project_member_directory definer (0063),
+    // not a direct people join: the definer re-checks project read access and
+    // returns the full roster, so a member whose people.view scope is narrow
+    // still sees the roster of a project they belong to — while the pm rows
+    // themselves stay behind the (now recursion-free) project_members RLS.
     const res = await tx.execute<ProjectMember>(sql`
       select ${MEMBER_COLUMNS}
       from public.project_members pm
-      join public.people per
-        on per.id = pm.person_id
+      join public.project_member_directory(${projectId}::uuid) dir
+        on dir.person_id = pm.person_id
       where pm.project_id = ${projectId}::uuid
         and pm.org_id = ${auth.ctx.orgId}::uuid
       order by pm.added_at asc, pm.person_id asc

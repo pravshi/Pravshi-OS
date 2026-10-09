@@ -951,6 +951,8 @@ describe('the rest of the authorization model is untouched', () => {
       'in_my_departments',
       'is_active',
       'is_active_person',
+      'is_project_manager',
+      'is_project_member',
       'login_person_active',
       'mfa_enrollment_required',
       'my_departments',
@@ -966,10 +968,13 @@ describe('the rest of the authorization model is untouched', () => {
       'update_credential_password',
     ]);
     // The pin above must agree with the migration SQL (0027 added the five
-    // lockout/MFA helpers; 0033 added crm_owner_reachable); if this fails the literal
+    // lockout/MFA helpers; 0033 added crm_owner_reachable; 0063 added
+    // is_project_member and is_project_manager); if this fails the literal
     // list is stale.
     expect(authzHelperNamesFromSql()).toEqual(names);
-    for (const deferred of ['is_project_member']) {
+    // is_project_member was the last deferred-as-stub name; it arrived for
+    // real in 0063, so the not-a-stub list is now empty by design.
+    for (const deferred of [] as string[]) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });

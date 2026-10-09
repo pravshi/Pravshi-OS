@@ -1028,8 +1028,8 @@ describe('function properties', () => {
     const names = rows.map((r) => r.proname);
     expect(names).toContain('scope_for');
     // has_record_grant arrived with Task 1.9 and reports_to_me with Task 1.16; both have
-    // moved off this list.
-    for (const deferred of ['is_project_member']) {
+    // moved off this list. is_project_member moved off with 0063 (with is_project_manager).
+    for (const deferred of [] as string[]) {
       expect(names, `${deferred} must not exist as a stub`).not.toContain(deferred);
     }
   });
