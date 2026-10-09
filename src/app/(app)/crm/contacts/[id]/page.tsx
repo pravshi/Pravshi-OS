@@ -18,17 +18,20 @@ import {
   deleteContactAction,
 } from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 /** /crm/contacts/[id] — contact detail with edit, company link, related deals. */
 export default async function ContactDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireCrmPagePermission('contacts', 'view');
   const { id } = await params;
 
-  const [contactRes, companiesRes, dealsRes, held] = await Promise.all([
+  const [contactRes, companiesRes, dealsRes, held, aiAllowed] = await Promise.all([
     getContactAction(id),
     listCompaniesAction({ limit: 100 }),
     listDealsAction({ contactId: id, limit: 100 }),
     getCrmPermissions(),
+    canUseAi(),
   ]);
 
   if (isErrorEnvelope(contactRes)) {
@@ -84,6 +87,13 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
           />
         )}
       </div>
+
+      <AiSummaryPanel
+        capability="contact_summary"
+        entityType="contact"
+        entityId={contact.id}
+        canUseAi={aiAllowed}
+      />
 
       <Card>
         <CardHeader>

@@ -946,7 +946,10 @@ describe('the rest of the model is untouched', () => {
     // The Phase 8 migration (0052) adds three more app_user policies —
     // select/insert/update on notification_preferences — none of them
     // scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(83);
+    // The Phase 9 migration (0054) adds six more app_user policies —
+    // select/insert/update on each of ai_usage_requests and ai_org_limits —
+    // none of them scope-driven, so with_scope stays at twenty-two.
+    expect(Number(rows[0]!.n)).toBe(89);
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 

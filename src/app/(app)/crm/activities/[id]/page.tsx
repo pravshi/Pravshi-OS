@@ -9,6 +9,8 @@ import { isErrorEnvelope, type ActivityEntityType } from '@/components/crm/types
 import { ACTIVITY_TYPE_LABELS, formatDateTime } from '@/components/crm/format';
 import { getActivityAction, updateActivityAction, deleteActivityAction } from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 const ENTITY_HREF: Record<ActivityEntityType, (id: string) => string> = {
   company: (id) => `/crm/companies/${id}`,
@@ -27,7 +29,11 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
   await requireCrmPagePermission('activities', 'view');
   const { id } = await params;
 
-  const [activityRes, held] = await Promise.all([getActivityAction(id), getCrmPermissions()]);
+  const [activityRes, held, aiAllowed] = await Promise.all([
+    getActivityAction(id),
+    getCrmPermissions(),
+    canUseAi(),
+  ]);
 
   if (isErrorEnvelope(activityRes)) {
     return (
@@ -60,6 +66,13 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
           />
         )}
       </div>
+
+      <AiSummaryPanel
+        capability="activity_summary"
+        entityType="activity"
+        entityId={activity.id}
+        canUseAi={aiAllowed}
+      />
 
       <Card>
         <CardHeader>

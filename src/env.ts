@@ -52,6 +52,20 @@ const runtimeSchema = z.object({
    * (the event is never dropped, the caller never breaks).
    */
   WORKFLOWS_USE_QUEUE: z.string().optional(),
+  /**
+   * Phase 9 AI Foundation (src/lib/ai). Every key is optional: with none of them
+   * set the application runs on the deterministic mock provider, and boot is
+   * unaffected. AI_API_KEY is a server-side secret only — never NEXT_PUBLIC_,
+   * never logged; src/lib/ai reads these keys only through this parsed env.
+   * AI_TIMEOUT_MS and AI_MAX_OUTPUT_TOKENS stay strings here (the WORKFLOWS_USE_QUEUE
+   * precedent); src/lib/ai/config.ts parses and clamps them.
+   */
+  AI_PROVIDER: z.string().min(1).optional(),
+  AI_MODEL: z.string().min(1).optional(),
+  AI_API_KEY: z.string().min(1).optional(),
+  AI_BASE_URL: z.string().url().optional(),
+  AI_TIMEOUT_MS: z.string().optional(),
+  AI_MAX_OUTPUT_TOKENS: z.string().optional(),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */

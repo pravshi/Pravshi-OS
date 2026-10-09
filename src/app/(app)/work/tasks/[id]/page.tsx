@@ -22,6 +22,8 @@ import {
 } from '../../_types';
 import { EditTaskForm } from '../../_components/EditTaskForm';
 import { PRIORITY_BADGE_CLASSES } from '../../_components/TaskCard';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 const STATUS_BADGE: Record<string, string> = {
   todo: 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
@@ -34,7 +36,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   await requirePagePermission(WORK_PERMISSIONS.tasks.view);
   const { id } = await params;
 
-  const [taskRes, held] = await Promise.all([getTaskAction(id), getWorkPermissions()]);
+  const [taskRes, held, aiAllowed] = await Promise.all([
+    getTaskAction(id),
+    getWorkPermissions(),
+    canUseAi(),
+  ]);
 
   if (isErrorEnvelope(taskRes)) {
     return (
@@ -94,6 +100,13 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           />
         )}
       </div>
+
+      <AiSummaryPanel
+        capability="task_summary"
+        entityType="task"
+        entityId={task.id}
+        canUseAi={aiAllowed}
+      />
 
       <Card>
         <CardHeader>

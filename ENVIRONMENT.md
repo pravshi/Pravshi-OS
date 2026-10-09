@@ -78,6 +78,21 @@ Read by `scripts/bootstrap/run.mjs`, once per database, from the process environ
 | `SENTRY_AUTH_TOKEN`  | optional     | Source-map upload. Not in use                                                                                                                         |
 | `BETTER_AUTH_SECRET` | **required** | Signs Better Auth session cookies. At least 32 characters. Without it each serverless instance would generate its own and reject the others' sessions |
 
+### AI Foundation (Phase 9) — optional
+
+All six variables are optional. With none set, the AI layer runs on the deterministic
+mock provider and the rest of the application is unaffected. See
+`docs/phase9-ai-foundation.md` for the full architecture, setup and runbook.
+
+| Variable               | Required | Notes                                                                                         |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `AI_PROVIDER`          | optional | Unset or `mock` = deterministic mock provider. `openai` or `openai-compatible` = real adapter |
+| `AI_MODEL`             | optional | Required when a real provider is selected; missing model = AI reports not configured          |
+| `AI_API_KEY`           | optional | Server-side only, never exposed to the browser. Required when a real provider is selected     |
+| `AI_BASE_URL`          | optional | Defaults to `https://api.openai.com/v1`. Point at any OpenAI-compatible endpoint              |
+| `AI_TIMEOUT_MS`        | optional | Overall per-request AI budget in milliseconds (default 30000, clamped by the config layer)    |
+| `AI_MAX_OUTPUT_TOKENS` | optional | Caps model output tokens per request (default set by the config layer)                        |
+
 ### Storage — not yet configured
 
 `.env.example` also lists `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and the

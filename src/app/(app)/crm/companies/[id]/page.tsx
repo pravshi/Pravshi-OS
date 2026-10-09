@@ -22,6 +22,8 @@ import {
   deleteCompanyAction,
 } from '../../actions';
 import { getCrmPermissions, requireCrmPagePermission, uiPermissionsFor } from '../../_permissions';
+import { AiSummaryPanel } from '@/components/ai/AiSummaryPanel';
+import { canUseAi } from '@/components/ai/can-use-ai';
 
 /**
  * /crm/companies/[id] — company detail with edit form, soft delete, and the
@@ -31,11 +33,12 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
   await requireCrmPagePermission('companies', 'view');
   const { id } = await params;
 
-  const [companyRes, contactsRes, dealsRes, held] = await Promise.all([
+  const [companyRes, contactsRes, dealsRes, held, aiAllowed] = await Promise.all([
     getCompanyAction(id),
     listContactsAction({ companyId: id, limit: 100 }),
     listDealsAction({ companyId: id, limit: 100 }),
     getCrmPermissions(),
+    canUseAi(),
   ]);
 
   if (isErrorEnvelope(companyRes)) {
@@ -83,6 +86,13 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
           />
         )}
       </div>
+
+      <AiSummaryPanel
+        capability="company_summary"
+        entityType="company"
+        entityId={company.id}
+        canUseAi={aiAllowed}
+      />
 
       <Card>
         <CardHeader>
