@@ -132,15 +132,6 @@ export async function withQueueDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   }
 }
 
-function isPgCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code;
-}
-
-/** A 23505 from the (org_id, dedup_key) unique index becomes the caller's no-op. */
-function isDedupConflict(error: unknown): boolean {
-  return isPgCode(error, '23505');
-}
-
 function toIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   return new Date(String(value)).toISOString();
@@ -223,9 +214,10 @@ function assertTransition(job: Job, to: JobStatus): void {
 /**
  * Validate the payload against the per-type zod schema, stamp org_id from
  * auth.ctx (NEVER from input), and insert. A dedup_key collision returns the
- * existing job — an idempotent no-op. Race-safe: the (org_id, dedup_key)
- * unique index arbitrates concurrent inserts; the loser catches 23505 and
- * fetches the winner's row.
+ * existing job — an idempotent no-op. Race-safe: the insert arbitrates on
+ * the (org_id, dedup_key) partial unique index via ON CONFLICT DO NOTHING,
+ * so a duplicate never raises an error; the loser then fetches the winner's
+ * row inside the same transaction.
  */
 export async function enqueueJob(auth: Authorization, input: EnqueueJobInput): Promise<Job> {
   await requireJobPermission(auth, PERM_CREATE);
@@ -244,27 +236,40 @@ export async function enqueueJob(auth: Authorization, input: EnqueueJobInput): P
   const nextRunAt = parsed.nextRunAt ?? new Date().toISOString();
 
   return withAuthorizedDb(auth.ctx, async (tx) => {
-    try {
-      const result = await tx.execute<Record<string, unknown>>(sql`
-        insert into jobs (org_id, type, priority, payload, max_attempts, next_run_at, dedup_key)
-        values (${orgId}, ${parsed.type}, ${parsed.priority}, ${JSON.stringify(parsed.payload)}::jsonb,
-                ${parsed.maxAttempts}, ${nextRunAt}::timestamptz, ${parsed.dedupKey ?? null})
-        returning ${JOB_COLUMNS}
-      `);
-      const inserted = result.rows[0];
-      if (!inserted) throw new Error('INTERNAL: job insert returned no row');
-      return mapJobRow(inserted);
-    } catch (e) {
-      if (isDedupConflict(e) && parsed.dedupKey != null) {
-        // Lost the race (or a true duplicate): return the existing job.
-        const existing = await tx.execute<Record<string, unknown>>(sql`
-          select ${JOB_COLUMNS} from jobs
-          where org_id = ${orgId} and dedup_key = ${parsed.dedupKey}
-        `);
-        if (existing.rows[0]) return mapJobRow(existing.rows[0]);
-      }
-      throw e;
+    // ON CONFLICT DO NOTHING against the partial unique index
+    // jobs_org_dedup_uidx (0045): a duplicate dedup_key returns NO row and
+    // raises NO error, so the transaction stays usable for the fallback
+    // SELECT below. (The previous catch-the-23505 shape could never work:
+    // drizzle wraps driver errors so the SQLSTATE was invisible on the
+    // outer error, and even a detected 23505 leaves the transaction
+    // aborted — 25P02 on any further statement. AUD-18, proven by
+    // tests/jobs/enqueue-dedup-db.test.ts against a real database.)
+    const result = await tx.execute<Record<string, unknown>>(sql`
+      insert into jobs (org_id, type, priority, payload, max_attempts, next_run_at, dedup_key)
+      values (${orgId}, ${parsed.type}, ${parsed.priority}, ${JSON.stringify(parsed.payload)}::jsonb,
+              ${parsed.maxAttempts}, ${nextRunAt}::timestamptz, ${parsed.dedupKey ?? null})
+      on conflict (org_id, dedup_key) where dedup_key is not null do nothing
+      returning ${JOB_COLUMNS}
+    `);
+    const inserted = result.rows[0];
+    if (inserted) return mapJobRow(inserted);
+    // No row back: the insert was swallowed as a duplicate. A NULL
+    // dedup_key can never conflict (the partial index excludes NULLs), so
+    // reaching here without one is an internal error.
+    if (parsed.dedupKey == null) {
+      throw new Error('INTERNAL: job insert returned no row without a dedup key');
     }
+    // Lost the race (or a true duplicate): return the existing job.
+    // Org-scoped, same as before — never another tenant's row.
+    const existing = await tx.execute<Record<string, unknown>>(sql`
+      select ${JOB_COLUMNS} from jobs
+      where org_id = ${orgId} and dedup_key = ${parsed.dedupKey}
+    `);
+    const existingRow = existing.rows[0];
+    if (!existingRow) {
+      throw new Error('INTERNAL: dedup conflict but no existing job found');
+    }
+    return mapJobRow(existingRow);
   });
 }
 
