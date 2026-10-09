@@ -276,12 +276,27 @@ describe.skipIf(!HAS_DB)('Tier-1 query plans (Phase 12 §4.4)', () => {
       if (n['Node Type'] === 'Seq Scan' && n['Relation Name'] === 'jobs') {
         seqScans.push(JSON.stringify(n));
       }
+      // Adjudication (PR #70 round 4, §4.4 outcome (a) — plan attached):
+      // the planner DOES use the canonical index, as a Bitmap Index Scan:
+      //   Limit → LockRows → Sort (priority DESC, next_run_at)
+      //     → Bitmap Heap Scan on jobs
+      //         (Recheck Cond: status = 'pending' AND next_run_at <= now())
+      //       → Bitmap Index Scan on jobs_claim_idx
+      //         (Index Cond: status = 'pending' AND next_run_at <= now())
+      // The old check also demanded Relation Name = 'jobs' on the SAME
+      // node — but EXPLAIN (FORMAT JSON) emits no "Relation Name" on
+      // Bitmap Index Scan nodes (only "Index Name"; the relation sits on
+      // the parent Bitmap Heap Scan), so it could never match. An index
+      // name identifies exactly one table's index, so matching
+      // jobs_claim_idx on any index-scan node type is the proof §4.4
+      // asks for; the Sort node above the scan owns the ORDER BY, which
+      // is the planner's prerogative at 209 estimated candidate rows.
       if (
         (n['Node Type'] === 'Index Scan' ||
           n['Node Type'] === 'Index Only Scan' ||
           n['Node Type'] === 'Bitmap Index Scan') &&
-        n['Relation Name'] === 'jobs' &&
-        n['Index Name'] === 'jobs_claim_idx'
+        n['Index Name'] === 'jobs_claim_idx' &&
+        (n['Node Type'] === 'Bitmap Index Scan' || n['Relation Name'] === 'jobs')
       ) {
         claimIndexScans.push(n['Node Type']);
       }
@@ -308,10 +323,22 @@ describe.skipIf(!HAS_DB)('Tier-1 query plans (Phase 12 §4.4)', () => {
     const now = new Date();
     const isoDay = (daysAgo: number) =>
       new Date(now.getTime() - daysAgo * 24 * 3600_000).toISOString().slice(0, 10);
+    // The seed spreads deals over the 90 days ending today
+    // (current_date − (i % 90), at noon); a 200-day CUSTOM window covers
+    // that spread with headroom for any seed/test date skew, inside the
+    // resolver's 370-day cap. Round 4's {} was NOT the window, though:
+    // the owner mirror below used the same bounds and returned totals.
+    // The metric came back empty because pipeline_stages reads ride on
+    // pipelines.view (0037 pipeline_stages_select) and the probe person
+    // did not hold it, so RLS hid every stage and the ⋈ produced no
+    // rows. The grant is now in the seed (PERF_PROBE_PERMISSIONS); the
+    // mirror keeps the metric's exact predicate — d.created_at in the
+    // half-open range (analytics/sql dateRangeFilter) — so any future
+    // divergence is a metric bug, not a mirror drift.
     const range = dateRanges.resolveDateRange('CUSTOM', {
       timezone: 'UTC',
       now,
-      customStart: isoDay(120),
+      customStart: isoDay(200),
       customEnd: isoDay(0),
     });
     capture.plans.length = 0;
@@ -338,7 +365,9 @@ describe.skipIf(!HAS_DB)('Tier-1 query plans (Phase 12 §4.4)', () => {
     capture.plans.length = 0;
     const res = await search.searchGlobal(makeAuth('companies.view'), {
       query: 'Zephyr',
-      entityTypes: ['companies'],
+      // The SearchFiltersSchema vocabulary is singular ('company', not
+      // 'companies') — round 4 died on the zod enum before searching.
+      entityTypes: ['company'],
       limit: 20,
       offset: 0,
     });

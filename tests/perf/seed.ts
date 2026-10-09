@@ -95,6 +95,11 @@ export const PERF_PROBE_PERMISSIONS = [
   'companies.view',
   'contacts.view',
   'deals.view',
+  // Stage reads ride on pipelines.view (0037 pipeline_stages_select), so
+  // every analytics metric that joins pipeline_stages — pipeline value,
+  // won revenue, win rate, deals-by-stage — needs it; without it RLS hides
+  // all stages and those metrics return empty (PR #70 round 4, test #6).
+  'pipelines.view',
   'activities.view',
   'projects.view',
   'tasks.view',
@@ -150,9 +155,21 @@ export function expectedCounts(scale: number): PerfCounts {
   };
 }
 
-/** md5('perf:<kind>:<org>:<n>') formatted as a uuid — equals the SQL cast. */
+/**
+ * md5('perf:<kind>:<org>:<n>') formatted as a uuid — equals the SQL cast
+ * in idSql below. The raw md5 hex is NOT a valid RFC 4122 uuid: its
+ * version nibble (hex char 13) can fall outside 1–8 and its variant
+ * nibble (hex char 17) outside 8–b, and the services validate ids with
+ * zod's uuid schema (perfId('project', 0, 1) has version 9 / variant 4
+ * and listTasks rejected it — PR #70 round 4, test #3). Both sides
+ * therefore force version '4' and map the variant nibble into 8–b
+ * ((v & 3) | 8); the ids stay deterministic and unique per (kind, org, n).
+ */
 export function perfId(kind: string, orgIndex: number, n: number): string {
-  const hex = createHash('md5').update(`perf:${kind}:${orgIndex}:${n}`).digest('hex');
+  const chars = createHash('md5').update(`perf:${kind}:${orgIndex}:${n}`).digest('hex').split('');
+  chars[12] = '4';
+  chars[16] = ((parseInt(chars[16]!, 16) & 3) | 8).toString(16);
+  const hex = chars.join('');
   return [
     hex.slice(0, 8),
     hex.slice(8, 12),
@@ -163,7 +180,10 @@ export function perfId(kind: string, orgIndex: number, n: number): string {
 }
 
 const idSql = (kind: string, orgIndex: number, expr: string) =>
-  `md5('perf:${kind}:${orgIndex}:' || (${expr}))::uuid`;
+  `(select (overlay(overlay(h placing '4' from 13 for 1)
+                    placing to_hex(((position(substring(h from 17 for 1) in '0123456789abcdef') - 1) & 3) | 8)
+                    from 17 for 1))::uuid
+      from (select md5('perf:${kind}:${orgIndex}:' || (${expr})) as h) _perf_id)`;
 
 /* ── one org's worth of set-based inserts (run inside the seed lock) ────── */
 
@@ -522,6 +542,9 @@ async function readCounts(client: PoolClient, orgId: string): Promise<PerfCounts
  * the product itself appends to while running (jobs: fan-out enqueues;
  * audit_logs: mutation audit writes). Returns the detected scale.
  */
+/** Seeded jobs whose type is 'scheduled_trigger': (i % 7) + 1 = 2 → i % 7 = 1, i in [1..n]. */
+const scheduledTriggerJobs = (n: number): number => (n >= 1 ? Math.floor((n - 1) / 7) + 1 : 0);
+
 function verifyExisting(actual: PerfCounts, orgSlug: string): number {
   const scale = actual.companies / PERF_BASE_COUNTS.companies;
   const expected = expectedCounts(scale);
@@ -548,10 +571,22 @@ function verifyExisting(actual: PerfCounts, orgSlug: string): number {
     }
   }
   for (const key of ['jobs', 'auditLogs'] as const) {
-    if (actual[key] < expected[key]) {
+    // The jobs floor is NOT the seeded count. tests/jobs/scheduler-tick
+    // cleans up with an UNSCOPED `delete from public.jobs where type =
+    // 'scheduled_trigger'`, which — the perf orgs share the CI database —
+    // also removes this dataset's jobs of that type: exactly the
+    // (i % 7) + 1 = 2 class, i.e. i % 7 = 1, which the generator's modular
+    // rule puts at ⌊(N−1)/7⌋ + 1 rows (1,429 of 10,000; PR #70 round 4
+    // observed 8,571 survivors). The floor is what the generator
+    // guarantees survives that delete: seeded minus that class. (If the
+    // delete has not run yet, the count is higher — the ≥ form holds
+    // either way.) audit_logs is append-only; its floor stays the count.
+    const floor =
+      key === 'jobs' ? expected.jobs - scheduledTriggerJobs(expected.jobs) : expected[key];
+    if (actual[key] < floor) {
       throw new Error(
         `perf seed: existing dataset for ${orgSlug} is short on ${key} — ` +
-          `${actual[key]} rows, expected at least ${expected[key]} at scale ${scale}.`,
+          `${actual[key]} rows, expected at least ${floor} at scale ${scale}.`,
       );
     }
   }

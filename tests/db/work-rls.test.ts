@@ -88,7 +88,7 @@ beforeAll(async () => {
   taskB = await mkTask(owner, orgB, `Matrix task B ${CODE}`, {
     projectId: projectB,
   });
-}, 30_000);
+}, 120_000); // 120s: setup can queue behind the Phase 12 perf seed + ANALYZE under CI parallel load (PR #70 round 4).
 
 afterAll(async () => {
   await owner.end();

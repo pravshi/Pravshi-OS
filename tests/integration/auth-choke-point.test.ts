@@ -88,7 +88,7 @@ beforeAll(async () => {
     `insert into public.person_roles (person_id, role_id, org_id) values ($1, $2, $3)`,
     [inviterId, superAdmin, orgId],
   );
-});
+}, 120_000); // 120s: setup can queue behind the Phase 12 perf seed + ANALYZE under CI parallel load (PR #70 round 4).
 
 afterAll(async () => {
   await owner?.end();

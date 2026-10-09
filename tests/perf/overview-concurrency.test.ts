@@ -164,8 +164,22 @@ describe.skipIf(!HAS_DB)('overview concurrency (Phase 12 §4.4, F-12-01)', () =>
     const expectedPipeline: Record<string, string | null> = {};
     for (const row of truth.rows) expectedPipeline[row.currency] = row.total;
     expect(serial.sales.pipelineValue).toEqual(expectedPipeline);
-    // Seeded job mix: exactly 10% dead_letter (i % 10 = 8).
-    expect(serial.automation.deadLetterCount).toBe(data.counts.jobs / 10);
+    // Dead-letter truth, mirrored from the owner at read time (the
+    // pipeline-value pattern above): the generator seeds exactly 10%
+    // dead_letter (i % 10 = 8 → 1,000 at scale 1), but the shared CI
+    // database is not hermetic — tests/jobs/scheduler-tick deletes ALL
+    // jobs of type 'scheduled_trigger' unscoped, and ~143 of those are
+    // dead_letter rows here, so an absolute 1,000 flakes on file order
+    // (PR #70 round 4: the seed verify observed the same delete). The
+    // anchor stays exact — metric == owner truth, and truth > 0.
+    const deadTruth = await owner.query<{ n: string }>(
+      `select count(*)::text as n from public.jobs
+        where org_id = $1 and status = 'dead_letter'`,
+      [data.orgA],
+    );
+    const expectedDeadLetter = Number(deadTruth.rows[0]!.n);
+    expect(expectedDeadLetter).toBeGreaterThan(0);
+    expect(serial.automation.deadLetterCount).toBe(expectedDeadLetter);
     const taskTotal =
       serial.work.tasksByStatus.todo +
       serial.work.tasksByStatus.in_progress +
