@@ -18,7 +18,11 @@ import { Pool, type PoolClient } from '@neondatabase/serverless';
  *
  * Determinism: every seeded row id is md5('perf:<kind>:<org>:<n>')::uuid,
  * mirrored by perfId() below, so tests can name individual rows (the probe
- * project, a sample company) without a lookup. Distributions are modular
+ * project, a sample company) without a lookup. One exception: the org's
+ * default pipeline row, which is provisioned by the org-insert trigger
+ * (0039) with a random id and adopted by lookup — nothing outside this
+ * module ever referenced the pipeline by id (the measured surfaces join
+ * deals → stages; they never look a pipeline up). Distributions are modular
  * arithmetic on the series index, so expected counts/sums are computable
  * ground truth — the suites still read them back through the owner
  * connection rather than trusting the formulae.
@@ -33,9 +37,18 @@ import { Pool, type PoolClient } from '@neondatabase/serverless';
  * dataset can therefore never be committed — let alone observed — which
  * PR #70 CI round 1 proved the previous shape allowed: the lock and the
  * statements were on one client, but each statement autocommitted, so
- * two suites overlapped mid-seed (a duplicate default pipeline for the
- * same org; the second suite observing orgs with zero companies) and the
- * partial rows stayed behind. If the orgs already exist, the dataset is
+ * two suites overlapped mid-seed (the second suite observing orgs with
+ * zero companies) and the partial rows stayed behind. Round 2 then proved
+ * the duplicate-default-pipeline error was NOT (only) that race: with
+ * the lock holding, both suites still died on the same insert, ~38 s
+ * apart — because every organization is born with a default pipeline.
+ * The organizations_seed_system_roles trigger (0008, body grown by 0039)
+ * calls seed_default_pipeline(new.id) inside the very statement that
+ * creates the org, so the seed's own transaction creates the conflicting
+ * row before its explicit pipeline insert runs; no cross-suite
+ * serialization can fix a conflict the caller manufactures itself.
+ * seedOrg therefore ADOPTS the provisioned pipeline (see there). If the
+ * orgs already exist, the dataset is
  * verified against the scale it was seeded at (detected from the
  * companies count) and returned; a dataset whose counts match NO single
  * scale is a loud error, never a silent top-up — a half-seeded dataset
@@ -200,19 +213,36 @@ async function seedOrg(client: PoolClient, orgIndex: 0 | 1, orgId: string, count
     orgId,
   ]);
 
-  // Pipeline + 6 stages (positions 1..6 = NEW..LOST; 5 won, 6 lost).
-  await q(
-    `insert into public.pipelines (id, org_id, name, is_default)
-     values (${idSql('pipeline', orgIndex, '1')}, $1, 'Perf Pipeline', true)`,
+  // Pipeline: ADOPT the default pipeline the org was born with. The
+  // organizations insert in ensurePerfDataset fired the
+  // organizations_seed_system_roles trigger, whose seed_default_pipeline
+  // call (0039) already created a live default ('Sales Pipeline', random
+  // id, six stages at positions 0..5) inside this same transaction — a
+  // second default would violate pipelines_one_default_per_org, which is
+  // exactly what PR #70 CI rounds 1–2 hit. Replace the provisioned stages
+  // (unreferenced — no deals exist yet, so the owner may hard-delete them)
+  // with this harness's deterministic stages and bind deals to the
+  // adopted pipeline's id below.
+  const pipeline = await q(
+    `select id from public.pipelines where org_id = $1 and is_default and deleted_at is null`,
     [orgId],
   );
+  const pipelineId = (pipeline.rows[0] as { id: string } | undefined)?.id;
+  if (!pipelineId) {
+    throw new Error(
+      'perf seed: organization has no provisioned default pipeline — the ' +
+        'organizations_seed_system_roles / seed_default_pipeline contract (0039) is broken',
+    );
+  }
+  await q(`delete from public.pipeline_stages where pipeline_id = $1`, [pipelineId]);
+  // 6 stages (positions 1..6 = NEW..LOST; 5 won, 6 lost).
   await q(
     `insert into public.pipeline_stages (id, org_id, pipeline_id, name, position, probability, is_won, is_lost)
-     select ${idSql('stage', orgIndex, 'g.i')}, $1, ${idSql('pipeline', orgIndex, '1')},
+     select ${idSql('stage', orgIndex, 'g.i')}, $1, $2,
             (array['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'])[g.i], g.i,
             (g.i * 15)::numeric, g.i = 5, g.i = 6
        from generate_series(1, 6) as g(i)`,
-    [orgId],
+    [orgId, pipelineId],
   );
 
   // Companies. Every 500th name carries the search probe token 'Zephyr'.
@@ -259,13 +289,13 @@ async function seedOrg(client: PoolClient, orgIndex: 0 | 1, orgId: string, count
             g.i % 101,
             case when (g.i % 6) + 1 >= 5
                  then (current_date - (g.i % 90)) + interval '13 hours' else null end,
-            ${idSql('pipeline', orgIndex, '1')},
+            $3,
             ${idSql('stage', orgIndex, '(g.i % 6) + 1')},
             ${person('((g.i - 1) % 100) + 1')},
             (current_date - (g.i % 90)) + interval '12 hours',
             (current_date - (g.i % 90)) + interval '12 hours' + make_interval(hours => g.i % 10)
        from generate_series(1, $2::int) as g(i)`,
-    [orgId, counts.deals],
+    [orgId, counts.deals, pipelineId],
   );
 
   // Activities across the three entity kinds.
