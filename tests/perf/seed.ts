@@ -47,7 +47,11 @@ import { Pool, type PoolClient } from '@neondatabase/serverless';
  * creates the org, so the seed's own transaction creates the conflicting
  * row before its explicit pipeline insert runs; no cross-suite
  * serialization can fix a conflict the caller manufactures itself.
- * seedOrg therefore ADOPTS the provisioned pipeline (see there). If the
+ * seedOrg therefore ADOPTS the provisioned pipeline (see there). Round 3
+ * got past the pipeline step and died inside the jobs insert on
+ * make_interval(seconds => …) — Postgres has no `seconds` named argument
+ * (the field is `secs`, and it takes float8); the expression is now
+ * (g.i % 3600) * interval '1 second', same distribution. If the
  * orgs already exist, the dataset is
  * verified against the scale it was seeded at (detected from the
  * companies count) and returned; a dataset whose counts match NO single
@@ -393,7 +397,7 @@ async function seedOrg(client: PoolClient, orgIndex: 0 | 1, orgId: string, count
                  else 'pending' end,
             g.i % 5, '{}'::jsonb, 0, 5,
             case when g.i % 10 = 9 and g.i % 5 != 0
-                 then now() - make_interval(seconds => g.i % 3600)
+                 then now() - (g.i % 3600) * interval '1 second'
                  else now() + interval '1 hour' end,
             now() - make_interval(days => g.i % 30),
             now() - make_interval(days => g.i % 30)
