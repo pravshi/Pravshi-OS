@@ -156,15 +156,21 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
       throw new Error(`permission catalogue lookup missed keys: ${keys.join(', ')}`);
     }
     const roleId = randomUUID();
+    // roles.key is NOT NULL with a format check (^[A-Z][A-Z0-9_]{1,39}$) and a
+    // non-partial unique index on (org_id, key) — sibling idiom
+    // (integration.test.ts:107): sanitise the RUN-suffixed label into key form.
+    const roleKey = `p1b-role-${RUN}-${randomUUID().slice(0, 6)}`
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, '_');
     await owner(
-      `insert into public.roles (id, org_id, name, is_system) values ($1, $2, $3, false)`,
-      [roleId, orgId, `p1b-role-${RUN}-${randomUUID().slice(0, 6)}`],
+      `insert into public.roles (id, org_id, key, name, is_system) values ($1, $2, $3, $4, false)`,
+      [roleId, orgId, roleKey, `p1b-role-${RUN}-${randomUUID().slice(0, 6)}`],
     );
     for (const permId of found) {
       await owner(
-        `insert into public.role_permissions (id, role_id, permission_id, scope)
-         values ($1, $2, $3, 'GLOBAL'::public.data_scope)`,
-        [randomUUID(), roleId, permId],
+        `insert into public.role_permissions (role_id, permission_id, scope)
+         values ($1, $2, 'GLOBAL'::public.access_scope)`,
+        [roleId, permId],
       );
     }
     return roleId;
@@ -188,29 +194,55 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     } as unknown as Authorization;
   }
 
-  /** Create a user + person + ACTIVE engagement holding `keys`; returns ids + auth. */
+  /** One department per org, created lazily (engagements.department_id is NOT NULL). */
+  const deptByOrg = new Map<string, string>();
+  async function mkDept(orgId: string): Promise<string> {
+    const cached = deptByOrg.get(orgId);
+    if (cached) return cached;
+    const id = randomUUID();
+    await owner(`insert into public.departments (id, org_id, code, name) values ($1, $2, $3, $4)`, [
+      id,
+      orgId,
+      `P1B_${RUN}`.toUpperCase(),
+      `P1b dept ${RUN}`,
+    ]);
+    deptByOrg.set(orgId, id);
+    return id;
+  }
+
+  /**
+   * Create a person + ACTIVE engagement holding `keys`; returns ids + auth.
+   * Fixture shapes mirror integration.test.ts / tests/authz/fixtures.ts: the
+   * person carries a generated identity code and no login (auth is fabricated
+   * below; nothing in this suite resolves a session), and the role attaches
+   * via person_roles — engagements has no role_id column.
+   */
   async function mkPerson(
     orgId: string,
     label: string,
     keys: readonly string[],
   ): Promise<{ personId: string; auth: Authorization }> {
     const roleId = await mkRoleFor(orgId, keys);
-    const userId = randomUUID();
     const personId = randomUUID();
-    await owner(
-      `insert into public.ba_user (id, name, email, email_verified) values ($1, $2, $3, true)`,
-      [userId, `P1b ${label}`, `p1b-${RUN}-${label}@example.invalid`],
+    const { rows: codeRows } = await owner<{ c: string }>(
+      `select authz.next_identity_code($1::uuid, 'EMP', '2026') as c`,
+      [orgId],
     );
     await owner(
-      `insert into public.people (id, org_id, user_id, display_name, email)
-       values ($1, $2, $3, $4, $5)`,
-      [personId, orgId, userId, `P1b ${label}`, `p1b-${RUN}-${label}@example.invalid`],
+      `insert into public.people (id, org_id, code, full_legal_name, person_status, work_email)
+       values ($1, $2, $3, $4, 'ACTIVE'::public.person_status, $5)`,
+      [personId, orgId, codeRows[0]!.c, `P1b ${label}`, `p1b-${RUN}-${label}@example.invalid`],
     );
+    const deptId = await mkDept(orgId);
     await owner(
       `insert into public.engagements
-         (id, org_id, person_id, engagement_type, status, role_id, start_date)
-       values ($1, $2, $3, 'FULL_TIME', 'ACTIVE', $4, current_date)`,
-      [randomUUID(), orgId, personId, roleId],
+         (id, org_id, person_id, department_id, engagement_type, status, start_date)
+       values ($1, $2, $3, $4, 'EMPLOYEE', 'ACTIVE'::public.engagement_status, current_date)`,
+      [randomUUID(), orgId, personId, deptId],
+    );
+    await owner(
+      `insert into public.person_roles (person_id, role_id, org_id) values ($1, $2, $3)`,
+      [personId, roleId, orgId],
     );
     return { personId, auth: makeAuth(personId, orgId) };
   }
