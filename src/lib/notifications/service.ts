@@ -105,22 +105,34 @@ export function buildNotificationJobPayload(
   };
 }
 
-/** The recipient must be an active person in the caller's org (defense in depth; the job handler re-checks). */
+/**
+ * The recipient must be an active person in the caller's org (defense in
+ * depth; the job handler re-checks). The probe goes through the bounded
+ * SECURITY DEFINER check (0052, context-asserted in 0061) rather than a
+ * direct SELECT on public.people: people_select visibility is bound to the
+ * CALLER's people.view scope (another person's row is visible only at
+ * GLOBAL/DEPARTMENT scope), so a direct read would silently reject
+ * legitimate recipients whenever the caller — e.g. a task's assignee
+ * completing it under a SELF-scope role — cannot see the recipient's
+ * directory row. Org membership is a fact about the recipient, not about
+ * the caller's directory scope; the definer answers exactly that (one
+ * boolean, no person data), the same probe the job handler and the
+ * reminder sweep already use.
+ */
 async function assertRecipientInOrg(
   auth: Authorization,
   orgId: string,
   personId: string,
 ): Promise<void> {
   const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-    tx.execute<{ id: string }>(sql`
-      select id from public.people
-      where id = ${personId}::uuid
-        and org_id = ${orgId}::uuid
-        and deleted_at is null
-      limit 1
+    tx.execute<{ recipient_exists: boolean }>(sql`
+      select public.notifications_recipient_exists(
+        ${orgId}::uuid,
+        ${personId}::uuid
+      ) as recipient_exists
     `),
   );
-  if (rows.rows.length === 0) {
+  if (rows.rows[0]?.recipient_exists !== true) {
     throw new Error(
       'INVALID_REQUEST: notification recipient is not an active person in this organization',
     );

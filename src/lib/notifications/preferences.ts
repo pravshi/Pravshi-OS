@@ -71,7 +71,7 @@ export function resolveEffectiveEnabled(
 }
 
 /**
- * Pure: builds the full effective matrix (11 event types × 2 channels) from
+ * Pure: builds the full effective matrix (12 event types × 2 channels) from
  * stored rows. The frontend settings screen renders this directly.
  */
 export function buildEffectivePreferences(
@@ -111,7 +111,7 @@ export async function getStoredPreferences(
   return result.rows;
 }
 
-/** The caller's own effective preference matrix (22 entries). */
+/** The caller's own effective preference matrix (24 entries). */
 export async function getEffectivePreferences(auth: Authorization): Promise<EffectivePreference[]> {
   const personId = requirePersonId(auth);
   const rows = await getStoredPreferences(auth, personId);

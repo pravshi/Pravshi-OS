@@ -60,6 +60,10 @@ export const EVENT_TYPE_META: Readonly<
     label: 'Task assigned',
     description: 'A task was assigned to you',
   },
+  TASK_COMPLETED: {
+    label: 'Task completed',
+    description: 'A task you created was completed',
+  },
   TASK_DUE: {
     label: 'Task due soon',
     description: 'A reminder before a task’s due date',
@@ -102,7 +106,7 @@ export const EVENT_TYPE_META: Readonly<
   },
 });
 
-// Compile-time + runtime guard: every one of the 11 event types has metadata.
+// Compile-time + runtime guard: every one of the 12 event types has metadata.
 for (const t of NOTIFICATION_EVENT_TYPES) {
   if (!EVENT_TYPE_META[t]) {
     throw new Error(`notifications-view: missing EVENT_TYPE_META for '${t}'`);
@@ -132,7 +136,7 @@ export interface StoredPreference {
   enabled: boolean;
 }
 
-/** One row of the settings table: the '*' wildcard first, then the 11 types. */
+/** One row of the settings table: the '*' wildcard first, then the 12 types. */
 export interface PreferenceRow {
   /** NotificationEventType or '*' (the wildcard). */
   key: string;

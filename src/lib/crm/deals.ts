@@ -6,6 +6,7 @@ import { writeAuditEntry } from '@/lib/audit/log';
 import { assertDealReferences } from './refs';
 import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
 import { emitIntegrationEvent } from '@/lib/integrations/fanout';
+import { emitNotificationSafely, notificationTitle, stableEventId } from '@/lib/notifications/emit';
 import {
   CreateDealSchema,
   ListDealsQuerySchema,
@@ -431,6 +432,27 @@ export async function updateDeal(auth: Authorization, id: string, input: unknown
         dealValue: deal.value,
       },
     });
+    // P1b (AUD-05): a stage change notifies the deal's owner (when the
+    // actor is someone else) through the Phase 8 pipeline. Post-commit
+    // and failure-isolated like the dispatch and fan-out around it (D3);
+    // the occurrence basis mirrors the stage-change dedup key below.
+    if (deal.ownerPersonId !== auth.ctx.personId) {
+      await emitNotificationSafely(auth, {
+        type: 'DEAL_STAGE_CHANGED',
+        recipientUserId: deal.ownerPersonId,
+        title: notificationTitle('Deal stage changed', deal.title),
+        body: `The deal "${deal.title}" moved to the ${toStage.name ?? nextStage} stage.`,
+        entityType: 'deal',
+        entityId: deal.id,
+        link: `/crm/deals/${deal.id}`,
+        eventId: stableEventId(
+          'deal-stage-changed',
+          txResult.historyId !== null
+            ? buildDedupKey('deal_stage_history', txResult.historyId)
+            : buildDedupKey('deal_stage', deal.id, toStageId ?? nextStage, deal.updatedAt),
+        ),
+      });
+    }
     // Phase 10 (Wave W-out): outbound webhook fan-out for the close events
     // (deal.won / deal.lost). Same post-commit point and the same won/lost
     // flags as the dispatch above; the fan-out instance id reuses the

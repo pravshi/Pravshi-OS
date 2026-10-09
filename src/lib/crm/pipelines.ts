@@ -5,6 +5,7 @@ import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
 import { emitIntegrationEvent } from '@/lib/integrations/fanout';
+import { emitNotificationSafely, notificationTitle, stableEventId } from '@/lib/notifications/emit';
 import {
   CreatePipelineSchema,
   CreatePipelineStageSchema,
@@ -708,8 +709,8 @@ export async function moveDealToStage(
     // deal row is read post-commit under the caller's RLS.
     const [dealRes, fromStageRes] = await Promise.all([
       withAuthorizedDb(auth.ctx, (tx) =>
-        tx.execute<{ title: string; value: string | null }>(sql`
-          select d.title, d.value::text as value
+        tx.execute<{ title: string; value: string | null; owner_person_id: string }>(sql`
+          select d.title, d.value::text as value, d.owner_person_id
           from public.deals d
           where d.id = ${dealId}::uuid
         `),
@@ -744,6 +745,31 @@ export async function moveDealToStage(
         dealValue: dealRow?.value ?? null,
       },
     });
+    // P1b (AUD-05): a stage move notifies the deal's owner (when the actor
+    // is someone else) through the Phase 8 pipeline. Post-commit and
+    // failure-isolated like the dispatch and fan-out around it (D3); the
+    // occurrence basis mirrors the stage-change dedup key above. The owner
+    // rides the post-commit read above; a caller who cannot see the deal
+    // row gets no owner and no notification (fail-closed, like the
+    // history read in the transaction).
+    const ownerPersonId = dealRow?.owner_person_id ?? null;
+    if (ownerPersonId !== null && ownerPersonId !== auth.ctx.personId && dealRow) {
+      await emitNotificationSafely(auth, {
+        type: 'DEAL_STAGE_CHANGED',
+        recipientUserId: ownerPersonId,
+        title: notificationTitle('Deal stage changed', dealRow.title),
+        body: `The deal "${dealRow.title}" moved to the ${result.stage_name ?? 'new'} stage.`,
+        entityType: 'deal',
+        entityId: dealId,
+        link: `/crm/deals/${dealId}`,
+        eventId: stableEventId(
+          'deal-stage-changed',
+          result.history_id !== null
+            ? buildDedupKey('deal_stage_history', result.history_id)
+            : buildDedupKey('deal_stage', dealId, result.to_stage_id, new Date().toISOString()),
+        ),
+      });
+    }
     // Phase 10 (Wave W-out): outbound webhook fan-out for the close events
     // (deal.won / deal.lost). Same post-commit point and the same won/lost
     // flags as the dispatch above; the fan-out instance id reuses the

@@ -4,6 +4,7 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
 import { writeAuditEntry } from '@/lib/audit/log';
 import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
 import { emitIntegrationEvent } from '@/lib/integrations/fanout';
+import { emitNotificationSafely, notificationTitle, stableEventId } from '@/lib/notifications/emit';
 import { isPgCode, parseRequest } from './errors';
 import {
   CreateTaskSchema,
@@ -369,6 +370,21 @@ export async function createTask(auth: Authorization, input: unknown): Promise<T
         projectId: created.projectId,
       },
     });
+    // P1b (AUD-05): assignment-at-creation also notifies the assignee
+    // through the Phase 8 pipeline. Post-commit and failure-isolated like
+    // every emission in this module (D3); self-assignment notifies nobody.
+    if (data.assigneePersonId !== auth.ctx.personId) {
+      await emitNotificationSafely(auth, {
+        type: 'TASK_ASSIGNED',
+        recipientUserId: data.assigneePersonId,
+        title: notificationTitle('Task assigned', created.title),
+        body: `You were assigned the task "${created.title}".`,
+        entityType: 'task',
+        entityId: id,
+        link: `/work/tasks/${id}`,
+        eventId: stableEventId('task-assigned', id, data.assigneePersonId, created.updatedAt),
+      });
+    }
   }
   await writeAuditEntry(
     auth.ctx,
@@ -501,6 +517,22 @@ export async function updateTask(auth: Authorization, id: string, input: unknown
         },
         { eventInstanceId: buildDedupKey('task_status', id, data.status, task.updatedAt) },
       );
+      // P1b (AUD-05): completing a task notifies its creator (when the
+      // completer is someone else). Same input-based occurrence rule as
+      // the fan-out above: a PATCH that writes status='done' is the
+      // occurrence, and the post-update updatedAt is its dedup basis.
+      if (task.createdBy !== auth.ctx.personId) {
+        await emitNotificationSafely(auth, {
+          type: 'TASK_COMPLETED',
+          recipientUserId: task.createdBy,
+          title: notificationTitle('Task completed', task.title),
+          body: `The task "${task.title}" was completed.`,
+          entityType: 'task',
+          entityId: id,
+          link: `/work/tasks/${id}`,
+          eventId: stableEventId('task-completed', id, task.updatedAt),
+        });
+      }
     }
   }
   if (data.assigneePersonId !== undefined) {
@@ -519,6 +551,21 @@ export async function updateTask(auth: Authorization, id: string, input: unknown
         projectId: task.projectId,
       },
     });
+    // P1b (AUD-05): (re)assignment notifies the NEW assignee through the
+    // Phase 8 pipeline. An explicit null here is an unassign and a
+    // self-assignment notifies nobody; failures never break the update (D3).
+    if (data.assigneePersonId !== null && data.assigneePersonId !== auth.ctx.personId) {
+      await emitNotificationSafely(auth, {
+        type: 'TASK_ASSIGNED',
+        recipientUserId: data.assigneePersonId,
+        title: notificationTitle('Task assigned', task.title),
+        body: `You were assigned the task "${task.title}".`,
+        entityType: 'task',
+        entityId: id,
+        link: `/work/tasks/${id}`,
+        eventId: stableEventId('task-assigned', id, data.assigneePersonId, task.updatedAt),
+      });
+    }
   }
   return task;
 }
@@ -609,6 +656,21 @@ export async function moveTask(
         },
         { eventInstanceId: buildDedupKey('task_status', id, result.toStatus, moved.updatedAt) },
       );
+      // P1b (AUD-05): a real move into 'done' notifies the task's creator
+      // (when the completer is someone else). The noop branch above is
+      // skipped, so a same-status "move" never notifies.
+      if (moved.createdBy !== auth.ctx.personId) {
+        await emitNotificationSafely(auth, {
+          type: 'TASK_COMPLETED',
+          recipientUserId: moved.createdBy,
+          title: notificationTitle('Task completed', moved.title),
+          body: `The task "${moved.title}" was completed.`,
+          entityType: 'task',
+          entityId: id,
+          link: `/work/tasks/${id}`,
+          eventId: stableEventId('task-completed', id, moved.updatedAt),
+        });
+      }
     }
   }
   return { ok: true, taskId: id, fromStatus: result.fromStatus, toStatus: result.toStatus };
@@ -651,7 +713,23 @@ export async function assignTask(
     },
     auth.meta,
   );
-  return getTask(auth, id);
+  const task = await getTask(auth, id);
+  // P1b (AUD-05): assignment notifies the new assignee through the Phase 8
+  // pipeline. Unassign (null) and self-assignment notify nobody;
+  // post-commit and failure-isolated like every emission here (D3).
+  if (personId !== null && personId !== auth.ctx.personId) {
+    await emitNotificationSafely(auth, {
+      type: 'TASK_ASSIGNED',
+      recipientUserId: personId,
+      title: notificationTitle('Task assigned', task.title),
+      body: `You were assigned the task "${task.title}".`,
+      entityType: 'task',
+      entityId: id,
+      link: `/work/tasks/${id}`,
+      eventId: stableEventId('task-assigned', id, personId, task.updatedAt),
+    });
+  }
+  return task;
 }
 
 export async function unassignTask(auth: Authorization, id: string): Promise<Task> {
