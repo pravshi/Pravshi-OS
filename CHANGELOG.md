@@ -5,6 +5,44 @@ All notable changes to Pravshi OS are recorded in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Database migrations: 0063–0064 (production still pending — see the
+[production migration runbook](docs/runbooks/production-migration.md)).
+
+### Fixed
+
+- Project members: `GET/POST/DELETE /api/work/projects/<id>/members` no longer
+  return 500. The `project_members` policies recursed into themselves; they now
+  use membership helper functions (migration 0063). Resolves the 1.0.0 known
+  limitation of the same name. (#72)
+- Task assignee and project member pickers offer the organization's active
+  people, so a project's first task can be assigned. (#74)
+- Automatic notifications for task assignment, reassignment and completion and
+  for deal stage changes, and task reminders are delivered by the worker
+  (migration 0064). (#76)
+- Authentication journeys: truthful invitation errors, sign-out from the shell,
+  safe return path after login, backup-code MFA challenge, lockout cleared by a
+  password reset. (#77)
+- Local development: pages rendered client-side (`/setup`, the login form) work
+  under `pnpm dev` again; production keeps the strict CSP. (#78)
+- Password-reset email is delivered with the documented email configuration
+  (`RESEND_API_KEY` + `EMAIL_FROM`). Reset email is a job, and the job email
+  adapter previously required `EMAIL_PROVIDER=resend` as well, so those emails
+  silently dead-lettered.
+
+### Changed
+
+- The production migration runbook targets the current journal (0064), and a
+  guard test fails CI whenever a migration lands without the runbook following.
+- Deployment, environment and development documentation describe the current
+  setup: no `staging` branch exists yet, and development uses its own Neon
+  project, separate from production.
+
+### Tests
+
+- Real-database proof of the job-enqueue deduplication contract. (#73)
+
 ## [1.0.0] — 2026-10-09
 
 Pravshi OS V1: a multi-tenant business operating system — CRM, sales pipelines,

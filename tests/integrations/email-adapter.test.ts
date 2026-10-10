@@ -306,4 +306,23 @@ describe('sendEmailViaProvider — provider selection', () => {
     expect((err as Error).message).toContain('EMAIL_FROM_UNCONFIGURED');
     expect((err as Error).message).not.toContain('NOT_IMPLEMENTED');
   });
+
+  // The documented configuration (DEPLOYMENT.md): RESEND_API_KEY + EMAIL_FROM, no
+  // EMAIL_PROVIDER. Password-reset email is an `email` job, so this path must reach
+  // the adapter rather than dead-letter as unconfigured.
+  it('defaults to the Resend adapter when only RESEND_API_KEY is configured', async () => {
+    env.RESEND_API_KEY = 're_auth';
+    const err = await sendEmailViaProvider(makeInput()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EmailSendError);
+    expect((err as Error).message).toContain('EMAIL_FROM_UNCONFIGURED');
+    expect((err as Error).message).not.toContain('EMAIL_PROVIDER_UNCONFIGURED');
+  });
+
+  it('lets an explicit EMAIL_PROVIDER win over the RESEND_API_KEY default', async () => {
+    env.RESEND_API_KEY = 're_auth';
+    env.EMAIL_PROVIDER = 'acme-mail';
+    env.EMAIL_PROVIDER_API_KEY = 'some-key';
+    const err = await sendEmailViaProvider(makeInput()).catch((e: unknown) => e);
+    expect((err as Error).message).toContain('EMAIL_PROVIDER_NOT_IMPLEMENTED');
+  });
 });
