@@ -281,6 +281,30 @@ describe('handleEmail', () => {
     }
   });
 
+  it('sends through Resend with only RESEND_API_KEY + EMAIL_FROM (the documented configuration)', async () => {
+    const prevProvider = env.EMAIL_PROVIDER;
+    const prevJobKey = env.EMAIL_PROVIDER_API_KEY;
+    const prevResendKey = env.RESEND_API_KEY;
+    const prevFrom = env.EMAIL_FROM;
+    env.EMAIL_PROVIDER = undefined;
+    env.EMAIL_PROVIDER_API_KEY = undefined;
+    env.RESEND_API_KEY = 'test-auth-key';
+    env.EMAIL_FROM = 'no-reply@example.com';
+    try {
+      const job = makeJob({
+        type: 'email',
+        payload: { to: 'ops@example.com', subject: 'Reset', text: 'link' },
+      });
+      await expect(handleEmail(makeCtx(job))).resolves.toBeUndefined();
+      expect(resendMocks.send).toHaveBeenCalledTimes(1);
+    } finally {
+      env.EMAIL_PROVIDER = prevProvider;
+      env.EMAIL_PROVIDER_API_KEY = prevJobKey;
+      env.RESEND_API_KEY = prevResendKey;
+      env.EMAIL_FROM = prevFrom;
+    }
+  });
+
   it('normalises a Resend transport failure to a retryable PROVIDER_ERROR', async () => {
     const prevProvider = env.EMAIL_PROVIDER;
     const prevKey = env.EMAIL_PROVIDER_API_KEY;
