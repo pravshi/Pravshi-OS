@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Security-headers + route rate-limit guards.
@@ -43,6 +43,41 @@ describe('security headers: next.config.ts ships a complete set', () => {
     expect(CONFIG).toMatch(/style-src 'self' 'unsafe-inline'/);
     expect(CONFIG).toMatch(/frame-ancestors 'none'/);
     expect(CONFIG).toMatch(/object-src 'none'/);
+  });
+
+  // The text checks above would still pass if 'unsafe-eval' leaked into production. These
+  // load the real config under each NODE_ENV and read the header it actually produces.
+  describe("'unsafe-eval' is granted to the development server only", () => {
+    const scriptSrcFor = async (nodeEnv: string) => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      vi.resetModules();
+      const { default: config } = await import('../../next.config');
+      const routes = (await config.headers!()) as { headers: { key: string; value: string }[] }[];
+      const csp = routes.flatMap((r) => r.headers).find((h) => h.key === 'Content-Security-Policy');
+      return csp!.value
+        .split(';')
+        .map((d) => d.trim())
+        .find((d) => d.startsWith('script-src'));
+    };
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    it('production keeps the strict script-src, without eval', async () => {
+      expect(await scriptSrcFor('production')).toBe("script-src 'self' 'unsafe-inline'");
+    });
+
+    it('test keeps the strict script-src, without eval', async () => {
+      expect(await scriptSrcFor('test')).toBe("script-src 'self' 'unsafe-inline'");
+    });
+
+    it('development adds unsafe-eval, which the Next.js dev server needs to run client code', async () => {
+      expect(await scriptSrcFor('development')).toBe(
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      );
+    });
   });
 
   it('sets X-Frame-Options DENY, nosniff, and a conservative referrer policy', () => {
