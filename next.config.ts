@@ -26,6 +26,16 @@ import type { NextConfig } from 'next';
  * - X-Frame-Options DENY, nosniff, and a conservative referrer policy round
  *   out the set.
  */
+/**
+ * The Next.js DEVELOPMENT server evaluates its own modules with eval() (React Refresh and
+ * eval-based source maps). Without 'unsafe-eval' the browser blocks every client
+ * component, so pages that render client-side — /setup, the login form's submit — never
+ * appear under `pnpm dev`. Production builds never use eval(), so production keeps the
+ * stricter policy; tests/guards/security-headers-ratelimit.test.ts proves both halves.
+ * The app itself uses no eval (see the workflow no-eval guard).
+ */
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 const securityHeaders = [
   {
     key: 'Strict-Transport-Security',
@@ -35,7 +45,9 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
+      isDevelopment
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+        : "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
