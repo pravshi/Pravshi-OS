@@ -567,3 +567,70 @@ describe('runWorker adaptive idle poll', () => {
     }
   });
 });
+
+// ── runWorker in-loop database maintenance (WP-2, migration 0065) ───────────
+
+describe('runWorker in-loop database maintenance', () => {
+  it('runs partitions then retention on the maintenanceIntervalMs cadence, through the 0065 definers', async () => {
+    registerHandler('email', async () => {});
+    vi.mocked(claimJob).mockResolvedValue(null);
+    // The mocked driver answers every statement with the reaper's row shape, so the
+    // partition step sees no window_end and logs its alarm — expected here.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const runPromise = runWorker({
+      workerId: 'w-maint',
+      pollIntervalMs: 10,
+      maintenanceIntervalMs: 30,
+    });
+    await sleep(120);
+    process.emit('SIGINT');
+    await runPromise;
+    errors.mockRestore();
+    logs.mockRestore();
+
+    const partitions = hoisted.executed.filter((s) =>
+      s.sql.includes('maintain_audit_log_partitions'),
+    );
+    const retention = hoisted.executed.filter((s) => s.sql.includes('run_data_retention'));
+    expect(partitions.length).toBeGreaterThanOrEqual(1);
+    expect(retention.length).toBe(partitions.length);
+    for (const call of retention) expect(call.params).toEqual([5000]);
+    // Never a raw DELETE from the worker plane: retention is the definer's job.
+    expect(hoisted.executed.some((s) => /delete\s+from/i.test(s.sql))).toBe(false);
+  });
+
+  it('maintenanceIntervalMs 0 disables in-loop maintenance', async () => {
+    registerHandler('email', async () => {});
+    vi.mocked(claimJob).mockResolvedValue(null);
+
+    const runPromise = runWorker({
+      workerId: 'w-nomaint',
+      pollIntervalMs: 10,
+      maintenanceIntervalMs: 0,
+    });
+    await sleep(100);
+    process.emit('SIGINT');
+    await runPromise;
+
+    expect(
+      hoisted.executed.filter(
+        (s) =>
+          s.sql.includes('maintain_audit_log_partitions') || s.sql.includes('run_data_retention'),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('the default cadence is hourly: a short run performs no maintenance', async () => {
+    registerHandler('email', async () => {});
+    vi.mocked(claimJob).mockResolvedValue(null);
+
+    const runPromise = runWorker({ workerId: 'w-maint-default', pollIntervalMs: 10 });
+    await sleep(80);
+    process.emit('SIGINT');
+    await runPromise;
+
+    expect(hoisted.executed.filter((s) => s.sql.includes('run_data_retention'))).toHaveLength(0);
+  });
+});
