@@ -399,10 +399,16 @@ export function buildEmailIdempotencyKey(job: Job): string {
  * Email provider abstraction.
  *
  * Behavior:
- * - No provider configured (EMAIL_PROVIDER unset) → throws CONFIG_ERROR
- *   (code 'CONFIG_ERROR' → classifyError marks it NON-RETRYABLE:
- *   "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can never send is
- *   pointless, so this dead-letters immediately.
+ * - EMAIL_PROVIDER unset but RESEND_API_KEY set → treated as 'resend'. That
+ *   is the configuration the auth mailers (invitations) already use, and the
+ *   one DEPLOYMENT.md documents; password-reset email travels as an `email`
+ *   job (Phase 11, F-11-06), so without this default a deployment that
+ *   configured only RESEND_API_KEY + EMAIL_FROM would send invitations but
+ *   silently dead-letter every reset email.
+ * - No provider configured (EMAIL_PROVIDER and RESEND_API_KEY both unset) →
+ *   throws CONFIG_ERROR (code 'CONFIG_ERROR' → classifyError marks it
+ *   NON-RETRYABLE: "EMAIL_PROVIDER_UNCONFIGURED"). Retrying a job that can
+ *   never send is pointless, so this dead-letters immediately.
  * - EMAIL_PROVIDER=resend → the real adapter
  *   (src/lib/integrations/providers/email/send.ts, Phase 10 §4.6): sends via
  *   the Resend SDK with the job's idempotency key, resolving its credential
@@ -418,13 +424,14 @@ export function buildEmailIdempotencyKey(job: Job): string {
 export async function sendEmailViaProvider(
   input: EmailProviderInput,
 ): Promise<EmailProviderResult> {
-  const provider = env.EMAIL_PROVIDER;
+  // An explicit EMAIL_PROVIDER always wins; only its absence defaults to
+  // Resend, and only when the auth mailers' Resend key exists.
+  const provider = env.EMAIL_PROVIDER ?? (env.RESEND_API_KEY ? 'resend' : undefined);
   const apiKey = env.EMAIL_PROVIDER_API_KEY;
 
   // Phase 10 (Wave P): 'resend' is wired. The adapter resolves its own
-  // credential and sender, so this branch runs before the unconfigured
-  // gate below — a deployment that set only RESEND_API_KEY + EMAIL_FROM
-  // (the auth mailers' configuration) sends job email too.
+  // credential (EMAIL_PROVIDER_API_KEY, falling back to RESEND_API_KEY) and
+  // sender, so this branch runs before the unconfigured gate below.
   if (provider === 'resend') {
     return sendViaResend({
       to: input.to,

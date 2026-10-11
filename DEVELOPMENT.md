@@ -5,7 +5,7 @@
 - **Node 22 LTS.** `.nvmrc` pins `22`; `package.json` requires `>=22.12`.
 - **pnpm 12.3.4**, pinned via `packageManager`. Run `corepack enable` and let it resolve the
   pinned version rather than installing pnpm globally.
-- Access to the `pravshi` Neon project.
+- Access to the **development** Neon project — never the production project.
 
 ```bash
 git clone https://github.com/pravshi/Pravshi-OS.git
@@ -22,24 +22,32 @@ decision, not a blanket approval.
 
 ## Get your own database branch
 
-**Never point your local environment at `production`.** Create your own Neon branch from
-`staging` and work against that:
+**Never point your local environment at production.** Development runs in its own Neon
+project, separate from the production project, so no development credential can reach
+production data:
 
 ```
-production          the default branch. Nothing automated touches it.
-└── staging         persistent, non-production. The parent for everything else.
-    └── dev/<name>  yours
+production project       production only. Nothing automated touches it, and no
+                         developer machine holds its credentials.
+development project      everything else
+└── default branch       provisioned: roles.sql applied, all migrations, a dev SUPER_ADMIN
+    └── dev/<name>       yours, branched from the default branch
 ```
 
 CI creates no Neon branches; it runs against its own throwaway Postgres container.
 
-Create `dev/<yourname>` from `staging` in the Neon console, then set `DATABASE_URL`,
-`DATABASE_URL_TEST` and `DATABASE_URL_MIGRATE` to point at it. See
-[ENVIRONMENT.md](ENVIRONMENT.md) for which role and endpoint each one takes.
+Create `dev/<yourname>` from the development project's default branch in the Neon console,
+then set `DATABASE_URL`, `DATABASE_URL_TEST` and `DATABASE_URL_MIGRATE` to point at it.
+See [ENVIRONMENT.md](ENVIRONMENT.md) for which role and endpoint each one takes.
 
 Your branch inherits `app_owner`, `app_user` and `app_admin` from its parent, with their
 passwords. If you need branch-local credentials, reset the role's password on **your**
 branch — Neon scopes that to the branch and leaves the parent untouched.
+
+Provisioning a brand-new development project from empty follows the same order as CI:
+`scripts/db/roles.sql` as the project owner ([scripts/db/README.md](scripts/db/README.md)),
+role passwords, every migration, then the one-time bootstrap
+([scripts/bootstrap/README.md](scripts/bootstrap/README.md)).
 
 ### Neon suspends when idle, and that is deliberate
 

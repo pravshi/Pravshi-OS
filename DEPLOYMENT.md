@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0062; project records indicate the `production` Neon branch stopped at 0044 (October
+  0064; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -23,8 +23,10 @@ As of the V1 release:
 - **Sentry is not configured** and no DSN has been issued (gate HG-6).
 
 What _is_ real today: the repository, the CI pipeline (green on `main`), the Neon
-`production` and `staging` branches with their roles and RLS, and the `vercel.json`
-configuration that a future deployment will consume.
+`production` branch with its roles and RLS, and the `vercel.json` configuration that a
+future deployment will consume. The `staging` branch the topology below names **no longer
+exists**; recreating it is part of enabling Preview deployments. Development runs against
+a separate Neon project, never against the production project.
 
 ## What already exists
 
@@ -57,6 +59,7 @@ The database topology that a deployment would map onto:
 ```
 production          Vercel Production would use this, as app_user, pooled
 └── staging         Vercel Preview would use this, as app_user, pooled
+                    (does not exist yet — must be created before Preview is enabled)
 ```
 
 CI does not use Neon at all: each run starts its own throwaway Postgres container. See
@@ -77,25 +80,25 @@ production branch. Confirm the region resolves to `sin1` from `vercel.json`.
 This table is the production inventory from `src/env.ts` — the enforcing source. If this
 table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is the bug.
 
-| Variable                                                                                   | Required in prod                                   | Secret   | If unset/mis-set in production                                                             |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                                                             | **Yes** (`production` branch, `app_user`, pooled)  | Yes      | Boot failure (schema/refine)                                                               |
-| `APP_URL`                                                                                  | **Yes** (`https://os.pravshi.com`)                 | No       | Boot failure; links/inbound URLs wrong                                                     |
-| `NODE_ENV`                                                                                 | **Yes** (`production`, platform-set)               | No       | Boot refusal logic disarmed                                                                |
-| `BETTER_AUTH_SECRET`                                                                       | **Yes** (≥32 chars, fresh for prod)                | Yes      | Boot failure — sessions impossible                                                         |
-| `HEALTH_CHECK_TOKEN`                                                                       | Operationally yes (≥32, per-env distinct)          | Yes      | `/health/db` denies everyone (fail-closed; the smoke pack's DB check is impossible)        |
-| `SENTRY_DSN`                                                                               | Operationally yes (HG-6)                           | No       | Error reporting silently disabled                                                          |
-| `NEXT_PUBLIC_SENTRY_DSN`                                                                   | With HG-6 (browser reporting)                      | No       | No browser error capture                                                                   |
-| `SENTRY_AUTH_TOKEN`                                                                        | Build-time only, optional                          | Yes      | No source-map upload (symbols unreadable). Not currently wired — deferred production setup |
-| `RESEND_API_KEY`                                                                           | Operationally yes                                  | Yes      | Invitation/reset mail not sent; endpoint falls back to returning tokens to admins          |
-| `EMAIL_FROM`                                                                               | With `RESEND_API_KEY` (verified domain)            | No       | Same as above                                                                              |
-| `EMAIL_PROVIDER` + `EMAIL_PROVIDER_API_KEY`                                                | For job email (the Phase 10 path)                  | Key: yes | Email jobs dead-letter by design (`EMAIL_PROVIDER_UNCONFIGURED`, non-retryable)            |
-| `INTEGRATIONS_ENCRYPTION_KEY`                                                              | For Tier V integrations (base64, exactly 32 bytes) | Yes      | Vault credentials NOT_CONFIGURED (typed, UI-honest)                                        |
-| `AI_PROVIDER`/`AI_MODEL`/`AI_API_KEY`/`AI_BASE_URL`/`AI_TIMEOUT_MS`/`AI_MAX_OUTPUT_TOKENS` | No (the mock is the honest default)                | Key: yes | AI runs on the deterministic mock — a _product_ decision for go-live, not a defect         |
-| `WEBHOOK_SIGNING_SECRET_<REF>`                                                             | Per configured delivery ref                        | Yes      | That delivery refuses to send (by design)                                                  |
-| `SCHEDULER_TICK_MS`                                                                        | Worker only, optional (default 60000)              | No       | Default applies                                                                            |
-| `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live       | No       | If set without a worker: workflow dispatches queue unexecuted                              |
-| `R2_*`                                                                                     | **Must not be provisioned for V1**                 | —        | No R2 buckets exist; the variables are placeholders for deferred storage work              |
+| Variable                                                                                   | Required in prod                                                                                               | Secret   | If unset/mis-set in production                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                                             | **Yes** (`production` branch, `app_user`, pooled)                                                              | Yes      | Boot failure (schema/refine)                                                                                                                                                                                                      |
+| `APP_URL`                                                                                  | **Yes** (`https://os.pravshi.com`)                                                                             | No       | Boot failure; links/inbound URLs wrong                                                                                                                                                                                            |
+| `NODE_ENV`                                                                                 | **Yes** (`production`, platform-set)                                                                           | No       | Boot refusal logic disarmed                                                                                                                                                                                                       |
+| `BETTER_AUTH_SECRET`                                                                       | **Yes** (≥32 chars, fresh for prod)                                                                            | Yes      | Boot failure — sessions impossible                                                                                                                                                                                                |
+| `HEALTH_CHECK_TOKEN`                                                                       | Operationally yes (≥32, per-env distinct)                                                                      | Yes      | `/health/db` denies everyone (fail-closed; the smoke pack's DB check is impossible)                                                                                                                                               |
+| `SENTRY_DSN`                                                                               | Operationally yes (HG-6)                                                                                       | No       | Error reporting silently disabled                                                                                                                                                                                                 |
+| `NEXT_PUBLIC_SENTRY_DSN`                                                                   | With HG-6 (browser reporting)                                                                                  | No       | No browser error capture                                                                                                                                                                                                          |
+| `SENTRY_AUTH_TOKEN`                                                                        | Build-time only, optional                                                                                      | Yes      | No source-map upload (symbols unreadable). Not currently wired — deferred production setup                                                                                                                                        |
+| `RESEND_API_KEY`                                                                           | Operationally yes                                                                                              | Yes      | Invitation mail not sent (the endpoint returns the link to the admin instead), and password-reset email jobs dead-letter (`EMAIL_PROVIDER_UNCONFIGURED`). The reset page answers identically either way, so nothing visibly fails |
+| `EMAIL_FROM`                                                                               | With `RESEND_API_KEY` (verified domain)                                                                        | No       | Invitation mail not sent; every email job, password reset included, dead-letters (`EMAIL_FROM_UNCONFIGURED`)                                                                                                                      |
+| `EMAIL_PROVIDER` + `EMAIL_PROVIDER_API_KEY`                                                | No — unset means Resend whenever `RESEND_API_KEY` is set; `EMAIL_PROVIDER_API_KEY` gives job email its own key | Key: yes | An explicit `EMAIL_PROVIDER` other than `resend` makes email jobs dead-letter (`EMAIL_PROVIDER_NOT_IMPLEMENTED`, non-retryable)                                                                                                   |
+| `INTEGRATIONS_ENCRYPTION_KEY`                                                              | For Tier V integrations (base64, exactly 32 bytes)                                                             | Yes      | Vault credentials NOT_CONFIGURED (typed, UI-honest)                                                                                                                                                                               |
+| `AI_PROVIDER`/`AI_MODEL`/`AI_API_KEY`/`AI_BASE_URL`/`AI_TIMEOUT_MS`/`AI_MAX_OUTPUT_TOKENS` | No (the mock is the honest default)                                                                            | Key: yes | AI runs on the deterministic mock — a _product_ decision for go-live, not a defect                                                                                                                                                |
+| `WEBHOOK_SIGNING_SECRET_<REF>`                                                             | Per configured delivery ref                                                                                    | Yes      | That delivery refuses to send (by design)                                                                                                                                                                                         |
+| `SCHEDULER_TICK_MS`                                                                        | Worker only, optional (default 60000)                                                                          | No       | Default applies                                                                                                                                                                                                                   |
+| `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live                                                                   | No       | If set without a worker: workflow dispatches queue unexecuted                                                                                                                                                                     |
+| `R2_*`                                                                                     | **Must not be provisioned for V1**                                                                             | —        | No R2 buckets exist; the variables are placeholders for deferred storage work                                                                                                                                                     |
 
 **Preview** holds the same runtime set, with `DATABASE_URL` naming the `staging` branch
 (`app_user`, pooled) and a `HEALTH_CHECK_TOKEN` distinct from production's.
@@ -173,9 +176,10 @@ From the operator's machine, never from CI or Vercel, following
 
 ## The worker plane
 
-Everything asynchronous in Pravshi OS — notifications, email delivery, outbound webhooks,
-workflow runs, scheduled triggers — executes in a separate long-running worker process
-(`src/lib/jobs/runner.ts`), not in the web app. **A deployment that starts only the web app
+Everything asynchronous in Pravshi OS — notifications, task reminders, email delivery
+(including **password-reset email**), outbound webhooks, workflow runs, scheduled
+triggers — executes in a separate long-running worker process (`src/lib/jobs/runner.ts`),
+not in the web app. **A deployment that starts only the web app
 is silently broken:** every one of those surfaces stalls, with no signal in the UI. The
 worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 
