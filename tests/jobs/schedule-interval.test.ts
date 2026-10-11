@@ -12,7 +12,7 @@ import { minIntervalMinutes } from '@/lib/jobs/cron';
 import {
   assertScheduleInterval,
   DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES,
-} from '@/app/api/jobs/store';
+} from '@/lib/jobs/schedule-policy';
 
 const FROM = new Date('2026-10-12T08:30:00Z');
 const saved = env.SCHEDULE_MIN_INTERVAL_MINUTES;

@@ -56,8 +56,9 @@ const runtimeSchema = z.object({
    * WP-W: the shortest gap allowed between two runs of one schedule, in minutes. Every
    * scheduled run wakes the database (on Neon Free, for at least five minutes), so a
    * 15-minute schedule alone would keep compute awake a third of the day. Default 60
-   * when unset; '0' disables the check (paid plans). Checked when a schedule is created
-   * or its cron/timezone changes; existing schedules are not altered.
+   * when unset; '0' disables the check (paid plans). Checked when a schedule is created,
+   * when its cron/timezone changes, and when a paused schedule is enabled again
+   * (src/lib/jobs/schedule-policy.ts); existing active schedules are not altered.
    */
   SCHEDULE_MIN_INTERVAL_MINUTES: z
     .string()

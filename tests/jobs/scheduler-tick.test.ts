@@ -304,7 +304,10 @@ describe.skipIf(!ready)('scheduler tick', () => {
     const s = await createSchedule(auth, {
       workflowId: activeWorkflow,
       name: 'paused one',
-      cron: '* * * * *',
+      // Hourly, not every minute: resumeSchedule enforces the minimum interval
+      // (WP-W, SCHEDULE_MIN_INTERVAL_MINUTES, default 60). forceDue below makes the
+      // schedule due regardless of its cadence, so the skip assertion is unchanged.
+      cron: '0 * * * *',
       timezone: 'UTC',
     });
     await pauseSchedule(auth, s.id);

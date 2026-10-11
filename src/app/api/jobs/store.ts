@@ -20,9 +20,9 @@ import { z } from 'zod';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { AuthorizationError } from '@/lib/authz/errors';
 import type { Authorization } from '@/lib/authz/require-permission';
-import { isValidCron, isValidTimezone, minIntervalMinutes, nextRunAt } from '@/lib/jobs/cron';
+import { isValidCron, isValidTimezone, nextRunAt } from '@/lib/jobs/cron';
 import { requestWorkerWake } from '@/lib/jobs/wake';
-import { env } from '@/env';
+import { assertScheduleInterval } from '@/lib/jobs/schedule-policy';
 import { JOB_TYPE_SET, type Job, type JobStatus, type JobType } from '@/lib/jobs/types';
 import { auditJobsMutation } from '@/lib/jobs/audit';
 
@@ -228,26 +228,6 @@ export async function createSchedule(auth: Authorization, input: unknown): Promi
   }
 }
 
-/** WP-W default: on Neon Free every scheduled run wakes the database. */
-export const DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES = 60;
-
-/**
- * Refuse a schedule that fires more often than SCHEDULE_MIN_INTERVAL_MINUTES (default 60,
- * '0' disables). Runs before anything is written.
- */
-export function assertScheduleInterval(cron: string, timezone: string): void {
-  const configured = env.SCHEDULE_MIN_INTERVAL_MINUTES;
-  const minimum =
-    configured === undefined ? DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES : Number(configured);
-  if (minimum <= 0) return;
-  const gap = minIntervalMinutes(cron, timezone);
-  if (gap < minimum) {
-    throw new Error(
-      `INVALID_REQUEST: this schedule runs every ${gap} minutes; the minimum on this deployment is ${minimum} minutes`,
-    );
-  }
-}
-
 /** nextRunAt() throws on unsatisfiable cron — surface that as INVALID_REQUEST. */
 function computeNextRun(cron: string, timezone: string): Date {
   try {
@@ -342,10 +322,17 @@ export async function updateSchedule(
     // run. Activating a schedule whose next run is unknown does too.
     const cronChanged = parsed.cron !== undefined && parsed.cron !== schedule.cron;
     const tzChanged = parsed.timezone !== undefined && parsed.timezone !== schedule.timezone;
+    // WP-W: the minimum interval applies whenever the schedule becomes able to fire on a
+    // new cadence — a changed cron/timezone, or a paused schedule enabled again even with
+    // its cron unchanged (a frequent schedule paused before the rule existed must not come
+    // back through reactivation). Thrown inside the transaction, so nothing is written.
+    const reactivating = parsed.isActive === true && !schedule.isActive;
+    if (cronChanged || tzChanged || reactivating) {
+      assertScheduleInterval(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
+    }
     let nextRun: Date | null = null;
     if (cronChanged || tzChanged) {
       nextRun = computeNextRun(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
-      assertScheduleInterval(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
     } else if (parsed.isActive === true && schedule.nextRunAt === null) {
       nextRun = computeNextRun(schedule.cron, schedule.timezone);
     }

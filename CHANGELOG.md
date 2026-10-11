@@ -27,8 +27,10 @@ Database migrations: 0063–0066 (production still pending — see the
   the compute it causes and warns at 70% and 90% of a budget.
   `WORKER_IDLE_MODE=poll` keeps the previous behaviour.
 - Schedules may not fire more often than `SCHEDULE_MIN_INTERVAL_MINUTES`
-  (default 60; 0 disables) — each run wakes the database. Existing schedules are
-  not changed; the "Every 15 minutes" preset became "Every hour".
+  (default 60; 0 disables) — each run wakes the database. Checked on create, on a
+  cron or timezone change, and when a paused schedule is enabled again (even with
+  its cron unchanged). Existing active schedules are not changed; the "Every 15
+  minutes" preset became "Every hour".
 - Automatic database maintenance in the worker (migration 0065), at startup and
   hourly. Audit-log partitions are kept twelve months ahead: they were created
   once by migration 0011 and never extended, so about a year later every write

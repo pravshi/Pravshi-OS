@@ -96,6 +96,9 @@ table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is th
 | `INTEGRATIONS_ENCRYPTION_KEY`                                                              | For Tier V integrations (base64, exactly 32 bytes)                                                             | Yes      | Vault credentials NOT_CONFIGURED (typed, UI-honest)                                                                                                                                                                               |
 | `AI_PROVIDER`/`AI_MODEL`/`AI_API_KEY`/`AI_BASE_URL`/`AI_TIMEOUT_MS`/`AI_MAX_OUTPUT_TOKENS` | No (the mock is the honest default)                                                                            | Key: yes | AI runs on the deterministic mock — a _product_ decision for go-live, not a defect                                                                                                                                                |
 | `WEBHOOK_SIGNING_SECRET_<REF>`                                                             | Per configured delivery ref                                                                                    | Yes      | That delivery refuses to send (by design)                                                                                                                                                                                         |
+| `WORKER_WAKE_URL`                                                                          | Operationally yes (`https://<worker-host>/wake`; https required in production)                                 | No       | No wake is sent: work waits for the worker's next scheduled wake, up to `WORKER_MAX_SLEEP_MS` (2 h) — long enough for a password-reset link (valid 1 h) to expire before its email is sent                                        |
+| `WORKER_WAKE_TOKEN`                                                                        | Operationally yes (≥32 chars, **identical** on the web app and the worker)                                     | Yes      | Same as above. A token that differs between the two services is refused with 401 on every wake, so it fails the same way, silently                                                                                                |
+| `SCHEDULE_MIN_INTERVAL_MINUTES`                                                            | No (default 60; `0` disables)                                                                                  | No       | Default applies: schedules may not fire more often than hourly. Keep the default on Neon Free — every scheduled run wakes the database                                                                                            |
 | `SCHEDULER_TICK_MS`                                                                        | Worker only, optional (default 60000)                                                                          | No       | Default applies                                                                                                                                                                                                                   |
 | `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live                                                                   | No       | If set without a worker: workflow dispatches queue unexecuted                                                                                                                                                                     |
 | `R2_*`                                                                                     | **Must not be provisioned for V1**                                                                             | —        | No R2 buckets exist; the variables are placeholders for deferred storage work                                                                                                                                                     |
@@ -190,7 +193,9 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 - **Command:** `pnpm worker` (`pnpm worker --help` prints usage without touching env or
   the database). **Node 22** (`.nvmrc`): the worker runs its TypeScript through
   `--experimental-transform-types`, which newer Node releases removed — on Node 26 it does
-  not start. Pin the host's Node version.
+  not start. Pin the host's Node version explicitly: on Railway set
+  `RAILPACK_NODE_VERSION=22` — Railpack reads `package.json` `engines.node` (an open
+  range, `>=22.12`) **before** `.nvmrc`, so without the pin it may pick a newer major.
 - **Environment:** parity with the web app. Required — validated at boot, and the process
   refuses to start without them: `DATABASE_URL` (the **pooled** endpoint; the host
   contains `-pooler.`), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`. (`HEALTH_CHECK_TOKEN`
@@ -224,15 +229,24 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   polling for a paid database plan. What each feature experiences in low-cost mode
   (measured end to end in `tests/e2e-worker/low-cost-worker.e2e.test.ts`):
 
-  | Work                                                      | When it runs                                                                                                                             |
-  | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-  | Password-reset email, notifications, webhooks, email jobs | Seconds after the commit (measured: 0.8 s from wake to finished job)                                                                     |
-  | …if the wake signal is lost (worker restarting, network)  | At the next scheduled wake — at most `WORKER_MAX_SLEEP_MS` (2 h) later. Never lost: the job is in Postgres                               |
-  | Task reminders                                            | At the reminder time (measured: 0.6 s late)                                                                                              |
-  | Scheduled automations                                     | At the scheduled time (measured: 0.3 s late); schedules may not fire more often than hourly by default (`SCHEDULE_MIN_INTERVAL_MINUTES`) |
-  | Webhook / job retries                                     | At their back-off time                                                                                                                   |
-  | Work that fell due while the worker was down              | Immediately after it starts (measured: 5 s including start-up)                                                                           |
-  | Audit-log partitions and retention                        | At start-up and on wakes, at most hourly and at least every `WORKER_MAX_SLEEP_MS`                                                        |
+  | Work                                                                  | When it runs                                                                                                                                                                                                        |
+  | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Password-reset email, notifications, webhooks, email jobs             | Seconds after the commit (measured: 0.8 s from wake to finished job)                                                                                                                                                |
+  | …if the wake signal is lost (network failure while the worker sleeps) | At the next scheduled wake — at most `WORKER_MAX_SLEEP_MS` (2 h) later. Never lost: the job is in Postgres. A worker that restarts drains waiting work at once, so this needs a wake to fail while the worker is up |
+  | Task reminders                                                        | At the reminder time (measured: 0.6 s late)                                                                                                                                                                         |
+  | Scheduled automations                                                 | At the scheduled time (measured: 0.3 s late); schedules may not fire more often than hourly by default (`SCHEDULE_MIN_INTERVAL_MINUTES`)                                                                            |
+  | Webhook / job retries                                                 | At their back-off time                                                                                                                                                                                              |
+  | Work that fell due while the worker was down                          | Immediately after it starts (measured: 5 s including start-up)                                                                                                                                                      |
+  | Audit-log partitions and retention                                    | At start-up and on wakes, at most hourly and at least every `WORKER_MAX_SLEEP_MS`                                                                                                                                   |
+
+  **Known rare failure — password reset.** A reset link is valid for **1 hour**
+  (`authz.request_password_reset`, migration 0024); the safety wake is **2 hours** by
+  deliberate choice (a shorter cap costs roughly 13 more CU-hours a month). So if the wake
+  signal for a reset request is lost while the worker is up and asleep — a network failure
+  between the web app and the worker — the email can go out after its link has expired. The
+  user sees "link expired" and requests a new one, which sends a fresh wake. Nothing is lost
+  or leaked; the cost is one extra request. Watch for `[jobs] worker wake failed` warnings
+  in the web app's logs: they mark exactly these windows.
 
   **Estimated compute** (worker's share, 0.25 CU fixed size): about 6.5 minutes of awake
   database per idle safety wake (60 s active + Neon's 5-minute suspend delay) × 12 a day
@@ -346,3 +360,12 @@ Before any deployment, confirm:
 - [ ] `HEALTH_CHECK_TOKEN` set, 32+ characters, different per environment
 - [ ] Worker running and claiming on its always-on host — process supervised, env parity
       confirmed, claim heartbeat fresh (see [The worker plane](#the-worker-plane))
+- [ ] Worker host runs **Node 22** (`RAILPACK_NODE_VERSION=22` on Railway); its start-up log
+      shows `[worker] starting … idleMode=deep-sleep … wakeEndpoint=on`
+- [ ] `WORKER_WAKE_TOKEN` set on **both** the web app and the worker, **identical**, 32+
+      characters; `WORKER_WAKE_URL` on the web app is `https://<worker-host>/wake`
+- [ ] `GET https://<worker-host>/healthz` answers 200 (no auth, no database) and is the
+      worker's platform health check
+- [ ] A test wake is accepted: `POST /wake` with the token answers 202 and a
+      `[worker] deep sleep` line follows within about a minute; without the token it answers 401
+- [ ] `SCHEDULE_MIN_INTERVAL_MINUTES` left at its default (60) while on Neon Free
