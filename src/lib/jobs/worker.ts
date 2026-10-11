@@ -50,7 +50,10 @@
  * public.jobs and match zero rows forever. The task-reminder sweep
  * (P1b, AUD-04) runs on the same model through
  * public.claim_due_task_reminders() (migration 0064) — see
- * reminder-sweep.ts for its claim/delivery contract.
+ * reminder-sweep.ts for its claim/delivery contract. Database maintenance
+ * (audit partitions + retention, WP-2) runs the same way through
+ * public.maintain_audit_log_partitions() and public.run_data_retention()
+ * (migration 0065) — see maintenance.ts.
  *
  * The synthesized Authorization is built directly per the §3.6 actor authority
  * rule (org from the job row, system actor); it is not issued by
@@ -68,6 +71,7 @@ import type { Authorization } from '../authz/require-permission';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from './queue';
 import { sweepRetryableJobs } from './retry-sweeper';
 import { sweepDueTaskReminders } from './reminder-sweep';
+import { runDbMaintenance } from './maintenance';
 import { backoffDelayMs, classifyError } from './retry';
 import { JOB_TYPE_SET, type Job, type JobType } from './types';
 
@@ -122,6 +126,16 @@ export interface WorkerConfig {
    * after worker start.
    */
   reminderSweepIntervalMs?: number;
+  /**
+   * Database maintenance cadence (Core V1 audit WP-2, migration 0065): every
+   * this many ms, runDbMaintenance() keeps audit_logs partitioned twelve
+   * months ahead and deletes rows past their retention periods, in bounded
+   * batches (maintenance.ts). Default 3600000 (hourly — both steps are cheap
+   * when there is nothing to do); 0 or negative disables it. The first
+   * in-loop pass fires one interval after worker start; runner.ts
+   * additionally runs one pass at startup.
+   */
+  maintenanceIntervalMs?: number;
 }
 
 export type JobHandler = (ctx: JobExecutionContext) => Promise<void>;
@@ -370,6 +384,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   const retrySweepIntervalMs = config.retrySweepIntervalMs ?? 30000;
   const reapIntervalMs = config.reapIntervalMs ?? 300000;
   const reminderSweepIntervalMs = config.reminderSweepIntervalMs ?? 60000;
+  const maintenanceIntervalMs = config.maintenanceIntervalMs ?? 3600000;
 
   let settled = false;
   let settle!: () => void;
@@ -423,6 +438,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
       let nextRetrySweepMs = Date.now() + retrySweepIntervalMs;
       let nextReapMs = Date.now() + reapIntervalMs;
       let nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
+      let nextMaintenanceMs = Date.now() + maintenanceIntervalMs;
       // Adaptive idle poll (Phase 12, F-12-04): the sleep after an empty
       // claim starts at pollIntervalMs and doubles up to maxIdleSleepMs;
       // any claimed job resets it to pollIntervalMs.
@@ -449,6 +465,13 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // sweep itself.
           nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
           await sweepDueTaskReminders().catch(() => undefined);
+        }
+        if (maintenanceIntervalMs > 0 && Date.now() >= nextMaintenanceMs) {
+          // Audit partitions + data retention (WP-2, 0065). runDbMaintenance
+          // never throws and logs its own failures; the catch is belt and
+          // braces — a maintenance problem must never kill the worker.
+          nextMaintenanceMs = Date.now() + maintenanceIntervalMs;
+          await runDbMaintenance().catch(() => undefined);
         }
         let job: Job | null;
         try {

@@ -39,6 +39,10 @@
  *    for the in-loop reap (reapIntervalMs, default 5 min) — and lease expiry
  *    no longer depends on per-org cleanup jobs existing. A reap failure is
  *    logged and swallowed; the in-loop reap retries on cadence.
+ *    Then runs one database-maintenance pass (`runDbMaintenance()`, WP-2,
+ *    migration 0065): audit partitions extended to twelve months ahead and
+ *    expired rows deleted in bounded batches. It never throws; the in-loop
+ *    pass (maintenanceIntervalMs, default hourly) repeats it.
  * 3. Starts `runWorker(config)` — the claim → execute → complete/fail loop.
  *    runWorker installs its own SIGTERM/SIGINT handlers and resolves when a
  *    graceful shutdown finishes; the process then exits 0.
@@ -129,6 +133,7 @@ async function main(): Promise<void> {
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
   const { runWorker, reapStaleJobs } = await import('./worker');
+  const { runDbMaintenance } = await import('./maintenance');
   const { tickScheduler } = await import('./scheduler');
 
   // The shared Neon pool emits 'error' for failures on idle clients (e.g. a
@@ -208,6 +213,10 @@ async function main(): Promise<void> {
   } catch (err) {
     console.error('[worker] startup reap failed (worker continues):', err);
   }
+
+  // Audit partitions + retention once at startup (WP-2), so a worker that
+  // restarts often still keeps the partition window extended.
+  await runDbMaintenance();
 
   // Fire once at startup so a fresh deploy does not wait a full interval,
   // then keep ticking. The first tick runs before the claim loop blocks.

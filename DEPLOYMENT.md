@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0064; project records indicate the `production` Neon branch stopped at 0044 (October
+  0065; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -220,6 +220,27 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   tick). Ticks are serialised across instances by a Postgres advisory lock and
   dedup-keyed by scheduled window, so running more than one worker process never
   double-fires a schedule.
+- **Database maintenance** (migration 0065): at startup and then hourly, the worker keeps
+  `audit_logs` partitioned twelve months ahead and deletes rows past their retention
+  period, at most 5,000 per table per pass. **Without a running worker, nothing extends the
+  audit-log partitions** — there is no default partition, so roughly a year after the last
+  extension every write that produces an audit entry fails. The worker logs
+  `[jobs] db maintenance` with per-table counts each pass, and
+  `[jobs] audit partition window ends soon` as an error once fewer than 60 days remain —
+  route that line to someone who reads it. Retention periods (fixed in the migration):
+
+  | Data                                                  | Deleted after                                  |
+  | ----------------------------------------------------- | ---------------------------------------------- |
+  | Succeeded/cancelled jobs and their webhook deliveries | 90 days (dead-letter and failed jobs are kept) |
+  | Notifications                                         | 90 days after being read; 365 days if unread   |
+  | Finished workflow executions (and their steps)        | 180 days after finishing                       |
+  | Processed inbound webhook events                      | 90 days                                        |
+  | AI usage records                                      | 400 days                                       |
+  | Expired sessions and verification tokens              | 7 days after expiry                            |
+  | Expired password-reset tokens                         | 30 days after expiry                           |
+  | Login lockouts and rate-limit windows                 | 1 day after they end                           |
+  | Audit log, login events, and all business records     | **Never**                                      |
+
 - **Liveness check:** two parts, both operator-run. (1) _Process:_ the supervisor reports
   the worker running. (2) _Claiming:_ with database access, confirm claim heartbeats are
   fresh — an executing worker refreshes its job's heartbeat every 15 s:

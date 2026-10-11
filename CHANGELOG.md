@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0064 (production still pending — see the
+Database migrations: 0063–0065 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
+
+### Added
+
+- Automatic database maintenance in the worker (migration 0065), at startup and
+  hourly. Audit-log partitions are kept twelve months ahead: they were created
+  once by migration 0011 and never extended, so about a year later every write
+  that produces an audit entry would have failed. Old operational records are
+  deleted on fixed retention periods (finished jobs and their webhook
+  deliveries, read notifications, finished workflow executions, processed
+  inbound webhook events, AI usage records, expired auth bookkeeping), in
+  bounded batches. The audit log, login events and business records are never
+  deleted. Both run through worker-only database functions that refuse a
+  signed-in caller. Periods are listed in DEPLOYMENT.md, "The worker plane".
 
 ### Fixed
 
