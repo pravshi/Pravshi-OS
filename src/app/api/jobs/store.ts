@@ -20,7 +20,9 @@ import { z } from 'zod';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import { AuthorizationError } from '@/lib/authz/errors';
 import type { Authorization } from '@/lib/authz/require-permission';
-import { isValidCron, isValidTimezone, nextRunAt } from '@/lib/jobs/cron';
+import { isValidCron, isValidTimezone, minIntervalMinutes, nextRunAt } from '@/lib/jobs/cron';
+import { requestWorkerWake } from '@/lib/jobs/wake';
+import { env } from '@/env';
 import { JOB_TYPE_SET, type Job, type JobStatus, type JobType } from '@/lib/jobs/types';
 import { auditJobsMutation } from '@/lib/jobs/audit';
 
@@ -184,6 +186,7 @@ export const CreateScheduleSchema = z.strictObject({
 export async function createSchedule(auth: Authorization, input: unknown): Promise<Schedule> {
   const parsed = CreateScheduleSchema.parse(input);
   const next = computeNextRun(parsed.cron, parsed.timezone);
+  assertScheduleInterval(parsed.cron, parsed.timezone);
 
   try {
     const schedule = await withAuthorizedDb(auth.ctx, async (tx) => {
@@ -214,12 +217,34 @@ export async function createSchedule(auth: Authorization, input: unknown): Promi
         isActive: schedule.isActive,
       },
     });
+    // A sleeping worker (WP-W) must re-read when the next run falls due. Never throws.
+    await requestWorkerWake();
     return schedule;
   } catch (error) {
     // 23503: workflow_id does not exist. 42501: the org-guard trigger rejected
     // a foreign-org workflow. Both are "not visible" to this caller.
     if (isPgCode(error, '23503') || isPgCode(error, '42501')) throw notFound();
     throw error;
+  }
+}
+
+/** WP-W default: on Neon Free every scheduled run wakes the database. */
+export const DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES = 60;
+
+/**
+ * Refuse a schedule that fires more often than SCHEDULE_MIN_INTERVAL_MINUTES (default 60,
+ * '0' disables). Runs before anything is written.
+ */
+export function assertScheduleInterval(cron: string, timezone: string): void {
+  const configured = env.SCHEDULE_MIN_INTERVAL_MINUTES;
+  const minimum =
+    configured === undefined ? DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES : Number(configured);
+  if (minimum <= 0) return;
+  const gap = minIntervalMinutes(cron, timezone);
+  if (gap < minimum) {
+    throw new Error(
+      `INVALID_REQUEST: this schedule runs every ${gap} minutes; the minimum on this deployment is ${minimum} minutes`,
+    );
   }
 }
 
@@ -320,6 +345,7 @@ export async function updateSchedule(
     let nextRun: Date | null = null;
     if (cronChanged || tzChanged) {
       nextRun = computeNextRun(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
+      assertScheduleInterval(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
     } else if (parsed.isActive === true && schedule.nextRunAt === null) {
       nextRun = computeNextRun(schedule.cron, schedule.timezone);
     }
@@ -353,6 +379,8 @@ export async function updateSchedule(
       isActive: `${updated.beforeIsActive}->${updated.schedule.isActive}`,
     },
   });
+  // The firing plan may have moved earlier or been re-activated; wake a sleeping worker.
+  await requestWorkerWake();
   return updated.schedule;
 }
 

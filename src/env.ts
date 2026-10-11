@@ -53,6 +53,17 @@ const runtimeSchema = z.object({
    */
   WORKFLOWS_USE_QUEUE: z.string().optional(),
   /**
+   * WP-W: the shortest gap allowed between two runs of one schedule, in minutes. Every
+   * scheduled run wakes the database (on Neon Free, for at least five minutes), so a
+   * 15-minute schedule alone would keep compute awake a third of the day. Default 60
+   * when unset; '0' disables the check (paid plans). Checked when a schedule is created
+   * or its cron/timezone changes; existing schedules are not altered.
+   */
+  SCHEDULE_MIN_INTERVAL_MINUTES: z
+    .string()
+    .regex(/^\d+$/, 'SCHEDULE_MIN_INTERVAL_MINUTES must be a whole number of minutes')
+    .optional(),
+  /**
    * Phase 9 AI Foundation (src/lib/ai). Every key is optional: with none of them
    * set the application runs on the deterministic mock provider, and boot is
    * unaffected. AI_API_KEY is a server-side secret only — never NEXT_PUBLIC_,
@@ -80,6 +91,16 @@ const runtimeSchema = z.object({
       message: 'INTEGRATIONS_ENCRYPTION_KEY must be base64 encoding exactly 32 bytes',
     })
     .optional(),
+  /**
+   * WP-W low-cost worker mode. The worker sleeps without polling the database (so Neon
+   * Free compute can suspend) and the web app wakes it after enqueuing work by POSTing to
+   * WORKER_WAKE_URL (the worker's /wake endpoint) with WORKER_WAKE_TOKEN. Both optional:
+   * unset, the web app sends no wake and the worker still finds every job at its next
+   * scheduled wake (WORKER_MAX_SLEEP_MS) — slower, never lost. The token is a shared secret
+   * set identically on the web app and the worker; server-side only, never logged.
+   */
+  WORKER_WAKE_URL: z.string().url().optional(),
+  WORKER_WAKE_TOKEN: z.string().min(32).optional(),
 });
 
 /** TOOLING — migrations and integration tests only. Never imported from src/app. */

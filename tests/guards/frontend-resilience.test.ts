@@ -78,10 +78,20 @@ describe('fonts are loaded, not phantom (F-12-07)', () => {
 
 describe('notification bell polling (F-12-08)', () => {
   const src = read('src/components/notifications/NotificationBell.tsx');
+  // WP-W moved the interval into poll-policy.ts alongside the idle rule.
+  const policy = read('src/components/notifications/poll-policy.ts');
 
   it('polls every 60s, not 30s', () => {
-    expect(src).toContain('POLL_INTERVAL_MS = 60_000');
+    expect(policy).toContain('POLL_INTERVAL_MS = 60_000');
+    expect(src).toContain("import { POLL_INTERVAL_MS, shouldPollUnread } from './poll-policy'");
+    expect(src).toContain('}, POLL_INTERVAL_MS);');
     expect(src).not.toContain('30_000');
+    expect(policy).not.toContain('30_000');
+  });
+
+  it('stops polling an unattended page after 10 minutes (WP-W)', () => {
+    expect(policy).toContain('IDLE_AFTER_MS = 10 * 60_000');
+    expect(src).toContain('if (canPoll()) void refreshCount();');
   });
 
   it('pauses while the tab is hidden and refreshes on visibility return', () => {

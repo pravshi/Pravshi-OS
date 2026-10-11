@@ -42,7 +42,7 @@ const CRON_HINTS: { expr: string; label: string }[] = [
   { expr: '0 9 * * 1-5', label: 'Weekdays at 9:00' },
   { expr: '0 9 * * 1', label: 'Mondays at 9:00' },
   { expr: '0 */6 * * *', label: 'Every 6 hours' },
-  { expr: '*/15 * * * *', label: 'Every 15 minutes' },
+  { expr: '0 * * * *', label: 'Every hour' },
   { expr: '0 0 1 * *', label: 'First of the month' },
 ];
 

@@ -37,6 +37,7 @@ import { connectWithWake } from '../db/pool';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { auditJobsMutation } from './audit';
+import { requestWorkerWake } from './wake';
 import {
   canTransitionJob,
   EnqueueJobInputSchema,
@@ -235,7 +236,7 @@ export async function enqueueJob(auth: Authorization, input: EnqueueJobInput): P
   const orgId = auth.ctx.orgId;
   const nextRunAt = parsed.nextRunAt ?? new Date().toISOString();
 
-  return withAuthorizedDb(auth.ctx, async (tx) => {
+  const job = await withAuthorizedDb(auth.ctx, async (tx) => {
     // ON CONFLICT DO NOTHING against the partial unique index
     // jobs_org_dedup_uidx (0045): a duplicate dedup_key returns NO row and
     // raises NO error, so the transaction stays usable for the fallback
@@ -271,6 +272,10 @@ export async function enqueueJob(auth: Authorization, input: EnqueueJobInput): P
     }
     return mapJobRow(existingRow);
   });
+  // Committed: wake a worker sleeping in low-cost mode (WP-W). Never throws; a wake
+  // that does not arrive only delays the job until the worker's next scheduled wake.
+  await requestWorkerWake();
+  return job;
 }
 
 // ── claim ─────────────────────────────────────────────────────────────────────
@@ -582,5 +587,7 @@ export async function retryJob(auth: Authorization, jobId: string): Promise<Job>
       toStatus: replayed.replayed.status,
     },
   });
+  // The replay is due now; wake a sleeping worker (WP-W). Never throws.
+  await requestWorkerWake();
   return replayed.replayed;
 }

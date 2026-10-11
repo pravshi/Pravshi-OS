@@ -28,6 +28,18 @@
  *   SCHEDULER_TICK_MS   scheduler tick interval in ms (default 60000)
  *   HOSTNAME            used in the worker id; falls back to os.hostname()
  *
+ * Low-cost mode (WP-W — see "IDLE: LOW-COST MODE" below):
+ *   WORKER_IDLE_MODE           'deep-sleep' (default) | 'poll'
+ *   WORKER_ACTIVE_WINDOW_MS    stay active after the last job or wake (default 60000)
+ *   WORKER_MAX_SLEEP_MS        longest deep sleep, the lost-wake safety net
+ *                              (default 7200000 = 2 h; at most 24 h)
+ *   WORKER_WAKE_TOKEN          enables the /wake endpoint (>= 32 chars; the same value
+ *                              the web app holds). Validated by @/env.
+ *   PORT                       wake endpoint port (default 8080; platforms set it)
+ *   WORKER_DB_BUDGET_CU_HOURS  the worker's monthly share of Neon CU-hours for the
+ *                              usage estimate's warnings (default 30)
+ *   WORKER_COMPUTE_CU          Neon compute size the estimate assumes (default 0.25)
+ *
  * ── WHAT IT DOES ────────────────────────────────────────────────────────────
  * 1. Imports `./handlers` and `./workflow-jobs` for their side effects: that
  *    registers the notification, webhook, email, cleanup, workflow_run and
@@ -71,6 +83,24 @@
  * ceiling before it is claimed — acceptable for every current job type
  * (none is user-blocking; user-facing work is synchronous). Scheduler
  * tick unchanged (60 s default).
+ *
+ * ── IDLE: LOW-COST MODE (WP-W, the default) ──────────────────────────────
+ * Neon Free suspends compute only after 5 minutes without a query and caps a
+ * project at 100 CU-hours a month — spent, every compute in the project
+ * (production included) is suspended until the next billing period. Polling
+ * every 10 s keeps compute awake permanently (~182 CU-hours a month), so by
+ * default the worker runs runWorker in 'deep-sleep' mode: once nothing has
+ * happened for WORKER_ACTIVE_WINDOW_MS it asks public.worker_next_due_at()
+ * (migration 0066) when work next falls due and sends NO query until then,
+ * capped at WORKER_MAX_SLEEP_MS. The web app rings POST /wake after it
+ * commits new work, so user-triggered jobs (password-reset email,
+ * notifications, webhooks) start within seconds. Every wake runs the reap,
+ * retry, reminder, scheduler and (hourly at most) maintenance passes at once,
+ * and a fresh start does all of them before the first claim — so in this mode
+ * the start-up reap/maintenance/tick below are left to the loop. Delays this
+ * introduces, by design: a job whose wake signal is lost waits for the next
+ * scheduled wake (at most WORKER_MAX_SLEEP_MS); everything else runs on time.
+ * WORKER_IDLE_MODE=poll restores the always-polling behaviour (paid plans).
  *
  * The process stays alive until SIGTERM/SIGINT. A supervisor (systemd,
  * Docker, Render, etc.) should restart it on non-zero exit.
@@ -130,9 +160,12 @@ async function main(): Promise<void> {
   // Importing these modules validates env (`@/env` throws on missing/invalid
   // vars) and registers every job handler as a side effect.
   const { env } = await import('@/env');
+  // Inside the worker, work enqueued by a handler is picked up by this loop: never send
+  // a network wake to ourselves.
+  (await import('./wake')).markWorkerProcess();
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
-  const { runWorker, reapStaleJobs } = await import('./worker');
+  const { runWorker, reapStaleJobs, workerNextDueAt } = await import('./worker');
   const { runDbMaintenance } = await import('./maintenance');
   const { tickScheduler } = await import('./scheduler');
 
@@ -148,11 +181,19 @@ async function main(): Promise<void> {
   // to every checked-out client to suppress the "Unhandled error." throw. The
   // pool's own 'error' re-emit for tracked clients is unaffected, so nothing
   // is silently lost.
+  //
+  // Once per client, not once per checkout: the pool hands the same client out
+  // again and again, and a listener added on every checkout accumulated for as
+  // long as the client lived (MaxListenersExceededWarning, unbounded growth).
   const { pool } = await import('../db/pool');
   const poolConnect = pool.connect.bind(pool);
+  const guarded = new WeakSet<object>();
   pool.connect = (async () => {
     const client = await poolConnect();
-    client.on('error', () => undefined);
+    if (!guarded.has(client)) {
+      guarded.add(client);
+      client.on('error', () => undefined);
+    }
     return client;
   }) as typeof pool.connect;
   pool.on('error', (err: unknown) => {
@@ -165,9 +206,15 @@ async function main(): Promise<void> {
   // application configuration.
   // eslint-disable-next-line no-restricted-syntax
   const tickMs = parseTickMs(process.env.SCHEDULER_TICK_MS);
+  const lowCost = parseLowCostConfig();
 
   console.log(
-    `[worker] starting workerId=${workerId} schedulerTickMs=${tickMs} nodeEnv=${env.NODE_ENV}`,
+    `[worker] starting workerId=${workerId} schedulerTickMs=${tickMs} nodeEnv=${env.NODE_ENV} ` +
+      `idleMode=${lowCost.idleMode}` +
+      (lowCost.idleMode === 'deep-sleep'
+        ? ` activeWindowMs=${lowCost.activeWindowMs} maxSleepMs=${lowCost.maxSleepMs} ` +
+          `wakeEndpoint=${env.WORKER_WAKE_TOKEN ? 'on' : 'off'}`
+        : ''),
   );
 
   // Never let a stray rejection take the process down silently.
@@ -203,6 +250,13 @@ async function main(): Promise<void> {
     }
   };
 
+  if (lowCost.idleMode === 'deep-sleep') {
+    await runLowCost({ env, workerId, tickMs, lowCost, runWorker, workerNextDueAt, runTick });
+    console.log('[worker] graceful shutdown complete');
+    process.exit(0);
+  }
+
+  // ── 'poll' mode: unchanged Phase 12 behaviour ──────────────────────────────
   // Crash recovery before anything else claims work (Phase 12, F-12-02):
   // reset claims orphaned by a dead predecessor to 'pending'. Logged with
   // the reaped count; a failure here must never kill the worker — the
@@ -233,6 +287,97 @@ async function main(): Promise<void> {
 
   console.log('[worker] graceful shutdown complete');
   process.exit(0);
+}
+
+// ── Low-cost mode (WP-W) ─────────────────────────────────────────────────────
+
+interface LowCostConfig {
+  idleMode: 'deep-sleep' | 'poll';
+  activeWindowMs: number;
+  maxSleepMs: number;
+  port: number;
+  budgetCuHours: number;
+  computeUnits: number;
+}
+
+/**
+ * Non-secret tuning knobs and the platform-provided PORT, read only by this bootstrap
+ * entrypoint (the SCHEDULER_TICK_MS precedent). Invalid values fall back to defaults with a
+ * warning; the secret (WORKER_WAKE_TOKEN) is read through @/env, never here.
+ */
+function parseLowCostConfig(): LowCostConfig {
+  const num = (name: string, fallback: number, min: number): number => {
+    // eslint-disable-next-line no-restricted-syntax
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < min) {
+      console.warn(`[worker] invalid ${name}=${JSON.stringify(raw)}; using default ${fallback}`);
+      return fallback;
+    }
+    return n;
+  };
+  // eslint-disable-next-line no-restricted-syntax
+  const mode = process.env.WORKER_IDLE_MODE?.trim();
+  if (mode && mode !== 'deep-sleep' && mode !== 'poll') {
+    console.warn(`[worker] invalid WORKER_IDLE_MODE=${JSON.stringify(mode)}; using deep-sleep`);
+  }
+  return {
+    idleMode: mode === 'poll' ? 'poll' : 'deep-sleep',
+    activeWindowMs: num('WORKER_ACTIVE_WINDOW_MS', 60_000, 0),
+    maxSleepMs: num('WORKER_MAX_SLEEP_MS', 7_200_000, 1_000),
+    port: num('PORT', 8080, 0),
+    budgetCuHours: num('WORKER_DB_BUDGET_CU_HOURS', 30, 0),
+    computeUnits: num('WORKER_COMPUTE_CU', 0.25, 0.01),
+  };
+}
+
+async function runLowCost(deps: {
+  env: { WORKER_WAKE_TOKEN?: string };
+  workerId: string;
+  tickMs: number;
+  lowCost: LowCostConfig;
+  runWorker: typeof import('./worker').runWorker;
+  workerNextDueAt: typeof import('./worker').workerNextDueAt;
+  runTick: (reason: string) => Promise<void>;
+}): Promise<void> {
+  const { WakeLatch } = await import('./wake-latch');
+  const { startWakeServer } = await import('./wake-server');
+  const { WakeLedger } = await import('./usage-estimate');
+  const latch = new WakeLatch();
+  const ledger = new WakeLedger({
+    budgetCuHours: deps.lowCost.budgetCuHours,
+    computeUnits: deps.lowCost.computeUnits,
+  });
+
+  // The wake endpoint only exists when a token is configured; without it the worker still
+  // finds every job at its scheduled wakes, only later.
+  const wakeServer = deps.env.WORKER_WAKE_TOKEN
+    ? await startWakeServer({ token: deps.env.WORKER_WAKE_TOKEN, latch, port: deps.lowCost.port })
+    : null;
+  if (wakeServer) console.log(`[worker] wake endpoint listening on port ${wakeServer.port}`);
+
+  try {
+    // No start-up reap/maintenance/tick here: runWorker starts active and runs every pass
+    // before its first claim.
+    await deps.runWorker({
+      workerId: deps.workerId,
+      idleMode: 'deep-sleep',
+      activeWindowMs: deps.lowCost.activeWindowMs,
+      maxSleepMs: deps.lowCost.maxSleepMs,
+      nextDueAt: deps.workerNextDueAt,
+      wakeLatch: latch,
+      schedulerTick: () => deps.runTick('wake'),
+      schedulerTickIntervalMs: deps.tickMs,
+      onActive: (at) => ledger.active(at),
+      onDeepSleep: (at, sleepMs) => {
+        ledger.deepSleep(at);
+        console.log('[worker] deep sleep', { sleepMs });
+      },
+    });
+  } finally {
+    await wakeServer?.close();
+  }
 }
 
 main().catch((err) => {

@@ -340,3 +340,38 @@ export function cronWindowStart(date: Date): string {
   const truncated = Math.floor(t / 60_000) * 60_000;
   return new Date(truncated).toISOString();
 }
+
+/**
+ * The shortest gap, in minutes, between consecutive occurrences of `cron` over the next
+ * `horizonDays` (default 8 — covers every weekday pattern plus a weekend), sampling at most
+ * `maxSamples` occurrences. Infinity when fewer than two occurrences fall in the horizon
+ * (the schedule fires rarely enough that its gap cannot matter here). Throws on an invalid
+ * cron or timezone, exactly like nextRunAt().
+ *
+ * Used by the schedule writer to refuse schedules that fire more often than
+ * SCHEDULE_MIN_INTERVAL_MINUTES (WP-W): on Neon Free every scheduled run wakes the
+ * database for at least five minutes.
+ */
+export function minIntervalMinutes(
+  cron: string,
+  timezone: string,
+  from: Date = new Date(),
+  horizonDays = 8,
+  maxSamples = 200,
+): number {
+  const horizonEnd = from.getTime() + horizonDays * 86_400_000;
+  let previous = nextRunAt(cron, timezone, from);
+  let smallest = Infinity;
+  for (let i = 1; i < maxSamples && previous.getTime() <= horizonEnd; i++) {
+    let next: Date;
+    try {
+      next = nextRunAt(cron, timezone, previous);
+    } catch {
+      break; // no further occurrence within nextRunAt's lookahead
+    }
+    if (next.getTime() > horizonEnd) break;
+    smallest = Math.min(smallest, (next.getTime() - previous.getTime()) / 60_000);
+    previous = next;
+  }
+  return smallest;
+}

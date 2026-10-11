@@ -118,6 +118,25 @@ external senders are built from `APP_URL` (documented above).
 | `SCHEDULER_TICK_MS`   | optional | Worker only. Read directly by `src/lib/jobs/runner.ts` from the process environment (not part of the `src/env.ts` runtime schema). Scheduler tick interval in milliseconds; default 60000, and an invalid or blank value falls back to the default                                                                                                                    |
 | `WORKFLOWS_USE_QUEUE` | optional | Part of the `src/env.ts` runtime schema. Only the exact string `true` enqueues top-level workflow dispatches as `workflow_run` jobs; unset, blank or any other value means inline execution in the HTTP request. Set it **only** when a worker process is running to claim those jobs — otherwise dispatches queue unexecuted (see DEPLOYMENT.md, "The worker plane") |
 
+### Low-cost worker mode (WP-W) — optional
+
+The worker sleeps without querying the database so Neon Free compute can suspend; the web
+app wakes it after committing new work. Without the wake pair the worker still finds every
+job at its next scheduled wake (`WORKER_MAX_SLEEP_MS`) — later, never lost. See
+DEPLOYMENT.md, "The worker plane", for delays and costs.
+
+| Variable                        | Where                  | Notes                                                                                                                                                        |
+| ------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WORKER_WAKE_TOKEN`             | web app **and** worker | Shared secret, at least 32 characters, identical on both. Part of the `src/env.ts` runtime schema. Server-side only, never logged                            |
+| `WORKER_WAKE_URL`               | web app                | The worker's `/wake` endpoint. Must be `https://` in production (the token would otherwise travel in clear). Part of the `src/env.ts` runtime schema         |
+| `SCHEDULE_MIN_INTERVAL_MINUTES` | web app                | Shortest gap allowed between two runs of one schedule. Default 60; `0` disables. Checked on create and on cron/timezone change; existing schedules untouched |
+| `WORKER_IDLE_MODE`              | worker                 | `deep-sleep` (default) or `poll` (always-on polling, for paid database plans). Read by `src/lib/jobs/runner.ts`                                              |
+| `WORKER_ACTIVE_WINDOW_MS`       | worker                 | How long the worker stays active after its last job or wake. Default 60000                                                                                   |
+| `WORKER_MAX_SLEEP_MS`           | worker                 | Longest deep sleep — the safety net for a lost wake. Default 7200000 (2 h), clamped to 24 h                                                                  |
+| `PORT`                          | worker                 | Port of the wake endpoint (`POST /wake`, `GET /healthz`). Default 8080; platforms set it                                                                     |
+| `WORKER_DB_BUDGET_CU_HOURS`     | worker                 | The worker's monthly share of Neon CU-hours for its usage-estimate warnings (70%, 90%). Default 30                                                           |
+| `WORKER_COMPUTE_CU`             | worker                 | The Neon compute size the estimate assumes. Default 0.25 — set the compute to a fixed size for the estimate to hold                                          |
+
 ### Storage — not yet configured
 
 `.env.example` also lists `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and the
