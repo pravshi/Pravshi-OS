@@ -40,6 +40,7 @@ import type { Job } from '@/lib/jobs/types';
 import { GET as listJobsRoute } from '@/app/api/jobs/route';
 import { GET as getJobRoute } from '@/app/api/jobs/[id]/route';
 import { POST as retryJobRoute } from '@/app/api/jobs/[id]/retry/route';
+import { POST as cancelJobRoute } from '@/app/api/jobs/[id]/cancel/route';
 
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 const RUN = Math.random().toString(36).slice(2, 8);
@@ -375,6 +376,81 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     }
     // A retryable failure keeps the content for the next attempt.
     expect(await protectedToken(jobId)).toBe(token);
+  });
+
+  it('cancelling or dead-lettering forgets the body; a reaped claim keeps it; a late retry fails closed', async () => {
+    const hasBody = async (jobId: string) =>
+      (await owner.query(`select 1 from public.job_email_content where job_id = $1`, [jobId]))
+        .rowCount === 1;
+
+    // Cancelled through the real route: the body goes with it, and the answer carries nothing.
+    const cancelled = await requestResetJob();
+    const cancelledToken = await protectedToken(cancelled.jobId);
+    const cancelRes = await call(
+      cancelJobRoute,
+      admin,
+      `http://localhost:3000/api/jobs/${cancelled.jobId}/cancel`,
+      'POST',
+      { id: cancelled.jobId },
+    );
+    expect(cancelRes.status).toBeLessThan(300);
+    expect(leaks(await cancelRes.text(), cancelledToken)).toBe(false);
+    expect(await hasBody(cancelled.jobId)).toBe(false);
+
+    // A claim the reaper hands back (running → pending) keeps the body for the next worker.
+    const reaped = await requestResetJob();
+    await holdAsWorker(reaped.jobId, `w-dead-${RUN}`);
+    await owner.query(
+      `update public.jobs set status = 'pending', claimed_by = null, claimed_at = null,
+              heartbeat_at = null, updated_at = now() where id = $1`,
+      [reaped.jobId],
+    );
+    expect(await hasBody(reaped.jobId)).toBe(true);
+
+    // Dead-lettered (a non-retryable failure): the body is gone.
+    const dead = await requestResetJob();
+    const deadToken = await protectedToken(dead.jobId);
+    const workerId = `w-dl-${RUN}`;
+    await holdAsWorker(dead.jobId, workerId);
+    await asUser.query(`select * from public.jobs_fail($1, $2::uuid, 'CONFIG_ERROR', 'x', false)`, [
+      workerId,
+      dead.jobId,
+    ]);
+    const deadStatus = (
+      await owner.query<{ status: string }>(`select status from public.jobs where id = $1`, [
+        dead.jobId,
+      ])
+    ).rows[0]!.status;
+    expect(deadStatus).toBe('dead_letter');
+    expect(await hasBody(dead.jobId)).toBe(false);
+
+    // An administrator retries it anyway: the worker finds no body and fails the job
+    // without retry, naming no part of the link.
+    const retried = await call(
+      retryJobRoute,
+      admin,
+      `http://localhost:3000/api/jobs/${dead.jobId}/retry`,
+      'POST',
+      { id: dead.jobId },
+    );
+    expect(retried.status).toBeLessThan(300);
+    await holdAsWorker(dead.jobId, workerId);
+    let failure: unknown = null;
+    try {
+      const job = await loadJob(dead.jobId);
+      await handleEmail({
+        job,
+        auth: buildJobAuthorization(job),
+        signal: new AbortController().signal,
+        workerId,
+      });
+    } catch (e) {
+      failure = e;
+    }
+    const classified = classifyError(failure);
+    expect(classified.retryable).toBe(false);
+    expect(classified.message).toMatch(/no longer available/);
+    expect(leaks(`${classified.code} ${classified.message}`, deadToken)).toBe(false);
   });
 
   it('delivers a working, single-use link to the intended recipient, then forgets it', async () => {
