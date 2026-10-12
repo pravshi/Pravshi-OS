@@ -48,6 +48,7 @@ import {
   WebhookPayloadSchema,
   type Job,
 } from './types';
+import { withQueueDb } from './queue';
 import { registerHandler } from './worker';
 import type { JobExecutionContext, JobHandler } from './worker';
 
@@ -470,14 +471,54 @@ export async function sendEmailViaProvider(
   );
 }
 
+/** The `contentRef` enqueue_password_reset_email() (0069) writes in place of the body. */
+export const PROTECTED_EMAIL_CONTENT_REF = 'job_email_content';
+
+/**
+ * The protected body of the email job this worker holds. Worker plane (no
+ * identity): the definer serves it only while the job is running under this
+ * worker id. Missing content — the job already finished, or was cancelled —
+ * fails the job without retry; the error names no part of the body.
+ */
+async function loadProtectedEmailContent(
+  ctx: JobExecutionContext,
+): Promise<{ subject: string; html?: string; text?: string }> {
+  const rows = await withQueueDb((tx) =>
+    tx.execute<{ subject: string; html: string | null; text_body: string | null }>(sql`
+      select subject, html, text_body
+      from public.job_email_content_for_worker(${ctx.job.id}::uuid, ${ctx.workerId})
+    `),
+  );
+  const row = rows.rows[0];
+  if (!row) {
+    failValidation('the protected email content for this job is no longer available');
+  }
+  return {
+    subject: row.subject,
+    ...(row.html !== null ? { html: row.html } : {}),
+    ...(row.text_body !== null ? { text: row.text_body } : {}),
+  };
+}
+
 /**
  * `email` job → provider send with retry + dedup.
  * Dedup: the idempotency key is derived from the job id (+ dedupKey), so a
  * retried job re-sends with the SAME key and a compliant provider will not
  * duplicate the message. Never logs the email body.
+ *
+ * A payload whose `contentRef` is PROTECTED_EMAIL_CONTENT_REF carries no body:
+ * it is a password-reset email (0069), whose link must never sit in a job
+ * payload that `jobs.view` holders can list. The body is read here, through the
+ * worker-plane definer bound to the job this worker holds, and exists only for
+ * the duration of the send.
  */
 export const handleEmail: JobHandler = async (ctx: JobExecutionContext) => {
-  const e = normalizeEmailPayload(ctx.job.payload);
+  const payload = ctx.job.payload;
+  const source =
+    payload['contentRef'] === PROTECTED_EMAIL_CONTENT_REF
+      ? { to: payload['to'], ...(await loadProtectedEmailContent(ctx)) }
+      : payload;
+  const e = normalizeEmailPayload(source);
   const idempotencyKey = buildEmailIdempotencyKey(ctx.job);
   const result = await sendEmailViaProvider({
     job: ctx.job,

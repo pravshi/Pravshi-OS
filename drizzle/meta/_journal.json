@@ -513,6 +513,14 @@
       "tag": "0068_elevated_function_boundaries",
       "breakpoints": true,
       "hash": "ad13aa14ed4611a8b78e64640cef3ae9ce64a4adc5ee269431c311d9cf551209"
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791584728057,
+      "tag": "0069_password_reset_email_content",
+      "breakpoints": true,
+      "hash": "0931683cfc7b407b044967f7b8d6e9d14f3011674e25765fdcb9a0bf5c99284c"
     }
   ]
 }

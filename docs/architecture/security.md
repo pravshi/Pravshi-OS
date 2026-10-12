@@ -243,6 +243,16 @@ needs a valid person id of the target organization, which no API returns and RLS
 expose. The defence against that position is keeping SQL execution out of reach (parameterised
 queries only, T-15) and, next, the dedicated roles.
 
+**Credential-bearing email content (0069).** The password-reset email carries the reset token
+in its link, so its body never enters `jobs.payload` (which `jobs.view` holders can list): it is
+kept in `public.job_email_content` — no privilege for any application role, RLS forced with an
+owner-only policy — and read only through `job_email_content_for_worker(job_id, worker_id)`, which
+serves the email job the caller holds (running, `claimed_by` = that worker id) and refuses a
+signed-in caller. The body is deleted when the job is finished. Residual until the worker has its
+own role: a raw-SQL `app_user` caller with no identity can claim the job and read the body — a
+caller that can already set any password through `authz.update_credential_password`. Pinned by
+`tests/security/password-reset-content-confidentiality.test.ts`.
+
 **Inbound endpoint-key rotation during a request.** A receipt's status changes prove the
 connection's *current* key (0068). If an administrator rotates the key between a request writing
 its receipt and marking it processed, the request fails closed: the route answers its opaque

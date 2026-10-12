@@ -119,6 +119,7 @@ function mkCtx(job: Job): JobExecutionContext {
     job,
     auth: undefined as never,
     signal: new AbortController().signal,
+    workerId: 'test-worker',
   };
 }
 

@@ -284,7 +284,12 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     for (const row of rows) {
       const job = await loadJob(row.id);
       const auth = buildJobAuthorization(job);
-      await handleNotification({ job, auth, signal: new AbortController().signal });
+      await handleNotification({
+        job,
+        auth,
+        signal: new AbortController().signal,
+        workerId: 'test-worker',
+      });
     }
   }
 

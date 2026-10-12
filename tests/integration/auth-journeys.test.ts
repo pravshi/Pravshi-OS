@@ -454,10 +454,11 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
 
     // Complete a reset through the real reset path: request one via the lib
     // entry the forgot-password flow uses, then read the plaintext token back
-    // out of the enqueued email job — the mailbox is the only place it ever
+    // out of the enqueued email — the mailbox is the only place it ever
     // exists, exactly as for a real user. The live row in auth.password_resets
     // (0024) is what the job's dedup key names (the phase11-adversarial §B
-    // idiom); the database itself only ever holds the token's digest.
+    // idiom). Since 0069 the email body lives in public.job_email_content,
+    // which only the owner (and the worker holding the job) can read.
     await requestPasswordReset(email, ip);
     const resetRow = (
       await owner!.query<{ id: string }>(
@@ -467,13 +468,15 @@ describe.runIf(HAS_DB)('P1c auth journeys', () => {
         [authUserId],
       )
     ).rows[0]!;
-    const job = (
-      await owner!.query<{ payload: { html?: string } }>(
-        `select payload from public.jobs where dedup_key = $1`,
+    const content = (
+      await owner!.query<{ html: string | null }>(
+        `select c.html from public.job_email_content c
+           join public.jobs j on j.id = c.job_id
+          where j.dedup_key = $1`,
         [`pwreset:${resetRow.id}`],
       )
-    ).rows[0]!;
-    const token = /reset-password\?token=([0-9a-f]{64})/.exec(job.payload.html ?? '')?.[1];
+    ).rows[0];
+    const token = /reset-password\?token=([0-9a-f]{64})/.exec(content?.html ?? '')?.[1];
     if (!token) throw new Error('reset email job did not carry a token link');
     const done = await resetPassword(token, NEW_PASSWORD, ip);
     expect(done).toEqual({ ok: true });

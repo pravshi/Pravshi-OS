@@ -86,6 +86,7 @@ function makeCtx(job: Job): JobExecutionContext {
       meta: {},
     } as unknown as JobExecutionContext['auth'],
     signal: new AbortController().signal,
+    workerId: 'test-worker',
   };
 }
 
