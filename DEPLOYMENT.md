@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0065; project records indicate the `production` Neon branch stopped at 0044 (October
+  0066; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -96,6 +96,9 @@ table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is th
 | `INTEGRATIONS_ENCRYPTION_KEY`                                                              | For Tier V integrations (base64, exactly 32 bytes)                                                             | Yes      | Vault credentials NOT_CONFIGURED (typed, UI-honest)                                                                                                                                                                               |
 | `AI_PROVIDER`/`AI_MODEL`/`AI_API_KEY`/`AI_BASE_URL`/`AI_TIMEOUT_MS`/`AI_MAX_OUTPUT_TOKENS` | No (the mock is the honest default)                                                                            | Key: yes | AI runs on the deterministic mock — a _product_ decision for go-live, not a defect                                                                                                                                                |
 | `WEBHOOK_SIGNING_SECRET_<REF>`                                                             | Per configured delivery ref                                                                                    | Yes      | That delivery refuses to send (by design)                                                                                                                                                                                         |
+| `WORKER_WAKE_URL`                                                                          | Operationally yes (`https://<worker-host>/wake`; https required in production)                                 | No       | No wake is sent: work waits for the worker's next scheduled wake, up to `WORKER_MAX_SLEEP_MS` (2 h) — long enough for a password-reset link (valid 1 h) to expire before its email is sent                                        |
+| `WORKER_WAKE_TOKEN`                                                                        | Operationally yes (≥32 chars, **identical** on the web app and the worker)                                     | Yes      | Same as above. A token that differs between the two services is refused with 401 on every wake, so it fails the same way, silently                                                                                                |
+| `SCHEDULE_MIN_INTERVAL_MINUTES`                                                            | No (default 60; `0` disables)                                                                                  | No       | Default applies: schedules may not fire more often than hourly. Keep the default on Neon Free — every scheduled run wakes the database                                                                                            |
 | `SCHEDULER_TICK_MS`                                                                        | Worker only, optional (default 60000)                                                                          | No       | Default applies                                                                                                                                                                                                                   |
 | `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live                                                                   | No       | If set without a worker: workflow dispatches queue unexecuted                                                                                                                                                                     |
 | `R2_*`                                                                                     | **Must not be provisioned for V1**                                                                             | —        | No R2 buckets exist; the variables are placeholders for deferred storage work                                                                                                                                                     |
@@ -188,7 +191,11 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   is the opposite of what it needs. _Where_ it runs is a Phase 13 deployment decision
   (human gate HG-8); this section contracts what any host must provide.
 - **Command:** `pnpm worker` (`pnpm worker --help` prints usage without touching env or
-  the database).
+  the database). **Node 22** (`.nvmrc`): the worker runs its TypeScript through
+  `--experimental-transform-types`, which newer Node releases removed — on Node 26 it does
+  not start. Pin the host's Node version explicitly: on Railway set
+  `RAILPACK_NODE_VERSION=22` — Railpack reads `package.json` `engines.node` (an open
+  range, `>=22.12`) **before** `.nvmrc`, so without the pin it may pick a newer major.
 - **Environment:** parity with the web app. Required — validated at boot, and the process
   refuses to start without them: `DATABASE_URL` (the **pooled** endpoint; the host
   contains `-pooler.`), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`. (`HEALTH_CHECK_TOKEN`
@@ -208,10 +215,54 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   use `FOR UPDATE SKIP LOCKED`, so two processes never execute the same job. This is a
   deliberate V1 contract, recorded with its reasoning in
   [docs/phase12-performance.md](docs/phase12-performance.md).
-- **Idle cost:** an idle worker polls for work — every 1 s at first, backing off to a 10 s
-  ceiling while the queue stays empty (Phase 12, F-12-04) — plus a scheduler tick every
-  60 s. While any worker runs, Neon compute stays awake; that is the accepted price of the
-  async plane, and a reason not to multiply worker processes casually.
+- **Idle cost — low-cost mode (WP-W, the default):** Neon Free suspends compute only after
+  5 minutes without a query and gives a project 100 CU-hours a month; spending them
+  suspends **every** compute in the project, production included, until the next billing
+  period. A worker that polls every 10 s keeps compute awake permanently (~182 CU-hours a
+  month at 0.25 CU), so by default the worker **deep-sleeps**: after
+  `WORKER_ACTIVE_WINDOW_MS` (60 s) with nothing to do it asks the database when work next
+  falls due (`public.worker_next_due_at()`, migration 0066) and sends no query at all
+  until then — capped at `WORKER_MAX_SLEEP_MS` (2 h). While it sleeps it holds no database
+  connection. The web app wakes it right after committing new work (`POST /wake` with
+  `WORKER_WAKE_TOKEN`; see below), and every wake runs the reap, retry, reminder,
+  scheduler and maintenance passes at once. `WORKER_IDLE_MODE=poll` restores always-on
+  polling for a paid database plan. What each feature experiences in low-cost mode
+  (measured end to end in `tests/e2e-worker/low-cost-worker.e2e.test.ts`):
+
+  | Work                                                                  | When it runs                                                                                                                                                                                                        |
+  | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Password-reset email, notifications, webhooks, email jobs             | Seconds after the commit (measured: 0.8 s from wake to finished job)                                                                                                                                                |
+  | …if the wake signal is lost (network failure while the worker sleeps) | At the next scheduled wake — at most `WORKER_MAX_SLEEP_MS` (2 h) later. Never lost: the job is in Postgres. A worker that restarts drains waiting work at once, so this needs a wake to fail while the worker is up |
+  | Task reminders                                                        | At the reminder time (measured: 0.6 s late)                                                                                                                                                                         |
+  | Scheduled automations                                                 | At the scheduled time (measured: 0.3 s late); schedules may not fire more often than hourly by default (`SCHEDULE_MIN_INTERVAL_MINUTES`)                                                                            |
+  | Webhook / job retries                                                 | At their back-off time                                                                                                                                                                                              |
+  | Work that fell due while the worker was down                          | Immediately after it starts (measured: 5 s including start-up)                                                                                                                                                      |
+  | Audit-log partitions and retention                                    | At start-up and on wakes, at most hourly and at least every `WORKER_MAX_SLEEP_MS`                                                                                                                                   |
+
+  **Known rare failure — password reset.** A reset link is valid for **1 hour**
+  (`authz.request_password_reset`, migration 0024); the safety wake is **2 hours** by
+  deliberate choice (a shorter cap costs roughly 13 more CU-hours a month). So if the wake
+  signal for a reset request is lost while the worker is up and asleep — a network failure
+  between the web app and the worker — the email can go out after its link has expired. The
+  user sees "link expired" and requests a new one, which sends a fresh wake. Nothing is lost
+  or leaked; the cost is one extra request. Watch for `[jobs] worker wake failed` warnings
+  in the web app's logs: they mark exactly these windows.
+
+  **Estimated compute** (worker's share, 0.25 CU fixed size): about 6.5 minutes of awake
+  database per idle safety wake (60 s active + Neon's 5-minute suspend delay) × 12 a day
+  ≈ 10 CU-hours a month, plus a few minutes per reminder or scheduled run outside working
+  hours. The worker logs a daily `[jobs] worker db-wake estimate` and an error line when
+  its month-to-date estimate passes 70% and 90% of `WORKER_DB_BUDGET_CU_HOURS` — an
+  estimate of its own share only; the Neon console stays the source of truth.
+
+- **Wake endpoint:** with `WORKER_WAKE_TOKEN` set the worker listens on `PORT`:
+  `POST /wake` (header `x-pravshi-worker-token`; 202, no body read, no database touched,
+  capped at 60 accepted wakes and 30 refused attempts a minute) and `GET /healthz` (200,
+  unauthenticated, no database — use it for the platform's health check). The web app
+  needs `WORKER_WAKE_URL` (`https://<worker-host>/wake`) and the same token. Without the
+  pair the worker still works; work just waits for its next scheduled wake. If the worker
+  is down or refuses a wake, each web instance stops sending wakes for 30 s, so an outage
+  costs one 1 s timeout per instance per 30 s rather than one per request.
 - **Crash recovery:** a job whose worker dies mid-flight is recovered automatically —
   stale claims are reaped when a worker starts and periodically while it runs (Phase 12,
   F-12-02), returning the job to the queue under the normal retry policy. No operator
@@ -220,7 +271,8 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   tick). Ticks are serialised across instances by a Postgres advisory lock and
   dedup-keyed by scheduled window, so running more than one worker process never
   double-fires a schedule.
-- **Database maintenance** (migration 0065): at startup and then hourly, the worker keeps
+- **Database maintenance** (migration 0065): at startup and then at most hourly (in
+  low-cost mode: on wakes, and at least every `WORKER_MAX_SLEEP_MS`), the worker keeps
   `audit_logs` partitioned twelve months ahead and deletes rows past their retention
   period, at most 5,000 per table per pass. **Without a running worker, nothing extends the
   audit-log partitions** — there is no default partition, so roughly a year after the last
@@ -242,8 +294,9 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   | Audit log, login events, and all business records     | **Never**                                      |
 
 - **Liveness check:** two parts, both operator-run. (1) _Process:_ the supervisor reports
-  the worker running. (2) _Claiming:_ with database access, confirm claim heartbeats are
-  fresh — an executing worker refreshes its job's heartbeat every 15 s:
+  the worker running, and `GET /healthz` on the wake endpoint answers 200. (2) _Claiming:_
+  ring `POST /wake` and confirm a `[worker] deep sleep` line follows within about a minute;
+  with database access, an executing worker also refreshes its job's heartbeat every 15 s:
 
   ```sql
   select max(heartbeat_at) from public.jobs where heartbeat_at is not null;
@@ -307,3 +360,12 @@ Before any deployment, confirm:
 - [ ] `HEALTH_CHECK_TOKEN` set, 32+ characters, different per environment
 - [ ] Worker running and claiming on its always-on host — process supervised, env parity
       confirmed, claim heartbeat fresh (see [The worker plane](#the-worker-plane))
+- [ ] Worker host runs **Node 22** (`RAILPACK_NODE_VERSION=22` on Railway); its start-up log
+      shows `[worker] starting … idleMode=deep-sleep … wakeEndpoint=on`
+- [ ] `WORKER_WAKE_TOKEN` set on **both** the web app and the worker, **identical**, 32+
+      characters; `WORKER_WAKE_URL` on the web app is `https://<worker-host>/wake`
+- [ ] `GET https://<worker-host>/healthz` answers 200 (no auth, no database) and is the
+      worker's platform health check
+- [ ] A test wake is accepted: `POST /wake` with the token answers 202 and a
+      `[worker] deep sleep` line follows within about a minute; without the token it answers 401
+- [ ] `SCHEDULE_MIN_INTERVAL_MINUTES` left at its default (60) while on Neon Free

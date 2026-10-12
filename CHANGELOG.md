@@ -7,11 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0065 (production still pending — see the
+Database migrations: 0063–0066 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
 
+- Low-cost worker mode for the Neon Free plan (the default). Neon Free suspends
+  compute only after five minutes without a query and caps a project at 100
+  CU-hours a month; a worker polling every 10 seconds kept compute awake
+  permanently (~182 CU-hours). The idle worker now sleeps without querying until
+  its next due work (migration 0066, `worker_next_due_at()`), at most two hours,
+  holding no database connection; the web app wakes it over an authenticated,
+  rate-limited `POST /wake` right after committing new work — jobs, retries,
+  reminders, schedules, and every forgot-password request (on every path, so the
+  wake adds no timing signal). Measured end to end: a woken job finishes in under
+  a second, reminders and schedules fire within a second of their time, work that
+  fell due while the worker was down drains on start, and a job whose wake was
+  lost is found by the two-hour safety wake. The worker logs a daily estimate of
+  the compute it causes and warns at 70% and 90% of a budget.
+  `WORKER_IDLE_MODE=poll` keeps the previous behaviour.
+- Schedules may not fire more often than `SCHEDULE_MIN_INTERVAL_MINUTES`
+  (default 60; 0 disables) — each run wakes the database. Checked on create, on a
+  cron or timezone change, and when a paused schedule is enabled again (even with
+  its cron unchanged). Existing active schedules are not changed; the "Every 15
+  minutes" preset became "Every hour".
 - Automatic database maintenance in the worker (migration 0065), at startup and
   hourly. Audit-log partitions are kept twelve months ahead: they were created
   once by migration 0011 and never extended, so about a year later every write
@@ -25,6 +44,11 @@ Database migrations: 0063–0065 (production still pending — see the
 
 ### Fixed
 
+- The notification bell stops polling a page nobody has used for ten minutes
+  and refreshes on the next activity; an unattended open tab no longer keeps the
+  database awake overnight.
+- The worker no longer adds an error listener to a pooled database client on
+  every checkout (listeners accumulated for the client's lifetime).
 - Project members: `GET/POST/DELETE /api/work/projects/<id>/members` no longer
   return 500. The `project_members` policies recursed into themselves; they now
   use membership helper functions (migration 0063). Resolves the 1.0.0 known

@@ -71,7 +71,8 @@ import type { Authorization } from '../authz/require-permission';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from './queue';
 import { sweepRetryableJobs } from './retry-sweeper';
 import { sweepDueTaskReminders } from './reminder-sweep';
-import { runDbMaintenance } from './maintenance';
+import { runDbMaintenance, sqlstateOf } from './maintenance';
+import { WakeLatch } from './wake-latch';
 import { backoffDelayMs, classifyError } from './retry';
 import { JOB_TYPE_SET, type Job, type JobType } from './types';
 
@@ -136,7 +137,45 @@ export interface WorkerConfig {
    * additionally runs one pass at startup.
    */
   maintenanceIntervalMs?: number;
+  /**
+   * What the worker does when the queue is empty (WP-W).
+   *   'poll' (default): the adaptive claim poll above — the database is read at least
+   *     every pollMaxIdleMs, plus every sweep cadence, so Neon compute never suspends.
+   *   'deep-sleep': low-cost mode for Neon Free. After activeWindowMs with nothing to do,
+   *     the worker asks nextDueAt() when work next falls due and sends NO query until
+   *     then (capped by maxSleepMs), or until wakeLatch is rung. On every wake it runs
+   *     the reap, retry, reminder, scheduler and (when due) maintenance passes at once.
+   */
+  idleMode?: 'poll' | 'deep-sleep';
+  /** deep-sleep: stay active this long after the last job or wake. Default 60000. */
+  activeWindowMs?: number;
+  /**
+   * deep-sleep: the longest sleep, whatever nextDueAt() says — the safety net that finds
+   * work whose wake signal was lost. Default 7200000 (2 h); clamped to 24 h so the
+   * maintenance pass (audit partitions, retention) runs at least daily.
+   */
+  maxSleepMs?: number;
+  /** deep-sleep: earliest due instant across the queue (public.worker_next_due_at()). */
+  nextDueAt?: () => Promise<Date | null>;
+  /** Rung by the wake endpoint (and by shutdown). Created internally when absent. */
+  wakeLatch?: WakeLatch;
+  /**
+   * deep-sleep: the scheduler tick runs inside the loop (on schedulerTickIntervalMs while
+   * active, and immediately on every wake) instead of on its own timer, so it cannot wake
+   * the database during a sleep. In 'poll' mode runner.ts keeps its own interval.
+   */
+  schedulerTick?: () => Promise<unknown>;
+  /** Default 60000. */
+  schedulerTickIntervalMs?: number;
+  /** Observability: the loop went active (start, wake) / went to deep sleep. */
+  onActive?: (at: number) => void;
+  onDeepSleep?: (at: number, sleepMs: number) => void;
 }
+
+/** deep-sleep never sleeps longer than a day: maintenance must run at least daily. */
+export const MAX_DEEP_SLEEP_MS = 24 * 60 * 60 * 1000;
+/** deep-sleep: first back-off when nextDueAt() fails or a due item will not clear. */
+export const DEEP_SLEEP_ERROR_BACKOFF_MS = 30_000;
 
 export type JobHandler = (ctx: JobExecutionContext) => Promise<void>;
 
@@ -209,10 +248,6 @@ async function withWorkerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   } finally {
     client.release();
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── Claim release & retry backoff (worker-plane, do NOT belong in queue.ts) ──
@@ -385,6 +420,17 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   const reapIntervalMs = config.reapIntervalMs ?? 300000;
   const reminderSweepIntervalMs = config.reminderSweepIntervalMs ?? 60000;
   const maintenanceIntervalMs = config.maintenanceIntervalMs ?? 3600000;
+  const deepSleep = config.idleMode === 'deep-sleep';
+  const activeWindowMs = Math.max(0, config.activeWindowMs ?? 60000);
+  const maxSleepMs = Math.min(
+    MAX_DEEP_SLEEP_MS,
+    Math.max(pollIntervalMs, config.maxSleepMs ?? 7200000),
+  );
+  const schedulerTickIntervalMs = config.schedulerTickIntervalMs ?? 60000;
+  const latch = config.wakeLatch ?? new WakeLatch();
+  if (deepSleep && typeof config.nextDueAt !== 'function') {
+    return Promise.reject(new Error("INVALID_REQUEST: idleMode 'deep-sleep' requires nextDueAt"));
+  }
 
   let settled = false;
   let settle!: () => void;
@@ -406,6 +452,8 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   const onShutdown = (): void => {
     if (state.shuttingDown) return;
     state.shuttingDown = true;
+    // Cut any idle or deep sleep short so the loop sees the shutdown now.
+    latch.ring();
     state.current?.abort.abort();
     if (state.current === null) {
       // Idle: nothing in flight, resolve immediately.
@@ -439,11 +487,42 @@ export function runWorker(config: WorkerConfig): Promise<void> {
       let nextReapMs = Date.now() + reapIntervalMs;
       let nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
       let nextMaintenanceMs = Date.now() + maintenanceIntervalMs;
+      let nextSchedulerTickMs = Date.now() + schedulerTickIntervalMs;
       // Adaptive idle poll (Phase 12, F-12-04): the sleep after an empty
       // claim starts at pollIntervalMs and doubles up to maxIdleSleepMs;
       // any claimed job resets it to pollIntervalMs.
       let idleSleepMs = pollIntervalMs;
+
+      // ── deep-sleep (WP-W) state ──────────────────────────────────────────
+      // A fresh worker starts ACTIVE and runs every pass at once: overdue work
+      // left by a restart, a crash or a long suspend is drained before any sleep.
+      let activeUntil = Date.now() + activeWindowMs;
+      let lastPastDue: number | null = null;
+      const firstBackoffMs = Math.min(DEEP_SLEEP_ERROR_BACKOFF_MS, maxSleepMs);
+      let stuckBackoffMs = firstBackoffMs;
+      let errorBackoffMs = firstBackoffMs;
+      const becomeActive = () => {
+        const t = Date.now();
+        activeUntil = t + activeWindowMs;
+        idleSleepMs = pollIntervalMs;
+        // Every timer the worker honours is looked at immediately on a wake.
+        nextRetrySweepMs = t;
+        nextReapMs = t;
+        nextReminderSweepMs = t;
+        nextSchedulerTickMs = t;
+        config.onActive?.(t);
+      };
+      if (deepSleep) {
+        becomeActive();
+        // Maintenance is gated by its own interval; on start, run it now.
+        nextMaintenanceMs = Date.now();
+      }
+
       while (!state.shuttingDown) {
+        if (deepSleep && config.schedulerTick && Date.now() >= nextSchedulerTickMs) {
+          nextSchedulerTickMs = Date.now() + schedulerTickIntervalMs;
+          await config.schedulerTick().catch(() => undefined);
+        }
         if (retrySweepIntervalMs > 0 && Date.now() >= nextRetrySweepMs) {
           // Automatic retry: re-drive retryable 'failed' jobs whose backoff
           // elapsed back to 'pending'. A DB blip must never kill the worker.
@@ -473,24 +552,82 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           nextMaintenanceMs = Date.now() + maintenanceIntervalMs;
           await runDbMaintenance().catch(() => undefined);
         }
-        let job: Job | null;
+        let job: Job | null = null;
+        let claimFailed = false;
         try {
           job = await claimJob(workerId, types);
         } catch {
           // A claim failure (DB blip, privilege path hiccup) must never kill
           // the worker — back off and keep polling. Queue state is unknown
           // after an error, so the idle backoff restarts from the base
-          // interval rather than staying at the deep-idle ceiling.
+          // interval rather than staying at the deep-idle ceiling. In
+          // deep-sleep mode a failure past the active window falls through to
+          // the deep-sleep back-off below instead of polling a database that
+          // is not answering.
+          claimFailed = true;
           idleSleepMs = pollIntervalMs;
-          await sleep(pollIntervalMs);
-          continue;
         }
         if (job === null) {
-          await sleep(idleSleepMs);
-          idleSleepMs = Math.min(idleSleepMs * 2, maxIdleSleepMs);
+          if (!deepSleep || Date.now() < activeUntil) {
+            const outcome = await latch.sleep(claimFailed ? pollIntervalMs : idleSleepMs);
+            if (outcome === 'woken' && deepSleep && !state.shuttingDown) becomeActive();
+            else if (!claimFailed) idleSleepMs = Math.min(idleSleepMs * 2, maxIdleSleepMs);
+            continue;
+          }
+
+          // ── Deep sleep: nothing to do and the active window has passed. ──
+          let sleepMs: number;
+          let lookup: { ok: true; dueAt: Date | null } | { ok: false };
+          try {
+            lookup = { ok: true, dueAt: await config.nextDueAt!() };
+            errorBackoffMs = firstBackoffMs;
+          } catch (error) {
+            // Database unavailable (suspended, quota, network). Never crash and never
+            // spin: back off, doubling up to maxSleepMs. Queued work stays in Postgres.
+            console.warn('[worker] next-due lookup failed; retrying after back-off', {
+              backoffMs: errorBackoffMs,
+              sqlstate: sqlstateOf(error),
+            });
+            lookup = { ok: false };
+          }
+          if (!lookup.ok) {
+            sleepMs = errorBackoffMs;
+            errorBackoffMs = Math.min(errorBackoffMs * 2, maxSleepMs);
+          } else {
+            const { dueAt } = lookup;
+            const now = Date.now();
+            if (dueAt === null) {
+              sleepMs = maxSleepMs;
+              lastPastDue = null;
+            } else if (dueAt.getTime() <= now) {
+              // Overdue. The wake passes just ran, so a due item that is still due
+              // will not clear by itself (a type no handler takes, a pass that keeps
+              // failing). Staying active for it would keep the database awake for
+              // ever; back off instead, loudly, doubling up to maxSleepMs.
+              if (lastPastDue !== dueAt.getTime()) {
+                lastPastDue = dueAt.getTime();
+                stuckBackoffMs = firstBackoffMs;
+                becomeActive();
+                continue;
+              }
+              console.warn('[worker] overdue work did not clear after a full pass', {
+                dueAt: dueAt.toISOString(),
+                backoffMs: stuckBackoffMs,
+              });
+              sleepMs = stuckBackoffMs;
+              stuckBackoffMs = Math.min(stuckBackoffMs * 2, maxSleepMs);
+            } else {
+              lastPastDue = null;
+              sleepMs = Math.min(dueAt.getTime() - now, maxSleepMs);
+            }
+          }
+          config.onDeepSleep?.(Date.now(), sleepMs);
+          await latch.sleep(sleepMs);
+          if (!state.shuttingDown) becomeActive();
           continue;
         }
         idleSleepMs = pollIntervalMs;
+        activeUntil = Date.now() + activeWindowMs;
         await executeJob(workerId, heartbeatIntervalMs, job, state);
       }
     } finally {
@@ -549,4 +686,24 @@ export async function reapStaleJobs(thresholdMs = 60000): Promise<number> {
     return Number(rows.rows[0]?.reaped ?? 0);
   });
   return reaped;
+}
+
+// ── Low-cost mode: when is anything next due? (WP-W) ─────────────────────────
+
+/**
+ * The earliest instant any pending job, retryable failed job, stale-claim reap, unsent
+ * task reminder or active schedule falls due — public.worker_next_due_at() (SECURITY
+ * DEFINER, migration 0066; the worker plane has no identity, so a plain read would match
+ * nothing under FORCED RLS). null when nothing is pending anywhere. Throws on database
+ * errors; the deep-sleep loop backs off on a throw.
+ */
+export async function workerNextDueAt(): Promise<Date | null> {
+  const rows = await withWorkerDb((tx) =>
+    tx.execute<{ due_at: string | null }>(sql`select public.worker_next_due_at()::text as due_at`),
+  );
+  const value = rows.rows[0]?.due_at ?? null;
+  if (value === null) return null;
+  const due = new Date(value);
+  if (!Number.isFinite(due.getTime())) throw new Error('INTERNAL: unparseable next-due instant');
+  return due;
 }

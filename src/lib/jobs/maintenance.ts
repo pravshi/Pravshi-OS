@@ -50,7 +50,7 @@ async function withWorkerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   }
 }
 
-function sqlstateOf(error: unknown): string {
+export function sqlstateOf(error: unknown): string {
   for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
     const code = (candidate as { code?: unknown } | null | undefined)?.code;
     if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;

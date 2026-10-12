@@ -33,6 +33,7 @@ import { connectWithWake } from '../db/pool';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { cronWindowStart, isValidCron, isValidTimezone, nextRunAt } from './cron';
+import { scheduleIntervalViolation } from './schedule-policy';
 
 // ── Permissions (seeded by 0045; names frozen by contract §2.5) ───────────────
 
@@ -254,6 +255,9 @@ export async function resumeSchedule(auth: Authorization, scheduleId: string): P
   await requireSchedulePermission(auth, PERM_CREATE);
   return withAuthorizedDb(auth.ctx, async (tx) => {
     const schedule = await loadScheduleForUpdate(tx, auth.ctx.orgId, scheduleId);
+    // WP-W: a paused schedule enabled again must respect the minimum interval too.
+    const intervalViolation = scheduleIntervalViolation(schedule.cron, schedule.timezone);
+    if (intervalViolation) throw invalidRequest(intervalViolation);
     const next = nextRunAt(schedule.cron, schedule.timezone, new Date());
     const result = await tx.execute<Record<string, unknown>>(sql`
       update public.schedules

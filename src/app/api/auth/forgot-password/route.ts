@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { env } from '@/env';
 import { requestPasswordReset, PasswordResetError } from '@/lib/auth/password-reset';
 import { clientIp } from '@/lib/auth/login-events';
+import { requestWorkerWake } from '@/lib/jobs/wake';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,17 +57,20 @@ export async function POST(req: Request) {
 
   try {
     await requestPasswordReset(email, clientIp(req));
-    return reply(200, { ok: true });
   } catch (e) {
-    if (e instanceof PasswordResetError && e.code === 'RATE_LIMITED') {
-      // Indistinguishable by design: a throttled response looks exactly like success.
-      return reply(200, { ok: true });
+    // A throttled request is indistinguishable by design: it answers exactly like success.
+    if (!(e instanceof PasswordResetError && e.code === 'RATE_LIMITED')) {
+      console.error('[auth/forgot-password] request failed', {
+        name: e instanceof Error ? e.name : typeof e,
+      });
     }
-    console.error('[auth/forgot-password] request failed', {
-      name: e instanceof Error ? e.name : typeof e,
-    });
     // Even an internal failure answers generic success: the existence question
     // must never become answerable through this endpoint's status codes.
-    return reply(200, { ok: true });
   }
+  // The reset email is a job; wake a worker sleeping in low-cost mode (WP-W) so it goes out
+  // in seconds. Sent on EVERY path through this step — known address, unknown address,
+  // throttled, failed — so the wake's own latency cannot become the timing difference the
+  // reset email moved onto the job plane to remove (Phase 11, F-11-06). Never throws.
+  await requestWorkerWake();
+  return reply(200, { ok: true });
 }

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
+import { requestWorkerWake } from '@/lib/jobs/wake';
 
 /**
  * Task reminders service (Phase 4 V1). Reminders are per-task SELF-reminders:
@@ -107,7 +108,7 @@ export async function createReminder(
   taskId: string,
   input: CreateReminderInput,
 ): Promise<TaskReminder> {
-  return withAuthorizedDb(auth.ctx, async (tx) => {
+  const reminder = await withAuthorizedDb(auth.ctx, async (tx) => {
     await assertTaskSettable(tx, auth, taskId);
     const res = await tx.execute(sql`
       insert into public.task_reminders as r (org_id, task_id, person_id, remind_at)
@@ -122,6 +123,10 @@ export async function createReminder(
     await assertTargetAffected(auth, res.rowCount ?? 0);
     return res.rows[0] as unknown as TaskReminder;
   });
+  // A sleeping worker (WP-W low-cost mode) computed its wake time before this reminder
+  // existed; wake it so it re-reads the next due instant. Never throws.
+  await requestWorkerWake();
+  return reminder;
 }
 
 /**

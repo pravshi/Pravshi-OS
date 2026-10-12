@@ -21,6 +21,8 @@ import { withAuthorizedDb } from '@/lib/db/authorized';
 import { AuthorizationError } from '@/lib/authz/errors';
 import type { Authorization } from '@/lib/authz/require-permission';
 import { isValidCron, isValidTimezone, nextRunAt } from '@/lib/jobs/cron';
+import { requestWorkerWake } from '@/lib/jobs/wake';
+import { assertScheduleInterval } from '@/lib/jobs/schedule-policy';
 import { JOB_TYPE_SET, type Job, type JobStatus, type JobType } from '@/lib/jobs/types';
 import { auditJobsMutation } from '@/lib/jobs/audit';
 
@@ -184,6 +186,7 @@ export const CreateScheduleSchema = z.strictObject({
 export async function createSchedule(auth: Authorization, input: unknown): Promise<Schedule> {
   const parsed = CreateScheduleSchema.parse(input);
   const next = computeNextRun(parsed.cron, parsed.timezone);
+  assertScheduleInterval(parsed.cron, parsed.timezone);
 
   try {
     const schedule = await withAuthorizedDb(auth.ctx, async (tx) => {
@@ -214,6 +217,8 @@ export async function createSchedule(auth: Authorization, input: unknown): Promi
         isActive: schedule.isActive,
       },
     });
+    // A sleeping worker (WP-W) must re-read when the next run falls due. Never throws.
+    await requestWorkerWake();
     return schedule;
   } catch (error) {
     // 23503: workflow_id does not exist. 42501: the org-guard trigger rejected
@@ -317,6 +322,14 @@ export async function updateSchedule(
     // run. Activating a schedule whose next run is unknown does too.
     const cronChanged = parsed.cron !== undefined && parsed.cron !== schedule.cron;
     const tzChanged = parsed.timezone !== undefined && parsed.timezone !== schedule.timezone;
+    // WP-W: the minimum interval applies whenever the schedule becomes able to fire on a
+    // new cadence — a changed cron/timezone, or a paused schedule enabled again even with
+    // its cron unchanged (a frequent schedule paused before the rule existed must not come
+    // back through reactivation). Thrown inside the transaction, so nothing is written.
+    const reactivating = parsed.isActive === true && !schedule.isActive;
+    if (cronChanged || tzChanged || reactivating) {
+      assertScheduleInterval(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
+    }
     let nextRun: Date | null = null;
     if (cronChanged || tzChanged) {
       nextRun = computeNextRun(parsed.cron ?? schedule.cron, parsed.timezone ?? schedule.timezone);
@@ -353,6 +366,8 @@ export async function updateSchedule(
       isActive: `${updated.beforeIsActive}->${updated.schedule.isActive}`,
     },
   });
+  // The firing plan may have moved earlier or been re-activated; wake a sleeping worker.
+  await requestWorkerWake();
   return updated.schedule;
 }
 

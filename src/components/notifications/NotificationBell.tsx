@@ -37,15 +37,18 @@ import {
   type NotificationWithLink,
 } from './notifications-view';
 import { EventTypeIcon } from './EventTypeIcon';
+import { POLL_INTERVAL_MS, shouldPollUnread } from './poll-policy';
 
 /**
  * §16.9 unread polling, retuned by Phase 12 (F-12-08): 60s, and no request
  * fires while the tab is hidden — polling resumes with an immediate refresh
- * when the tab becomes visible again. No SSE/websocket exists; document if
- * this changes.
+ * when the tab becomes visible again. WP-W adds the same rule for an
+ * unattended page: no request after 10 minutes without user activity, and an
+ * immediate refresh on the next activity (poll-policy.ts). No SSE/websocket
+ * exists; document if this changes.
  */
-const POLL_INTERVAL_MS = 60_000;
 const PREVIEW_LIMIT = 5;
+const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'focus'] as const;
 
 export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -69,22 +72,43 @@ export function NotificationBell() {
 
   useEffect(() => {
     mounted.current = true;
+    let lastActivityAt = Date.now();
+    const canPoll = () =>
+      shouldPollUnread({
+        visible: document.visibilityState === 'visible',
+        lastActivityAt,
+        now: Date.now(),
+      });
     void refreshCount();
     const timer = setInterval(() => {
-      // Hidden tabs do not poll (Phase 12, F-12-08): ambient load should
-      // scale with visible tabs, not with every tab ever opened.
-      if (document.visibilityState === 'visible') void refreshCount();
+      // Hidden or unattended tabs do not poll (Phase 12 F-12-08, WP-W):
+      // ambient load should scale with people using the app, not with
+      // every tab left open.
+      if (canPoll()) void refreshCount();
     }, POLL_INTERVAL_MS);
     const onVisibilityChange = () => {
       // Returning to the tab refreshes immediately instead of waiting out
       // the remainder of the interval with a stale count.
-      if (document.visibilityState === 'visible') void refreshCount();
+      if (document.visibilityState === 'visible') {
+        lastActivityAt = Date.now();
+        void refreshCount();
+      }
+    };
+    const onActivity = () => {
+      const wasIdle = !canPoll();
+      lastActivityAt = Date.now();
+      // Back from an idle spell: refresh now rather than at the next tick.
+      if (wasIdle && document.visibilityState === 'visible') void refreshCount();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
+    for (const event of ACTIVITY_EVENTS) {
+      window.addEventListener(event, onActivity, { passive: true });
+    }
     return () => {
       mounted.current = false;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      for (const event of ACTIVITY_EVENTS) window.removeEventListener(event, onActivity);
     };
   }, [refreshCount]);
 

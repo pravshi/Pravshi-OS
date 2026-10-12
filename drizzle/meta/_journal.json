@@ -489,6 +489,14 @@
       "tag": "0065_db_maintenance",
       "breakpoints": true,
       "hash": "83feafe58f56f8a2ee609d7b029739ba0d872265df6c0d155d8525263df4c69d"
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1791581728057,
+      "tag": "0066_worker_next_due",
+      "breakpoints": true,
+      "hash": "d0fe49560379f960ef2c5994371074007af36dfbfb28f0129c4afaaa2e9dbac6"
     }
   ]
 }
