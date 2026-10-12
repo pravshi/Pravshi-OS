@@ -5,12 +5,13 @@
 
 ## Credential separation — the most important rule in this file
 
-| Variable                 | Role        | Endpoint | Permitted to live in                                             |
-| ------------------------ | ----------- | -------- | ---------------------------------------------------------------- |
-| `DATABASE_URL`           | `app_user`  | pooled   | Vercel (all envs, when it exists) + local                        |
-| `DATABASE_URL_MIGRATE`   | `app_owner` | direct   | GitHub Actions and local machines ONLY                           |
-| `DATABASE_URL_TEST`      | `app_user`  | pooled   | GitHub Actions and local machines ONLY                           |
-| `DATABASE_URL_BOOTSTRAP` | `app_admin` | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions |
+| Variable                 | Role         | Endpoint | Permitted to live in                                             |
+| ------------------------ | ------------ | -------- | ---------------------------------------------------------------- |
+| `DATABASE_URL`           | `app_user`   | pooled   | Vercel (all envs, when it exists) + local                        |
+| `DATABASE_URL_MIGRATE`   | `app_owner`  | direct   | GitHub Actions and local machines ONLY                           |
+| `DATABASE_URL_TEST`      | `app_user`   | pooled   | GitHub Actions and local machines ONLY                           |
+| `DATABASE_URL_WORKER`    | `app_worker` | pooled   | The worker host (Railway) + local — NEVER Vercel                 |
+| `DATABASE_URL_BOOTSTRAP` | `app_admin`  | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions |
 
 **`DATABASE_URL_BOOTSTRAP` must never leave the operator's machine.** It connects as
 `app_admin`, whose one capability is creating the first SUPER_ADMIN — once per database, see
@@ -18,6 +19,14 @@
 migrations nor the test suite needs it. `src/env.ts` refuses to boot in production with it
 present, and `scripts/guards/workflow-secret-flow.mjs` fails CI if any workflow so much as names
 it or runs `scripts/bootstrap/` — from any source, not only from a secret.
+
+**`DATABASE_URL_WORKER` belongs on the worker host only.** It connects as `app_worker`
+(migration 0070), the only role that can claim jobs, run retries, reaping, reminders,
+scheduler ticks and maintenance, read protected email content and resolve webhook signing
+secrets — for every organization. The web app never needs it: `src/env.ts` refuses to load
+when it is present on Vercel (`VERCEL` set), builds included, and the worker refuses to start
+without it or when it authenticates as any other role. CI creates a per-run `app_worker`
+password for its disposable database, exactly as for `app_user`.
 
 **`DATABASE_URL_MIGRATE` must never be added to Vercel.** It uses `app_owner`, which owns the
 schema and is precisely what RLS does not constrain. A deployed application holding that
@@ -45,6 +54,7 @@ absolute everywhere else. Both halves are pinned by tests in `tests/env.test.ts`
 | `DATABASE_URL`           | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL  |
 | `DATABASE_URL_MIGRATE`   | tooling   | Must **not** contain `-pooler`; migrations need one real session       |
 | `DATABASE_URL_TEST`      | tooling   | Integration tests. Point at your own branch, never `production`        |
+| `DATABASE_URL_WORKER`    | worker    | `app_worker`, pooled. Required by `pnpm worker`; never on Vercel       |
 | `DATABASE_URL_BOOTSTRAP` | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs` |
 
 ### First-run bootstrap — operator machine only

@@ -243,14 +243,35 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
     };
   };
 
+  /**
+   * Run the handler the way the worker does: on a job it HOLDS — running under its claim, the
+   * state jobs_claim_next + jobs_start leave it in (0070 binds the handler's writes to that
+   * claim). A fabricated job is inserted in that state; afterwards the job is finished as the
+   * worker would finish it.
+   */
   const runNotificationJob = async (job: Job): Promise<void> => {
+    const workerId = 'integration-worker';
+    await owner.query(
+      `insert into public.jobs (id, org_id, type, status, payload, claimed_by, claimed_at, heartbeat_at, next_run_at)
+       values ($1, $2, 'notification', 'running', $3::jsonb, $4, now(), now(), now())
+       on conflict (id) do update
+         set status = 'running', claimed_by = excluded.claimed_by,
+             claimed_at = now(), heartbeat_at = now(), updated_at = now()`,
+      [job.id, job.orgId, JSON.stringify(job.payload), workerId],
+    );
     const auth = worker!.buildJobAuthorization(job);
-    await handlers!.handleNotification({
-      job,
-      auth,
-      signal: new AbortController().signal,
-      workerId: 'test-worker',
-    });
+    try {
+      await handlers!.handleNotification({
+        job,
+        auth,
+        signal: new AbortController().signal,
+        workerId,
+      });
+      await owner.query(`update public.jobs set status = 'succeeded' where id = $1`, [job.id]);
+    } catch (error) {
+      await owner.query(`update public.jobs set status = 'dead_letter' where id = $1`, [job.id]);
+      throw error;
+    }
   };
 
   const drainJob = async (jobId: string): Promise<void> => {

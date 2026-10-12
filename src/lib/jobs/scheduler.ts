@@ -29,7 +29,7 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAuthorizedDb, type Tx } from '../db/authorized';
-import { connectWithWake } from '../db/pool';
+import { connectWorkerWithWake } from '../db/worker-pool';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { cronWindowStart, isValidCron, isValidTimezone, nextRunAt } from './cron';
@@ -60,7 +60,7 @@ async function requireSchedulePermission(auth: Authorization, permission: string
 /** Worker-plane transaction: pooled connection, no per-request identity
  *  (there is no user on the tick path — see header note). */
 async function withSchedulerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const client = await connectWithWake();
+  const client = await connectWorkerWithWake();
   try {
     const db = drizzle(client);
     return await db.transaction(fn);

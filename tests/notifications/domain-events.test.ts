@@ -282,6 +282,12 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
       [orgId],
     );
     for (const row of rows) {
+      // Held as the worker holds it (claim + start): 0070 binds the handler's writes to it.
+      await owner(
+        `update public.jobs set status = 'running', claimed_by = 'test-worker',
+                claimed_at = now(), heartbeat_at = now() where id = $1`,
+        [row.id],
+      );
       const job = await loadJob(row.id);
       const auth = buildJobAuthorization(job);
       await handleNotification({
@@ -290,6 +296,7 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
         signal: new AbortController().signal,
         workerId: 'test-worker',
       });
+      await owner(`update public.jobs set status = 'succeeded' where id = $1`, [row.id]);
     }
   }
 

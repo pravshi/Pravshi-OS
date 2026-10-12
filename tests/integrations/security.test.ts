@@ -1149,10 +1149,30 @@ describe.skipIf(!HAS_DB)('integrations security (§4.7) — isolation, authoriza
     const aliceManage = await authFor(aliceAcct, 'integrations.manage');
 
     // Exactly the worker's resolution path (jobs/handlers.ts
-    // resolveSubscriptionSigningSecret): the 0059 definer under an
-    // authorized context, then the vault decrypt.
+    // resolveSubscriptionSigningSecret): the 0059 definer on the app_worker
+    // connection (0070) under the system actor bound to the job's org, then
+    // the vault decrypt.
+    const { withWorkerContext } = await import('@/lib/db/worker-pool');
+    // The webhook job the worker holds while resolving (0070 binds the lookup to it): a
+    // running job of org A under this test's worker id, far in the future so nothing else
+    // claims, sweeps or reaps it.
+    const heldWorker = `r1-worker-${RUN}`;
+    const heldJob = (
+      await owner.query<{ id: string }>(
+        `insert into public.jobs (org_id, type, status, payload, next_run_at, claimed_by, claimed_at, heartbeat_at)
+         values ($1, 'webhook', 'running', '{}'::jsonb, now() + interval '30 days', $2, now(), now() + interval '30 days')
+         returning id`,
+        [orgA, heldWorker],
+      )
+    ).rows[0]!.id;
     const resolveSecret = async (): Promise<string | null> => {
-      const rows = await authorized!.withAuthorizedDb(aliceManage.ctx, async (tx) => {
+      const workerCtx = {
+        personId: '00000000-0000-4000-8000-000000000000',
+        orgId: orgA,
+        aal: 'aal1' as const,
+      };
+      const item = { kind: 'job' as const, id: heldJob, workerId: heldWorker };
+      const rows = await withWorkerContext(workerCtx, item, async (tx) => {
         const res = await tx.execute<{ signing_secret_ciphertext: string | null }>(sql`
           select r.signing_secret_ciphertext
           from public.integration_webhook_resolve_delivery(${orgA}::uuid, ${subA}::uuid) r

@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0069; project records indicate the `production` Neon branch stopped at 0044 (October
+  0070; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -198,7 +198,16 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   range, `>=22.12`) **before** `.nvmrc`, so without the pin it may pick a newer major.
 - **Environment:** parity with the web app. Required — validated at boot, and the process
   refuses to start without them: `DATABASE_URL` (the **pooled** endpoint; the host
-  contains `-pooler.`), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`. (`HEALTH_CHECK_TOKEN`
+  contains `-pooler.`), `DATABASE_URL_WORKER` (pooled, role **`app_worker`**, migration
+  0070 — the worker checks at start that it authenticates as `app_worker` and exits
+  otherwise), `APP_URL`, `NODE_ENV`, `BETTER_AUTH_SECRET`. `DATABASE_URL_WORKER` is the
+  one variable the worker holds that the web app must not: every worker-plane operation
+  (claims, retries, reaping, reminders, scheduler ticks, maintenance, protected email content,
+  webhook signing secrets) is executable by `app_worker` only, and `src/env.ts` refuses it on
+  Vercel. Workflow actions still run as their real person over `DATABASE_URL`.
+  **Order with migration 0070:** create the role first (`scripts/db/roles.sql`, then its
+  password), then deploy the worker and apply 0070 in either order — whichever lands first,
+  claims are refused until both are in place and queued work waits; nothing is lost. (`HEALTH_CHECK_TOKEN`
   is optional in `src/env.ts` — unset means `/health/db` denies everyone; set it on the
   web app, and the worker does not depend on it.) Because the worker executes the email, webhook and AI handlers, it also needs the web
   app's integration and AI variables (`INTEGRATIONS_ENCRYPTION_KEY`, the email provider

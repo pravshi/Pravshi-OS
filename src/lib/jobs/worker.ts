@@ -65,7 +65,7 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWithWake } from '../db/pool';
+import { connectWorkerWithWake } from '../db/worker-pool';
 import type { Tx } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from './queue';
@@ -246,7 +246,7 @@ export function buildJobAuthorization(job: Job): Authorization {
 // ── Worker-plane DB (no per-request identity; same model as queue.ts) ─────────
 
 async function withWorkerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const client = await connectWithWake();
+  const client = await connectWorkerWithWake();
   try {
     const db = drizzle(client);
     return await db.transaction(fn);

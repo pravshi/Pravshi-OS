@@ -30,6 +30,14 @@ describe('there is exactly one path to Postgres', () => {
     ).toBe('');
   });
 
+  it('only the worker plane (src/lib/jobs) uses the app_worker pool', () => {
+    // worker-pool.ts connects as app_worker (migration 0070): the role that can claim every
+    // organization's jobs. Only the job runtime may reach it — never a route, a page or
+    // feature code — and the web app does not even hold its credential (src/env.ts).
+    const hits = grep(`-lE "db/worker-pool'" -- src ":!src/lib/jobs/*" ":!src/lib/db/*"`);
+    expect(hits, `app_worker pool imported outside the worker plane, in:\n${hits}`).toBe('');
+  });
+
   it('no feature code queries the credential tables by hand', () => {
     const hits = grep(
       `-lE "auth[.]auth_(users|sessions|accounts|verifications)" -- src ":!src/lib/auth/*"`,

@@ -41,6 +41,8 @@ type Ctx = { personId?: string | null; orgId?: string | null };
 describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const appUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The worker's own login (0070): worker-plane functions belong to it alone.
+  const appWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
 
   let orgA = '';
   let orgB = '';
@@ -141,21 +143,27 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
   afterAll(async () => {
     await owner.end();
     await appUser.end();
+    await appWorker.end();
   });
 
-  /** One committed transaction as app_user, carrying exactly the identity given. */
+  /** One committed transaction as app_user (or the given pool), carrying exactly the identity given. */
   async function asUser<T extends Record<string, unknown> = Record<string, unknown>>(
     ctx: Ctx,
     text: string,
     params: unknown[] = [],
+    pool: Pool = appUser,
+    extra: Record<string, string> = {},
   ): Promise<T[]> {
-    const c = await appUser.connect();
+    const c = await pool.connect();
     try {
       await c.query('begin');
       await c.query(
         `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
         [ctx.personId ?? '', ctx.orgId ?? ''],
       );
+      for (const [name, value] of Object.entries(extra)) {
+        await c.query(`select set_config($1, $2, true)`, [name, value]);
+      }
       const result = await c.query<T>(text, params);
       await c.query('commit');
       return result.rows;
@@ -192,10 +200,18 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
       ).toBe('42501');
     });
 
-    it('still claims on the worker plane (no identity) — see the lifecycle block for the claim itself', async () => {
+    it('app_user cannot claim at all, even with no identity (0070: the worker role only)', async () => {
+      expect(
+        await sqlstateOf(
+          asUser({}, `select id from public.jobs_claim_next('elev', array['cleanup'])`),
+        ),
+      ).toBe('42501');
+    });
+
+    it('still claims on the worker plane (app_worker, no identity) — see the lifecycle block for the claim itself', async () => {
       // Identity-less call reaches the claim (no 42501). Inside a rolled-back
       // transaction so nothing another suite queued is consumed.
-      const c = await appUser.connect();
+      const c = await appWorker.connect();
       try {
         await c.query('begin');
         await expect(
@@ -210,13 +226,38 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
 
   // ── PART 2: integration_webhook_resolve_delivery ────────────────────────
   describe('integration_webhook_resolve_delivery', () => {
-    const resolve = (ctx: Ctx, org: string, sub: string) =>
+    // The worker resolves secrets (0070: app_worker only, bound to the webhook job it
+    // holds — org A's here); the context-kind assertion (0068) still applies.
+    const ELEV_WORKER = `elev-webhook-worker-${RUN}`;
+    let heldWebhookA = '';
+    beforeAll(async () => {
+      heldWebhookA = (
+        await owner.query<{ id: string }>(
+          `insert into public.jobs (org_id, type, status, payload, next_run_at, claimed_by, claimed_at, heartbeat_at)
+           values ($1, 'webhook', 'running', '{}'::jsonb, now() + interval '30 days', $2, now(), now() + interval '30 days')
+           returning id`,
+          [orgA, ELEV_WORKER],
+        )
+      ).rows[0]!.id;
+    });
+    const resolve = (ctx: Ctx, org: string, sub: string, pool: Pool = appWorker) =>
       asUser<{ is_active: boolean; signing_secret_ciphertext: string }>(
         ctx,
         `select is_active, signing_secret_ciphertext
            from public.integration_webhook_resolve_delivery($1::uuid, $2::uuid)`,
         [org, sub],
+        pool,
+        { 'app.work_kind': 'job', 'app.work_id': heldWebhookA, 'app.worker_id': ELEV_WORKER },
       );
+
+    it('app_user cannot resolve a secret in any context — not even its own org (0070)', async () => {
+      expect(await sqlstateOf(resolve({ personId: alice, orgId: orgA }, orgA, subA, appUser))).toBe(
+        '42501',
+      );
+      expect(
+        await sqlstateOf(resolve({ personId: SYSTEM_ACTOR, orgId: orgA }, orgA, subA, appUser)),
+      ).toBe('42501');
+    });
 
     it('answers its own organization — person context and worker (system-actor) context', async () => {
       expect(await resolve({ personId: alice, orgId: orgA }, orgA, subA)).toEqual([
@@ -230,8 +271,11 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
     it('refuses another organization in every context kind', async () => {
       // A person naming another org.
       expect(await sqlstateOf(resolve({ personId: alice, orgId: orgA }, orgB, subB))).toBe('42501');
-      // The worker bound to org A naming org B.
+      // The worker holding org A's webhook job naming org B — with app.org_id saying A or B.
       expect(await sqlstateOf(resolve({ personId: SYSTEM_ACTOR, orgId: orgA }, orgB, subB))).toBe(
+        '42501',
+      );
+      expect(await sqlstateOf(resolve({ personId: SYSTEM_ACTOR, orgId: orgB }, orgB, subB))).toBe(
         '42501',
       );
       // No identity at all.
@@ -617,6 +661,15 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
 
   // ── PART 9: catalogue ───────────────────────────────────────────────────
   it('every function in scope is SECURITY DEFINER, search_path pinned, owned by app_owner, not PUBLIC', async () => {
+    const NOT_APP_USER = new Set([
+      'authz.next_identity_code(uuid,text,text)',
+      'public.jobs_claim_next(text,text[])',
+      'public.integration_webhook_resolve_delivery(uuid,uuid)',
+      'public.scheduler_tick_claim(timestamptz)',
+      'public.claim_due_task_reminders(integer)',
+      'public.jobs_sweep_retryable(integer)',
+      'public.worker_next_due_at()',
+    ]);
     const sigs = [
       'public.jobs_claim_next(text,text[])',
       'public.integration_webhook_resolve_delivery(uuid,uuid)',
@@ -654,7 +707,9 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
       expect(r.config, r.sig).toContain('search_path=""');
       expect(r.owner_name, r.sig).toBe('app_owner');
       expect(r.public_exec, r.sig).toBe(false);
-      expect(r.user_exec, r.sig).toBe(r.sig !== 'authz.next_identity_code(uuid,text,text)');
+      // 0070: worker-plane functions belong to app_worker alone; the organization-taking
+      // identity-code generator is not app_user's either (0068).
+      expect(r.user_exec, r.sig).toBe(!NOT_APP_USER.has(r.sig));
     }
   });
 });

@@ -37,6 +37,8 @@ import {
 describe.skipIf(!DB_READY)('database maintenance (live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const appUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The worker's own login (0070): the only role that may run maintenance.
+  const appWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
   let orgId = '';
   let personId = '';
 
@@ -56,6 +58,7 @@ describe.skipIf(!DB_READY)('database maintenance (live DB)', () => {
     // database is discarded after the run) — the reaper-live.test.ts pattern.
     await owner.end();
     await appUser.end();
+    await appWorker.end();
   });
 
   const exists = async (table: string, id: string) =>
@@ -92,28 +95,41 @@ describe.skipIf(!DB_READY)('database maintenance (live DB)', () => {
   // ── Worker-plane only ─────────────────────────────────────────────────────
 
   describe('who may call', () => {
-    it('refuses a signed-in person context with 42501 (both functions)', async () => {
+    it('refuses a signed-in person context with 42501 (both functions, either role)', async () => {
       const ctx = { personId, orgId };
-      expect(
-        await sqlstateOf(
-          inContext(appUser, ctx, `select * from public.maintain_audit_log_partitions()`),
-        ),
-      ).toBe('42501');
-      expect(
-        await sqlstateOf(inContext(appUser, ctx, `select * from public.run_data_retention(10)`)),
-      ).toBe('42501');
+      for (const pool of [appUser, appWorker]) {
+        expect(
+          await sqlstateOf(
+            inContext(pool, ctx, `select * from public.maintain_audit_log_partitions()`),
+          ),
+        ).toBe('42501');
+        expect(
+          await sqlstateOf(inContext(pool, ctx, `select * from public.run_data_retention(10)`)),
+        ).toBe('42501');
+      }
     });
 
-    it('runs for app_user with no identity set — the worker plane', async () => {
-      const rows = await inContext(appUser, {}, `select * from public.run_data_retention(1)`);
+    it('runs for app_worker with no identity set — the worker plane', async () => {
+      const rows = await inContext(appWorker, {}, `select * from public.run_data_retention(1)`);
       expect(rows.length).toBe(12);
+    });
+
+    it('refuses app_user even with no identity set (0070: worker role only)', async () => {
+      expect(
+        await sqlstateOf(inContext(appUser, {}, `select * from public.run_data_retention(1)`)),
+      ).toBe('42501');
+      expect(
+        await sqlstateOf(
+          inContext(appUser, {}, `select * from public.maintain_audit_log_partitions()`),
+        ),
+      ).toBe('42501');
     });
 
     it('rejects an out-of-range batch limit (22023)', async () => {
       for (const bad of [0, 10001]) {
         expect(
           await sqlstateOf(
-            inContext(appUser, {}, `select * from public.run_data_retention($1)`, [bad]),
+            inContext(appWorker, {}, `select * from public.run_data_retention($1)`, [bad]),
           ),
         ).toBe('22023');
       }

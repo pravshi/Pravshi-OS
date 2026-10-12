@@ -377,6 +377,10 @@ describe('handleScheduledTrigger — 0048 execution bridge (mocked)', () => {
 describe.skipIf(!DB_READY)('workflow_execute_as_job() — 0048 verification matrix (live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const appUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The worker's own login (0070): the principal is resolved by it alone, for a job
+  // running under the asking worker's claim.
+  const appWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
+  const WORKER_ID = `wexec-worker-${RUN}`;
 
   let org = '';
   let person = '';
@@ -391,16 +395,19 @@ describe.skipIf(!DB_READY)('workflow_execute_as_job() — 0048 verification matr
     enqueuedBy?: string | null;
     payload?: Record<string, unknown>;
   }): Promise<string> {
+    // A running job is held by a worker: claimed under WORKER_ID (jobs_start's state).
+    const status = o.status ?? 'running';
     const { rows } = await owner.query<{ id: string }>(
-      `insert into public.jobs (org_id, type, status, payload, enqueued_by)
-       values ($1, $2, $3, $4::jsonb, $5::uuid)
+      `insert into public.jobs (org_id, type, status, payload, enqueued_by, claimed_by, claimed_at)
+       values ($1, $2, $3, $4::jsonb, $5::uuid, $6, case when $6::text is null then null else now() end)
        returning id`,
       [
         o.orgId,
         o.type,
-        o.status ?? 'running',
+        status,
         JSON.stringify(o.payload ?? {}),
         o.enqueuedBy ?? null,
+        status === 'running' || status === 'claimed' ? WORKER_ID : null,
       ],
     );
     return rows[0]!.id;
@@ -408,11 +415,12 @@ describe.skipIf(!DB_READY)('workflow_execute_as_job() — 0048 verification matr
 
   async function bridge(
     jobId: string,
-    pool: Pool = owner,
+    pool: Pool = appWorker,
+    workerId: string = WORKER_ID,
   ): Promise<{ org_id: string; person_id: string }> {
     const { rows } = await pool.query<{ org_id: string; person_id: string }>(
-      `select org_id, person_id from public.workflow_execute_as_job($1::uuid)`,
-      [jobId],
+      `select org_id, person_id from public.workflow_execute_as_job($1::uuid, $2)`,
+      [jobId, workerId],
     );
     return rows[0]!;
   }
@@ -428,6 +436,7 @@ describe.skipIf(!DB_READY)('workflow_execute_as_job() — 0048 verification matr
   afterAll(async () => {
     await owner.end();
     await appUser.end();
+    await appWorker.end();
   });
 
   it('returns the verified principal for a running workflow_run job', async () => {
@@ -540,10 +549,21 @@ describe.skipIf(!DB_READY)('workflow_execute_as_job() — 0048 verification matr
     expect(await sqlstateOf(bridge(jobId))).toBe('22023');
   });
 
-  it('is executable by app_user (grant check)', async () => {
+  it('answers only app_worker, and only for the worker holding the claim (0070)', async () => {
     const jobId = await insertJob({ orgId: org, type: 'workflow_run', enqueuedBy: person });
-    const row = await bridge(jobId, appUser);
-    expect(row.person_id).toBe(person);
+    // The holder, on the worker login: answered.
+    expect((await bridge(jobId)).person_id).toBe(person);
+    // Another worker id: the job is not held by it.
+    expect(await sqlstateOf(bridge(jobId, appWorker, `someone-else-${RUN}`))).toBe('42501');
+    // app_user: not executable at all.
+    expect(await sqlstateOf(bridge(jobId, appUser))).toBe('42501');
+    // Even the owner login is not the worker (session_user check inside the definer).
+    expect(await sqlstateOf(bridge(jobId, owner))).toBe('42501');
+    // The unbound 1-argument form is gone.
+    const old = await owner.query<{ p: string | null }>(
+      `select to_regprocedure('public.workflow_execute_as_job(uuid)')::text p`,
+    );
+    expect(old.rows[0]!.p).toBeNull();
   });
 
   it('stamps enqueued_by from app.person_id on insert (trigger)', async () => {

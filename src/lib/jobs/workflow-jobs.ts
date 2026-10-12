@@ -169,9 +169,10 @@ type ExecutionPrincipal = {
 
 /**
  * Resolves the job's execution Authorization through the 0048 SECURITY
- * DEFINER `workflow_execute_as_job(p_job_id)`, called on the worker plane
- * (withQueueDb — no ambient identity; the definer verifies everything from
- * the job row, so the caller identity is irrelevant).
+ * DEFINER `workflow_execute_as_job(p_job_id, p_worker_id)`, called on the
+ * worker plane (withQueueDb — the app_worker connection, no ambient identity;
+ * the definer verifies everything from the job row). Since 0070 the job must be
+ * running under THIS worker's claim, and only app_worker may ask.
  *
  * The definer asserts type IN ('workflow_run','scheduled_trigger') and
  * status = 'running' (reachable only through the claimed_by-checked
@@ -195,13 +196,13 @@ type ExecutionPrincipal = {
  * department/team slice) is the correct breadth for background workflow
  * execution.
  */
-async function resolveJobExecutionAuth(job: Job): Promise<Authorization> {
+async function resolveJobExecutionAuth(job: Job, workerId: string): Promise<Authorization> {
   let principal: ExecutionPrincipal;
   try {
     const result = await withQueueDb((tx) =>
       tx.execute<{ org_id: string; person_id: string }>(sql`
         select org_id, person_id
-        from public.workflow_execute_as_job(${job.id}::uuid)
+        from public.workflow_execute_as_job(${job.id}::uuid, ${workerId})
       `),
     );
     const row = result.rows[0];
@@ -309,7 +310,7 @@ export async function handleWorkflowRun(ctx: JobExecutionContext): Promise<void>
 
   // The job is the authority: run Phase 5 under the verified execution
   // principal (0048), not the system actor.
-  const auth = await resolveJobExecutionAuth(job);
+  const auth = await resolveJobExecutionAuth(job, ctx.workerId);
 
   if (eventInput !== undefined) {
     // Bypass the dispatcher: the worker IS the background execution path.
@@ -356,7 +357,7 @@ export async function handleWorkflowRun(ctx: JobExecutionContext): Promise<void>
 export async function handleScheduledTrigger(ctx: JobExecutionContext): Promise<void> {
   const { job } = ctx;
   const payload = ScheduledTriggerJobPayloadSchema.parse(job.payload);
-  const auth = await resolveJobExecutionAuth(job);
+  const auth = await resolveJobExecutionAuth(job, ctx.workerId);
 
   const rows = await withAuthorizedDb(auth.ctx, (tx) =>
     tx.execute<ScheduleRow>(sql`
