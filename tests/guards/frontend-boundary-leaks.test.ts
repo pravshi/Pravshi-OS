@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { posix } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -31,10 +31,16 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 
+/**
+ * Paths are built with POSIX separators on every platform: the filters below
+ * match on '/error.tsx' etc., and path.join yields backslashes on Windows, where
+ * the walk then matched nothing and every check below silently passed over an
+ * empty list (the sanity test is what caught it).
+ */
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
+    const path = posix.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...walk(path));
     else out.push(path);
   }

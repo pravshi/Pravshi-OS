@@ -27,6 +27,9 @@ export interface IdentityCodeInput {
  * The counter table itself is unreachable: no application role holds privileges on it,
  * and RLS denies it besides. `authz.next_identity_code()` is the only writer, and it is
  * atomic under concurrency, so two simultaneous callers can never receive the same code.
+ * The runtime role reaches it only through `authz.next_identity_code_for_current_org()`
+ * (0068), which takes no organization: the database derives it from the transaction
+ * identity, so even a caller that bypasses this function cannot name another org.
  *
  * Validation is duplicated here and in SQL deliberately. This copy gives a fast, typed
  * failure at the call site; the SQL copy is the one that actually protects the table,
@@ -46,7 +49,7 @@ export async function nextIdentityCode(
 
   return withAuthorizedDb(ctx, async (tx) => {
     const result = await tx.execute<{ code: string }>(
-      sql`select authz.next_identity_code(${ctx.orgId}::uuid, ${codeType}, ${resolvedPeriod}) as code`,
+      sql`select authz.next_identity_code_for_current_org(${codeType}, ${resolvedPeriod}) as code`,
     );
     const code = result.rows[0]?.code;
     if (typeof code !== 'string') {

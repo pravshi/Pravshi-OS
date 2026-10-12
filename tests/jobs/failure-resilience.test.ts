@@ -919,50 +919,63 @@ describe.skipIf(!dbReady)('failure resilience (live DB)', () => {
   it('the real reaper function reaps only stale claimed/running jobs', async () => {
     const staleAt = new Date(Date.now() - 10 * 60_000).toISOString();
     const freshAt = new Date().toISOString();
-    const ins = await owner.query<{ id: string; status: string }>(
-      `insert into public.jobs
-         (org_id, type, status, payload, claimed_by, claimed_at, heartbeat_at)
-       values
-         ($1::uuid, 'email', 'claimed', '{}'::jsonb, 'w-old', now(), $2::timestamptz),
-         ($1::uuid, 'email', 'running', '{}'::jsonb, 'w-fresh', now(), $3::timestamptz),
-         ($1::uuid, 'email', 'pending', '{}'::jsonb, null, null, $2::timestamptz)
-       returning id, status`,
-      [orgId, staleAt, freshAt],
-    );
-    const [staleClaimed, freshRunning, pendingStale] = ins.rows;
+    // One transaction for insert → reap → read: the rows are invisible to every
+    // other session until COMMIT, so no other suite's reaper (the function is
+    // global) can reap them first and leave this call a count of 0. The
+    // concurrency contract itself — each stale row reaped exactly once, by
+    // whichever caller gets it — is what makes that race possible in parallel runs.
+    const client = await owner.connect();
+    try {
+      await client.query('begin');
+      const ins = await client.query<{ id: string; status: string }>(
+        `insert into public.jobs
+           (org_id, type, status, payload, claimed_by, claimed_at, heartbeat_at)
+         values
+           ($1::uuid, 'email', 'claimed', '{}'::jsonb, 'w-old', now(), $2::timestamptz),
+           ($1::uuid, 'email', 'running', '{}'::jsonb, 'w-fresh', now(), $3::timestamptz),
+           ($1::uuid, 'email', 'pending', '{}'::jsonb, null, null, $2::timestamptz)
+         returning id, status`,
+        [orgId, staleAt, freshAt],
+      );
+      const [staleClaimed, freshRunning, pendingStale] = ins.rows;
 
-    // The REAL worker-plane path: SECURITY DEFINER public.jobs_reap_stale
-    // (migration 0049), exactly as reapStaleJobs() calls it. The count is
-    // cross-org by design, so assert >= 1 and pin this org's rows exactly.
-    const { rows: fnRows } = await owner.query<{ jobs_reap_stale: string }>(
-      `select public.jobs_reap_stale(60000)::text as jobs_reap_stale`,
-    );
-    expect(Number(fnRows[0]!.jobs_reap_stale)).toBeGreaterThanOrEqual(1);
+      // The REAL worker-plane path: SECURITY DEFINER public.jobs_reap_stale
+      // (migration 0049), exactly as reapStaleJobs() calls it. The count is
+      // cross-org by design, so assert >= 1 and pin this org's rows exactly.
+      const { rows: fnRows } = await client.query<{ jobs_reap_stale: string }>(
+        `select public.jobs_reap_stale(60000)::text as jobs_reap_stale`,
+      );
+      expect(Number(fnRows[0]!.jobs_reap_stale)).toBeGreaterThanOrEqual(1);
 
-    const { rows } = await owner.query<{
-      id: string;
-      status: string;
-      attempts: string;
-      error_code: string | null;
-      claimed_by: string | null;
-    }>(
-      `select id, status, attempts::text, error_code, claimed_by
-         from public.jobs where org_id = $1::uuid`,
-      [orgId],
-    );
-    const byId = new Map(rows.map((r) => [r.id, r]));
+      const { rows } = await client.query<{
+        id: string;
+        status: string;
+        attempts: string;
+        error_code: string | null;
+        claimed_by: string | null;
+      }>(
+        `select id, status, attempts::text, error_code, claimed_by
+           from public.jobs where org_id = $1::uuid`,
+        [orgId],
+      );
+      await client.query('commit');
+      const byId = new Map(rows.map((r) => [r.id, r]));
 
-    const reaped = byId.get(staleClaimed!.id)!;
-    expect(reaped.status).toBe('pending');
-    expect(Number(reaped.attempts)).toBe(1); // the abandoned attempt counts
-    expect(reaped.error_code).toBe('STALE_CLAIM');
-    expect(reaped.claimed_by).toBeNull();
+      const reaped = byId.get(staleClaimed!.id)!;
+      expect(reaped.status).toBe('pending');
+      expect(Number(reaped.attempts)).toBe(1); // the abandoned attempt counts
+      expect(reaped.error_code).toBe('STALE_CLAIM');
+      expect(reaped.claimed_by).toBeNull();
 
-    const fresh = byId.get(freshRunning!.id)!;
-    expect(fresh.status).toBe('running'); // fresh heartbeat: untouched
+      const fresh = byId.get(freshRunning!.id)!;
+      expect(fresh.status).toBe('running'); // fresh heartbeat: untouched
 
-    const pend = byId.get(pendingStale!.id)!;
-    expect(pend.status).toBe('pending'); // wrong status: untouched
-    expect(pend.error_code).toBeNull();
+      const pend = byId.get(pendingStale!.id)!;
+      expect(pend.status).toBe('pending'); // wrong status: untouched
+      expect(pend.error_code).toBeNull();
+    } finally {
+      await client.query('rollback').catch(() => undefined);
+      client.release();
+    }
   });
 });

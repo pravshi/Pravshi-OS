@@ -462,7 +462,20 @@ async function seedOrg(client: PoolClient, orgIndex: 0 | 1, orgId: string, count
   );
 }
 
-/** Audit rows need partitions for the months they land in (last 30 days). */
+/**
+ * Audit rows need partitions for the months they land in (last 30 days).
+ *
+ * Runs in its OWN short transaction, committed before the seed transaction
+ * begins (see ensurePerfDataset). Creating a partition of audit_logs takes an
+ * ACCESS EXCLUSIVE lock on audit_logs and — because the partition inherits
+ * audit_logs' foreign keys — a SHARE ROW EXCLUSIVE lock on people and
+ * organizations, which conflicts with every INSERT/UPDATE on them. Held for
+ * the length of the seed transaction, those locks stalled every concurrent
+ * suite that created an organization or a person, or wrote an audit entry,
+ * until the seed committed. Partitions are idempotent infrastructure (the
+ * maintenance function creates the same ones), so committing them early
+ * leaves nothing half-seeded behind.
+ */
 async function ensureAuditPartitions(client: PoolClient) {
   // The maintenance function ensures the current month forward.
   await client.query(`select public.ensure_audit_log_partitions(2)`);
@@ -492,8 +505,13 @@ async function ensureAuditPartitions(client: PoolClient) {
 
 async function seedAuditRows(client: PoolClient, orgIndex: 0 | 1, orgId: string, n: number) {
   await client.query(
-    `insert into public.audit_logs (id, org_id, occurred_at, action, entity_type, result)
+    // Every entry carries a real actor (one of the org's seeded people): the audit
+    // log never holds an actor-less entry outside this harness, and the suites that
+    // pin that invariant database-wide (audit-triggers, bootstrap) must not see
+    // 400,000 of them depending on which file happened to run first.
+    `insert into public.audit_logs (id, org_id, actor_person_id, occurred_at, action, entity_type, result)
      select ${idSql('audit', orgIndex, 'g.i')}, $1,
+            ${idSql('person', orgIndex, `1 + (g.i % ${PERF_PEOPLE_PER_ORG})`)},
             now() - make_interval(days => g.i % 30, hours => g.i % 24),
             'perf.seeded', 'deal', 'SUCCESS'::public.audit_result
        from generate_series(1, $2::int) as g(i)`,
@@ -604,6 +622,18 @@ function verifyExisting(actual: PerfCounts, orgSlug: string): number {
 export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
   const client = await owner.connect();
   try {
+    // Partitions first, in a short transaction of their own under the same
+    // advisory lock (see ensureAuditPartitions for why not inside the seed).
+    await client.query('begin');
+    try {
+      await client.query(`select pg_advisory_xact_lock(hashtext('pravshi-perf-seed-v1')::bigint)`);
+      await ensureAuditPartitions(client);
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    }
+
     await client.query('begin');
     try {
       // Transaction-scoped: released by COMMIT/ROLLBACK, so a holder that
@@ -645,7 +675,6 @@ export async function ensurePerfDataset(scale = 1): Promise<PerfDataset> {
         );
         orgIds.push(org.rows[0]!.id);
       }
-      await ensureAuditPartitions(client);
       for (const orgIndex of [0, 1] as const) {
         await seedOrg(client, orgIndex, orgIds[orgIndex]!, counts);
         await seedAuditRows(client, orgIndex, orgIds[orgIndex]!, counts.auditLogs);

@@ -217,11 +217,40 @@ What each role can *see at all*, independent of the action:
 | **T-18** | Credential stuffing / brute force | **Medium** | Rate limiting on login and reset; 12-char minimum; breach-list check; lockout with alerting; optional Google OAuth later | Test: repeated failures → limited, audited |
 | **T-19** | Supply-chain compromise via a dependency | **Medium** | Dependabot; `npm audit` in CI; lockfile committed; minimal dependency count | CI gate |
 | **T-20** | Founder account loss (lost phone, no recovery) | **Medium** | Two SUPER_ADMIN accounts; MFA recovery codes stored offline; documented break-glass procedure | Documented in INCIDENT-RESPONSE.md; drill once |
+| **T-22** | Cross-tenant action through an elevated (SECURITY DEFINER) function — a caller names another organization's id, or a tenant request reaches a worker-only function | **High** | Every definer that accepts an organization or record id checks it against the transaction identity and raises `42501` (migrations 0061, 0068); worker-only claims refuse a person context; the runtime role allocates identity codes only for its own organization (`authz.next_identity_code_for_current_org`); background work and inbound webhooks stop for organizations that are not ACTIVE | `tests/db/elevated-function-boundaries.test.ts`: a negative and a positive test per function, and suspend → nothing processed → reactivate → processed for every background path |
 
 **Deliberately accepted V1 gaps**, so nobody is surprised later: no malware scanning on uploads
 (T-08); no automated deprovisioning in Google or GitHub (manual attestation, Blueprint §13); no
 anomaly detection beyond denial-rate review; no field-level encryption above what Postgres provides
 at rest; no formal penetration test until §37 recommendation 8 is funded.
+
+**Residual (T-22): `public.resolve_login_org(email)`** answers which organization an email
+address belongs to, and the runtime role can call it with no identity: sign-in needs the answer
+before anyone is authenticated. No API response returns it, so reaching it takes the ability to
+run SQL as `app_user` — and anyone with that can already confirm an address exists. It stays
+unchanged until a dedicated pre-authentication database role exists (the infrastructure package
+that also introduces `app_worker` and `app_platform`).
+
+**Residual (T-22): what the 0068 checks do not stop.** They bind each function to the
+transaction's identity, which stops a confused deputy — application code passing the wrong
+organization's id. They do not stop someone who can already run arbitrary SQL as `app_user`:
+that role can set `app.person_id` / `app.org_id` itself, and until the worker functions move to
+a dedicated `app_worker` role it can call them with no identity at all. In that position a
+caller can claim any organization's job (payload included), and can set `app.org_id` to satisfy
+the person-less branch of `integration_webhook_resolve_delivery` (it returns signing-secret
+ciphertext; the decryption key is not in the database). Impersonating a person additionally
+needs a valid person id of the target organization, which no API returns and RLS does not
+expose. The defence against that position is keeping SQL execution out of reach (parameterised
+queries only, T-15) and, next, the dedicated roles.
+
+**Inbound endpoint-key rotation during a request.** A receipt's status changes prove the
+connection's *current* key (0068). If an administrator rotates the key between a request writing
+its receipt and marking it processed, the request fails closed: the route answers its opaque
+`500`, and the receipt stays `RECEIVED` (any workflow dispatch has already happened). The old key
+no longer resolves; a redelivery under the new key with the same external event id reprocesses
+that same receipt, and the workflow dedup key keeps the work exactly-once. A delivery that carries
+no external event id is instead recorded as a payload duplicate, so its original receipt stays
+`RECEIVED`. Pinned by `tests/integrations/inbound-key-rotation.test.ts`.
 
 ---
 

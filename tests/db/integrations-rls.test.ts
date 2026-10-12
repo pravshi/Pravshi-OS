@@ -29,6 +29,7 @@
  * mkEngagement + custom roles) — no logins are needed at this layer,
  * because authz.has() reads the same person_roles the fixtures write.
  */
+import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
@@ -45,11 +46,17 @@ const RUN = Math.random()
 const TOK = `S10RLS${RUN}`;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
-/** 64-hex stand-ins for an endpoint-key hash / a payload hash. */
-const KEYHASH_A = 'a1'.repeat(32);
-const KEYHASH_B = 'b2'.repeat(32);
-const PAYHASH_A = 'c3'.repeat(32);
-const PAYHASH_B = 'd4'.repeat(32);
+/**
+ * 64-hex stand-ins for an endpoint-key hash / a payload hash — random per run.
+ * integration_connections.inbound_endpoint_key_hash is UNIQUE database-wide, so
+ * fixed literals made the suite unrunnable a second time against the same
+ * database (the beforeAll connection insert hit the unique index).
+ */
+const hex64 = () => randomBytes(32).toString('hex');
+const KEYHASH_A = hex64();
+const KEYHASH_B = hex64();
+const PAYHASH_A = hex64();
+const PAYHASH_B = hex64();
 
 const tryImport = async <T>(path: string): Promise<T | null> => {
   try {
@@ -611,7 +618,7 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       ).rows;
     expect(await byHash(KEYHASH_A)).toEqual([{ connection_id: connA, org_id: orgA }]);
     expect(await byHash(KEYHASH_B)).toEqual([{ connection_id: connB, org_id: orgB }]);
-    expect(await byHash('e5'.repeat(32))).toEqual([]);
+    expect(await byHash(hex64())).toEqual([]);
     expect(await byHash('not-a-hash')).toEqual([]);
   }, 60_000);
 
@@ -640,7 +647,7 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       { receipt_id: inboundA, receipt_status: 'PROCESSED', match_kind: 'payload' },
     ]);
     expect(await find(connA, null, PAYHASH_B)).toEqual([]);
-    expect(await find(connA, `rls-unknown-${RUN}`, 'f6'.repeat(32))).toEqual([]);
+    expect(await find(connA, `rls-unknown-${RUN}`, hex64())).toEqual([]);
   }, 60_000);
 
   it('definer: resolve_delivery answers only the exact (org, subscription) pair', async () => {
@@ -656,7 +663,9 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     expect(await resolve(orgA, subA)).toEqual([
       { is_active: true, signing_secret_ciphertext: `ciphertext-a-${RUN}` },
     ]);
-    expect(await resolve(orgB, subA)).toEqual([]);
+    // Naming another organization is refused outright since 0068 (the
+    // context-kind assertion), not merely answered empty.
+    expect(await sqlstateOf(resolve(orgB, subA))).toBe('42501');
     expect(await resolve(orgA, subB)).toEqual([]);
     expect(await resolve(orgA, '11111111-2222-4333-8444-555555555555')).toEqual([]);
   }, 60_000);
@@ -715,11 +724,24 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     // The transition definer moves it to PROCESSED and stamps
     // processed_at — and the row's org is still org A afterwards: the
     // definer derives the org from the receipt row itself, so no call
-    // can steer a receipt into another tenant.
+    // can steer a receipt into another tenant. Since 0068 the caller must
+    // also present the receipt connection's endpoint digest, as for the write.
+    // Another connection's digest is refused 42501 and moves nothing…
+    expect(
+      await sqlstateOf(
+        inCtx(
+          ctx,
+          `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+          [receiptId, KEYHASH_B, 'PROCESSED', true],
+        ),
+      ),
+    ).toBe('42501');
+    expect(await receiptRow(receiptId)).toMatchObject({ status: 'RECEIVED' });
+    // …the right one moves it.
     const transitioned = await inCtx<{ ok: boolean }>(
       ctx,
-      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
-      [receiptId, 'PROCESSED', true],
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+      [receiptId, KEYHASH_A, 'PROCESSED', true],
     );
     expect(transitioned.rows[0]!.ok).toBe(true);
     const settled = await receiptRow(receiptId);
@@ -729,8 +751,8 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     // transitions are fire-and-forget by design).
     const missing = await inCtx<{ ok: boolean }>(
       ctx,
-      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
-      ['11111111-2222-4333-8444-555555555555', 'PROCESSED', true],
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+      ['11111111-2222-4333-8444-555555555555', KEYHASH_A, 'PROCESSED', true],
     );
     expect(missing.rows[0]!.ok).toBe(false);
 

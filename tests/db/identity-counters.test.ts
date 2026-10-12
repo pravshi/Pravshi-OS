@@ -8,6 +8,7 @@ import { Pool } from '@neondatabase/serverless';
  *   owner  (DATABASE_URL_MIGRATE, app_owner) — inspects catalogue state
  *   user   (DATABASE_URL_TEST,    app_user)  — the runtime role, used to prove what it
  *                                              CANNOT do, and that it can still get a code
+ *                                              for its OWN organization (0068)
  *
  * The point of the app_user assertions is not that a grant is missing today. It is that a
  * counter which the runtime role can UPDATE could be rewound to re-issue a code that
@@ -145,17 +146,63 @@ describe('identity_counters — the runtime role cannot manipulate the counter',
   });
 });
 
-describe('authz.next_identity_code — generation', () => {
-  it('app_user CAN execute the function', async () => {
+describe('authz.next_identity_code — the runtime role (0068)', () => {
+  it('app_user can NOT execute the organization-taking function', async () => {
     const p = track(asUser());
-    const { rows } = await p.query<{ code: string }>(
-      `select authz.next_identity_code('${ORG_A}'::uuid, '${type('X')}', '2026') as code`,
-    );
-    expect(rows[0]?.code).toMatch(new RegExp(`^${type('X')}-2026-[0-9]{4,}$`));
+    await expect(
+      p.query(`select authz.next_identity_code('${ORG_A}'::uuid, '${type('X')}', '2026') as code`),
+    ).rejects.toMatchObject({ code: '42501' });
   });
 
-  it('produces the documented format and increments deterministically', async () => {
+  it('app_user gets a code for its own organization through next_identity_code_for_current_org', async () => {
+    const o = track(owner());
+    const seed = (
+      await o.query<{ c: string }>(`select authz.next_identity_code($1::uuid,'EMP','2026') c`, [
+        ORG_A,
+      ])
+    ).rows[0]!.c;
+    const person = (
+      await o.query<{ id: string }>(
+        `insert into public.people (org_id, code, full_legal_name, person_status)
+         values ($1, $2, 'Counter Caller', 'ACTIVE') returning id`,
+        [ORG_A, seed],
+      )
+    ).rows[0]!.id;
+    const t = type('W');
+    const c = await track(asUser()).connect();
+    try {
+      await c.query('begin');
+      await c.query(`select set_config('app.person_id', $1, true)`, [person]);
+      const { rows } = await c.query<{ code: string }>(
+        `select authz.next_identity_code_for_current_org($1, '2026') as code`,
+        [t],
+      );
+      expect(rows[0]?.code).toBe(`${t}-2026-0001`);
+      await c.query('commit');
+    } catch (error) {
+      await c.query('rollback').catch(() => undefined);
+      throw error;
+    } finally {
+      c.release();
+    }
+    // The counter that moved is ORG_A's — ORG_B's sequence for the type is untouched.
+    const b = await o.query<{ code: string }>(
+      `select authz.next_identity_code('${ORG_B}'::uuid, '${t}', '2026') as code`,
+    );
+    expect(b.rows[0]?.code).toBe(`${t}-2026-0001`);
+  });
+
+  it('next_identity_code_for_current_org refuses a transaction without an identity', async () => {
     const p = track(asUser());
+    await expect(
+      p.query(`select authz.next_identity_code_for_current_org('EMP', '2026')`),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+});
+
+describe('authz.next_identity_code — generation (as its owner-run callers use it)', () => {
+  it('produces the documented format and increments deterministically', async () => {
+    const p = track(owner());
     const t = type('F');
     const first = await p.query<{ code: string }>(
       `select authz.next_identity_code('${ORG_A}'::uuid, '${t}', '2026') as code`,
@@ -168,7 +215,7 @@ describe('authz.next_identity_code — generation', () => {
   });
 
   it('is generic, not employee-specific', async () => {
-    const p = track(asUser());
+    const p = track(owner());
     // The real prefixes from the architecture. The sequence number is not asserted here
     // because these counters are shared with every other run; the format is what matters.
     for (const prefix of ['EMP', 'INT', 'CTR']) {
@@ -180,7 +227,7 @@ describe('authz.next_identity_code — generation', () => {
   });
 
   it('keeps sequences separate per organization and per period', async () => {
-    const p = track(asUser());
+    const p = track(owner());
     const t = type('S');
     const a = await p.query<{ code: string }>(
       `select authz.next_identity_code('${ORG_A}'::uuid, '${t}', '2026') as code`,
@@ -197,7 +244,7 @@ describe('authz.next_identity_code — generation', () => {
   });
 
   it('rejects invalid input and fails closed', async () => {
-    const p = track(asUser());
+    const p = track(owner());
     const bad: [string, string][] = [
       ['lower', '2026'], // not uppercase
       ['E', '2026'], // too short
@@ -216,7 +263,7 @@ describe('authz.next_identity_code — generation', () => {
   });
 
   it('leaks no value back in its error messages', async () => {
-    const p = track(asUser());
+    const p = track(owner());
     try {
       await p.query(`select authz.next_identity_code('${ORG_A}'::uuid, $1, '2026')`, [
         'sensitive-looking-value',
@@ -242,7 +289,7 @@ describe('authz.next_identity_code — concurrency', () => {
   it('issues no duplicate under 50 concurrent calls on separate connections', async () => {
     const N = 50;
     const t = type('R');
-    const p = track(asUser());
+    const p = track(owner());
     const results = await Promise.all(
       Array.from({ length: N }, () =>
         p.query<{ code: string }>(

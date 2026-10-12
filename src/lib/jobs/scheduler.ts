@@ -280,6 +280,10 @@ export async function resumeSchedule(auth: Authorization, scheduleId: string): P
  * scheduler_admin_delete() SECURITY DEFINER function — after the caller's
  * jobs.delete permission AND the row's visibility to their org are verified
  * above (missing vs. other-org's schedule is indistinguishable: NOT_FOUND).
+ *
+ * The delete runs in the SAME identity transaction as the visibility check
+ * (0068): the function re-derives the org from that identity and re-checks
+ * jobs.delete, so it can only ever delete a schedule of the caller's org.
  */
 export async function deleteSchedule(auth: Authorization, scheduleId: string): Promise<void> {
   await requireSchedulePermission(auth, PERM_DELETE);
@@ -287,8 +291,6 @@ export async function deleteSchedule(auth: Authorization, scheduleId: string): P
     // Visibility check under the caller's identity: the row must belong to
     // their org, otherwise NOT_FOUND (missing vs. other-org indistinguishable).
     await loadScheduleForUpdate(tx, auth.ctx.orgId, scheduleId);
-  });
-  await withSchedulerDb(async (tx) => {
     await tx.execute(sql`
       select public.scheduler_admin_delete(${scheduleId}::uuid)
     `);
