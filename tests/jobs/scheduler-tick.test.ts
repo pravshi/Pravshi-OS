@@ -50,6 +50,18 @@ let draftWorkflow = '';
 
 const windowOf = (s: Schedule) => cronWindowStart(new Date(s.nextRunAt as string));
 
+/**
+ * The instant every tick in this file fires at. The tick is global across orgs and
+ * its return value counts every schedule it fired, so the exact-count assertions
+ * below need a moment at which only THIS file's schedules are due. A fixed instant
+ * in the distant past gives exactly that: each test forces its own schedule due just
+ * before it, and no other suite's schedule (created due now or later) is due then.
+ * This replaces wiping every organization's schedules and scheduled_trigger jobs in
+ * beforeAll, which deleted other suites' fixtures mid-run when files ran in parallel.
+ */
+const TICK_AT = new Date('2001-03-04T05:06:00.000Z');
+const beforeTick = (minutes: number) => new Date(TICK_AT.getTime() - minutes * 60_000);
+
 async function jobCount(scheduleId: string): Promise<number> {
   const { rows } = await owner.query<{ n: string }>(
     `select count(*) n from public.jobs where dedup_key like $1`,
@@ -121,10 +133,6 @@ const authFor = (cookie: string, permission: string) => async (): Promise<Author
 
 beforeAll(async () => {
   if (!ready) return;
-  // The tick is global across orgs: start clean so assertions on per-tick
-  // counts are not polluted by schedules orphaned from earlier runs.
-  await owner.query(`delete from public.schedules`);
-  await owner.query(`delete from public.jobs where type = 'scheduled_trigger'`);
   org = await mkOrg(owner, `sched-${CODE}`);
   const dept = await mkDept(owner, org, `SD${CODE}`);
   const schedRole = await mkRoleWith(owner, org, `SCHED_${CODE}`, SCHED_PERMS);
@@ -232,11 +240,11 @@ describe.skipIf(!ready)('scheduler tick', () => {
       cron: '* * * * *',
       timezone: 'UTC',
     });
-    const dueAt = new Date(Date.now() - 2 * 60_000);
+    const dueAt = beforeTick(2);
     await forceDue(s.id, dueAt);
     const before = (await loadScheduleRow(s.id))!;
 
-    const enqueued = await tickScheduler(new Date());
+    const enqueued = await tickScheduler(TICK_AT);
     expect(enqueued).toBe(1);
 
     // Exactly one job row: type, org, payload, dedup key.
@@ -270,11 +278,11 @@ describe.skipIf(!ready)('scheduler tick', () => {
       cron: '* * * * *',
       timezone: 'UTC',
     });
-    await forceDue(s.id, new Date(Date.now() - 2 * 60_000));
+    await forceDue(s.id, beforeTick(2));
 
-    expect(await tickScheduler(new Date())).toBe(1);
-    // Second tick: the schedule already advanced past now → nothing due.
-    expect(await tickScheduler(new Date())).toBe(0);
+    expect(await tickScheduler(TICK_AT)).toBe(1);
+    // Second tick: the schedule already advanced past TICK_AT → nothing due.
+    expect(await tickScheduler(TICK_AT)).toBe(0);
     expect(await jobCount(s.id)).toBe(1);
 
     await deleteSchedule(auth, s.id);
@@ -287,14 +295,14 @@ describe.skipIf(!ready)('scheduler tick', () => {
       cron: '* * * * *',
       timezone: 'UTC',
     });
-    const dueAt = new Date(Date.now() - 3 * 60_000);
+    const dueAt = beforeTick(3);
     await forceDue(s.id, dueAt);
-    expect(await tickScheduler(new Date())).toBe(1);
+    expect(await tickScheduler(TICK_AT)).toBe(1);
 
     // Force the SAME window due again: the dedup key collides, the fire is a
     // no-op (ON CONFLICT DO NOTHING) and the count stays 0.
     await forceDue(s.id, dueAt);
-    expect(await tickScheduler(new Date())).toBe(0);
+    expect(await tickScheduler(TICK_AT)).toBe(0);
     expect(await jobCount(s.id)).toBe(1);
 
     await deleteSchedule(auth, s.id);
@@ -313,8 +321,8 @@ describe.skipIf(!ready)('scheduler tick', () => {
     await pauseSchedule(auth, s.id);
     // Even when the stored next_run_at is in the past, a paused schedule
     // must not fire.
-    await forceDue(s.id, new Date(Date.now() - 5 * 60_000));
-    expect(await tickScheduler(new Date())).toBe(0);
+    await forceDue(s.id, beforeTick(5));
+    expect(await tickScheduler(TICK_AT)).toBe(0);
     expect(await jobCount(s.id)).toBe(0);
 
     // Resume recomputes next_run_at from the cron (no stale backlog).

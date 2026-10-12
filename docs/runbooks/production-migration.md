@@ -324,7 +324,7 @@ after any repo change.
 | 64  | `0065_db_maintenance`                  | 1791580728057 | `83feafe58f56f8a2ee609d7b029739ba0d872265df6c0d155d8525263df4c69d` |
 | 65  | `0066_worker_next_due` | 1791581728057 | `d0fe49560379f960ef2c5994371074007af36dfbfb28f0129c4afaaa2e9dbac6` |
 | 66  | `0067_admin_audit_completeness` | 1791582728057 | `9b26f90ece4a2ad2c362bf89b28e262b1fc63e616c5f6f7659360add8c16fc55` |
-| 67  | `0068_elevated_function_boundaries` | 1791583728057 | `474fecc28f845b7ae53a098ba6957f34113158ca84989099ae89305aa50d9780` |
+| 67  | `0068_elevated_function_boundaries` | 1791583728057 | `ad13aa14ed4611a8b78e64640cef3ae9ce64a4adc5ee269431c311d9cf551209` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

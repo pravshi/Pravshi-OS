@@ -96,13 +96,18 @@ describe.skipIf(!dbReady)('stale-claim reaper (live DB)', () => {
     ).rows[0]!;
 
   it('reaps a claimed job whose worker died: pending again, attempt burned, claim cleared', async () => {
+    // Stale by 10 s against a 5 s threshold. Every other caller of the (global)
+    // reaper in this repo uses a threshold of at least 60 s, so this row can only
+    // ever be reaped by THIS call — otherwise a parallel suite's reaper could take
+    // it first and leave this call's count at 0 (each stale row is reaped exactly
+    // once, by whichever caller gets it).
     const jobId = await insertClaimed({
       status: 'claimed',
-      heartbeatAge: '10 minutes',
+      heartbeatAge: '10 seconds',
       attempts: 1,
     });
 
-    const reaped = await reapStaleJobs(60_000);
+    const reaped = await reapStaleJobs(5_000);
     // The reaper is global across orgs; the pinned assertion is OUR row's
     // state (below). The count includes every stale claim in the database.
     expect(reaped).toBeGreaterThanOrEqual(1);

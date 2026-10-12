@@ -35,17 +35,21 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
-import { DB_READY, mkOrg, RUN } from '../workflows/helpers';
+import { DB_READY, mkOrg, mkPerson, RUN } from '../workflows/helpers';
 
 const dbReady = DB_READY;
 
 describe.skipIf(!dbReady)('audit partition maintenance under concurrency (Phase 12)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   let orgId = '';
+  // The probe rows' actor: the audit log holds no actor-less entries, and
+  // audit-triggers / bootstrap pin that database-wide.
+  let actorId = '';
 
   beforeAll(async () => {
     if (!dbReady) return;
     orgId = await mkOrg(owner, `pmaint-${RUN}`);
+    actorId = await mkPerson(owner, orgId, `Pmaint Probe ${RUN}`);
   }, 30_000);
 
   afterAll(async () => {
@@ -64,9 +68,9 @@ describe.skipIf(!dbReady)('audit partition maintenance under concurrency (Phase 
       try {
         while (!stop) {
           await pool.query(
-            `insert into public.audit_logs (org_id, occurred_at, action, entity_type, result)
-             values ($1::uuid, now(), 'phase12.partition_maintenance_probe', 'probe', 'SUCCESS')`,
-            [orgId],
+            `insert into public.audit_logs (org_id, actor_person_id, occurred_at, action, entity_type, result)
+             values ($1::uuid, $2::uuid, now(), 'phase12.partition_maintenance_probe', 'probe', 'SUCCESS')`,
+            [orgId, actorId],
           );
           inserted += 1;
         }

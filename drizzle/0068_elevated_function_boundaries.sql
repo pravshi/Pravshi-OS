@@ -646,6 +646,29 @@ begin
     union all
     select 'the unverified 3-argument integration_inbound_set_receipt_status still exists'
     where to_regprocedure('public.integration_inbound_set_receipt_status(uuid,text,boolean)') is not null
+    union all
+    -- The deployed bodies carry the 0068 checks (a later replace that drops one
+    -- fails here, not silently): each function must contain every listed fragment.
+    select c.sig || ' is missing its 0068 check: ' || c.fragment
+    from (values
+      ('public.jobs_claim_next(text,text[])', 'authz.person_id()'),
+      ('public.jobs_claim_next(text,text[])', 'o.status = ''ACTIVE'' and o.deleted_at is null'),
+      ('public.integration_webhook_resolve_delivery(uuid,uuid)', 'authz.org_id()'),
+      ('public.integration_webhook_resolve_delivery(uuid,uuid)', 'current_setting(''app.org_id'', true)'),
+      ('public.scheduler_admin_delete(uuid)', 'authz.has(''jobs.delete'')'),
+      ('public.scheduler_admin_delete(uuid)', 'org_id = (select authz.org_id())'),
+      ('public.record_login_event(uuid,text,public.citext,uuid,inet,text,jsonb)', 'public.resolve_login_org(p_email)'),
+      ('authz.next_identity_code_for_current_org(text,text)', 'authz.person_id()'),
+      ('public.integration_inbound_set_receipt_status(uuid,text,text,boolean)', 'c.inbound_endpoint_key_hash = p_endpoint_key_hash'),
+      ('public.person_holds_protected_role(uuid,uuid)', 'p_org_id is distinct from (select authz.org_id())'),
+      ('public.scheduler_tick_claim(timestamptz)', 'o.status = ''ACTIVE'' and o.deleted_at is null'),
+      ('public.claim_due_task_reminders(integer)', 'o.status = ''ACTIVE'' and o.deleted_at is null'),
+      ('public.jobs_sweep_retryable(integer)', 'o.status = ''ACTIVE'' and o.deleted_at is null'),
+      ('public.worker_next_due_at()', 'o.status = ''ACTIVE'' and o.deleted_at is null'),
+      ('public.integration_inbound_resolve_endpoint(text)', 'o.status = ''ACTIVE'' and o.deleted_at is null')
+    ) as c(sig, fragment)
+    join pg_proc p on p.oid = to_regprocedure(c.sig)
+    where strpos(p.prosrc, c.fragment) = 0
   ) problems;
 
   if v_problems is not null then

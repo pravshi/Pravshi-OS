@@ -219,8 +219,12 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   jobs of a suspended, archived or deleted organization, does not retry its failed jobs,
   fire its reminders or schedules, and does not wake for them; its inbound webhook
   endpoints answer with the ordinary rejection. The work is left in place, not cancelled,
-  and resumes on its own once the organization is ACTIVE again. A job already claimed when
-  the organization was suspended still finishes, or is recovered if its worker dies.
+  and resumes on its own once the organization is ACTIVE again; overdue reminders and
+  schedules then fire once, late, as after worker downtime. A job already running when the
+  organization is suspended is not interrupted: steps that go through the organization's
+  own permissions fail (the organization is no longer active), the job is marked failed
+  and, while it has attempts left, retried after reactivation; a job whose worker dies is
+  still recovered.
 - **Idle cost — low-cost mode (WP-W, the default):** Neon Free suspends compute only after
   5 minutes without a query and gives a project 100 CU-hours a month; spending them
   suspends **every** compute in the project, production included, until the next billing

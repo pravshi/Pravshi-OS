@@ -231,6 +231,27 @@ run SQL as `app_user` — and anyone with that can already confirm an address ex
 unchanged until a dedicated pre-authentication database role exists (the infrastructure package
 that also introduces `app_worker` and `app_platform`).
 
+**Residual (T-22): what the 0068 checks do not stop.** They bind each function to the
+transaction's identity, which stops a confused deputy — application code passing the wrong
+organization's id. They do not stop someone who can already run arbitrary SQL as `app_user`:
+that role can set `app.person_id` / `app.org_id` itself, and until the worker functions move to
+a dedicated `app_worker` role it can call them with no identity at all. In that position a
+caller can claim any organization's job (payload included), and can set `app.org_id` to satisfy
+the person-less branch of `integration_webhook_resolve_delivery` (it returns signing-secret
+ciphertext; the decryption key is not in the database). Impersonating a person additionally
+needs a valid person id of the target organization, which no API returns and RLS does not
+expose. The defence against that position is keeping SQL execution out of reach (parameterised
+queries only, T-15) and, next, the dedicated roles.
+
+**Inbound endpoint-key rotation during a request.** A receipt's status changes prove the
+connection's *current* key (0068). If an administrator rotates the key between a request writing
+its receipt and marking it processed, the request fails closed: the route answers its opaque
+`500`, and the receipt stays `RECEIVED` (any workflow dispatch has already happened). The old key
+no longer resolves; a redelivery under the new key with the same external event id reprocesses
+that same receipt, and the workflow dedup key keeps the work exactly-once. A delivery that carries
+no external event id is instead recorded as a payload duplicate, so its original receipt stays
+`RECEIVED`. Pinned by `tests/integrations/inbound-key-rotation.test.ts`.
+
 ---
 
 ## 5. Testing strategy

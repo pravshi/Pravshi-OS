@@ -525,7 +525,8 @@ describe('when nobody is acting', () => {
 
   it('fabricates no actor: the entries simply do not exist', async () => {
     // Not "entries with a null or invented actor" — no entries at all. actor_person_id is
-    // NOT NULL on audit_logs, so a fabricated identity is the only way one could appear.
+    // nullable on audit_logs, so this asserts database-wide that no actor-less entry exists
+    // (the perf harness gives its seeded entries real actors for exactly this reason).
     const { rows } = await owner.query<{ n: string }>(
       `select count(*) n from public.audit_logs where actor_person_id is null`,
     );
