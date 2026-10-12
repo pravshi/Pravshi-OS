@@ -58,8 +58,14 @@ const windowOf = (s: Schedule) => cronWindowStart(new Date(s.nextRunAt as string
  * before it, and no other suite's schedule (created due now or later) is due then.
  * This replaces wiping every organization's schedules and scheduled_trigger jobs in
  * beforeAll, which deleted other suites' fixtures mid-run when files ran in parallel.
+ *
+ * The instant must also come AFTER every due time worker-next-due-live.test.ts and
+ * elevated-function-boundaries.test.ts seed (1970–2005, inside rolled-back
+ * transactions): those suites assert their row is the database's earliest due work,
+ * and this file's schedules exist, committed, while it runs. 2010 is later than all
+ * of them and still long past, so the first constraint holds too.
  */
-const TICK_AT = new Date('2001-03-04T05:06:00.000Z');
+const TICK_AT = new Date('2010-03-04T05:06:00.000Z');
 const beforeTick = (minutes: number) => new Date(TICK_AT.getTime() - minutes * 60_000);
 
 async function jobCount(scheduleId: string): Promise<number> {
