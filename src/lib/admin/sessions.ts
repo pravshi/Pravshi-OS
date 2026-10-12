@@ -2,10 +2,9 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import {
   listSessionsForLogin,
-  revokeSessionForLogin,
+  revokeSessionsWithAudit,
   type AdminSessionSummary,
 } from '@/lib/auth/admin-credentials';
-import { revokeSessionsFor } from '@/lib/auth/session';
 import type { Authorization } from '@/lib/authz/require-permission';
 
 /**
@@ -63,7 +62,8 @@ export async function revokeUserSession(
   sessionId: string,
 ): Promise<void> {
   const authUserId = await resolveTargetLogin(auth, personId);
-  await revokeSessionForLogin(authUserId, sessionId);
+  // Revocation and its audit entry commit together (WP-T1).
+  await revokeSessionsWithAudit(auth, { personId, authUserId, sessionId });
 }
 
 /**
@@ -73,5 +73,7 @@ export async function revokeUserSession(
  */
 export async function revokeAllUserSessions(auth: Authorization, personId: string): Promise<void> {
   const authUserId = await resolveTargetLogin(auth, personId);
-  await revokeSessionsFor(authUserId);
+  // Deletes every session, stamps sessions_revoked_at, and records one audit entry —
+  // one transaction (WP-T1).
+  await revokeSessionsWithAudit(auth, { personId, authUserId });
 }

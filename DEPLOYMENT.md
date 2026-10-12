@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0066; project records indicate the `production` Neon branch stopped at 0044 (October
+  0067; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have

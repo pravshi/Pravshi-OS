@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
+import { withAuthorizedDb } from '@/lib/db/authorized';
+import type { Authorization } from '@/lib/authz/require-permission';
 import { generateResetToken, hashResetToken } from './password-reset';
 
 /**
@@ -57,6 +59,78 @@ export async function revokeSessionForLogin(authUserId: string, sessionId: strin
     returning id
   `);
   if (!res.rows[0]) throw new Error('Session not found.');
+}
+
+export type SessionRevocationScope = 'one' | 'all';
+
+/**
+ * Revoke one session (sessionId given) or every session of a login, AND record exactly one
+ * audit entry for it — in ONE transaction, under the administrator's identity
+ * (multi-tenant audit WP-T1, MT-H3). Either the sessions are gone and the entry exists, or
+ * neither: an audit failure rolls the revocation back, and a session that is not there
+ * raises before any entry is written.
+ *
+ * Runs through withAuthorizedDb(auth.ctx): the same app_user role as authDb (so the
+ * auth.auth_sessions grants are identical), but carrying the actor, which write_audit_log()
+ * requires and derives the actor and organization from. The caller has already scoped
+ * targetPersonId and authUserId to the admin's organization (src/lib/admin/sessions.ts).
+ *
+ * 'all' also stamps people.sessions_revoked_at (authz.stamp_sessions_revoked), exactly as
+ * revokeSessionsFor() does, so a session that survives the delete still fails.
+ *
+ * Returns the number of sessions revoked.
+ */
+export async function revokeSessionsWithAudit(
+  auth: Authorization,
+  target: { personId: string; authUserId: string; sessionId?: string },
+): Promise<number> {
+  const scope: SessionRevocationScope = target.sessionId ? 'one' : 'all';
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    let revoked: number;
+    if (target.sessionId) {
+      const res = await tx.execute<{ id: string }>(sql`
+        delete from auth.auth_sessions
+        where id = ${target.sessionId}::uuid
+          and user_id = ${target.authUserId}::uuid
+        returning id
+      `);
+      if (!res.rows[0]) throw new Error('Session not found.');
+      revoked = 1;
+    } else {
+      const res = await tx.execute<{ id: string }>(sql`
+        delete from auth.auth_sessions
+        where user_id = ${target.authUserId}::uuid
+        returning id
+      `);
+      revoked = res.rows.length;
+      // The stamp updates public.people, whose row-level audit trigger records a change
+      // whenever an actor is present — a second, redundant entry for this one action.
+      // It always ran actor-less before (via authDb), so run it actor-less here too: clear
+      // the person for this one statement, then restore it for the entry below. The stamp
+      // is a SECURITY DEFINER function, so the cleared context does not affect it.
+      await tx.execute(sql`select set_config('app.person_id', '', true)`);
+      await tx.execute(sql`select authz.stamp_sessions_revoked(${target.authUserId}::uuid)`);
+      await tx.execute(sql`select set_config('app.person_id', ${auth.ctx.personId}, true)`);
+    }
+    await tx.execute(sql`
+      select public.write_audit_log(
+        p_action := ${scope === 'one' ? 'session.revoked' : 'session.revoked_all'},
+        p_entity_type := 'person',
+        p_result := 'SUCCESS'::public.audit_result,
+        p_entity_id := ${target.personId}::uuid,
+        p_severity := 'HIGH',
+        p_metadata := ${JSON.stringify({
+          scope,
+          sessions_revoked: revoked,
+          ...(target.sessionId ? { session_id: target.sessionId } : {}),
+        })}::jsonb,
+        p_request_id := ${auth.meta.requestId}::uuid,
+        p_actor_ip := ${auth.meta.ip}::inet,
+        p_user_agent := ${auth.meta.userAgent}
+      )
+    `);
+    return revoked;
+  });
 }
 
 /** The login's email address — the address the reset link is sent to. */

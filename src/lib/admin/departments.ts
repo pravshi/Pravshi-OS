@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
+import { setAuditRequestId } from './audit-context';
 
 /** Department administration. Mutations are departments.manage; listing is departments.view. */
 
@@ -46,7 +47,9 @@ export async function createDepartment(
 ): Promise<void> {
   // Writes go through the SECURITY DEFINER function: app_user holds no
   // INSERT on departments (migration 0004 revoked it).
+  // The function records its own audit entry in this transaction (migration 0067).
   await withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     await tx.execute(sql`
       select public.create_department(
         ${input.code},
@@ -59,6 +62,7 @@ export async function createDepartment(
 
 export async function archiveDepartment(auth: Authorization, id: string): Promise<void> {
   await withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     await tx.execute(sql`select public.archive_department(${id}::uuid)`);
   });
 }
