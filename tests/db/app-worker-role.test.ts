@@ -333,7 +333,7 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
   it('the runtime environment refuses DATABASE_URL_WORKER on Vercel, and accepts it on the worker host', () => {
     const base = {
       DATABASE_URL: 'postgresql://u:p@ep-x-pooler.example.test/db',
-      DATABASE_URL_WORKER: 'postgresql://w:p@ep-x-pooler.example.test/db',
+      DATABASE_URL_WORKER: 'postgresql://u:p@ep-x-pooler.example.test/db',
       APP_URL: 'https://app.example.test',
       NODE_ENV: 'production',
       BETTER_AUTH_SECRET: 'x'.repeat(40),
@@ -344,7 +344,7 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
     ).toThrow(/DATABASE_URL_WORKER/);
     expect(parseRuntimeEnv(base).DATABASE_URL_WORKER).toBe(base.DATABASE_URL_WORKER);
     expect(() =>
-      parseRuntimeEnv({ ...base, DATABASE_URL_WORKER: 'postgresql://w:p@ep-x.example.test/db' }),
+      parseRuntimeEnv({ ...base, DATABASE_URL_WORKER: 'postgresql://u:p@ep-x.example.test/db' }),
     ).toThrow(/pooled/);
   });
 });
