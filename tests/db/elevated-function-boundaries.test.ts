@@ -152,6 +152,7 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
     text: string,
     params: unknown[] = [],
     pool: Pool = appUser,
+    extra: Record<string, string> = {},
   ): Promise<T[]> {
     const c = await pool.connect();
     try {
@@ -160,6 +161,9 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
         `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
         [ctx.personId ?? '', ctx.orgId ?? ''],
       );
+      for (const [name, value] of Object.entries(extra)) {
+        await c.query(`select set_config($1, $2, true)`, [name, value]);
+      }
       const result = await c.query<T>(text, params);
       await c.query('commit');
       return result.rows;
@@ -222,8 +226,20 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
 
   // ── PART 2: integration_webhook_resolve_delivery ────────────────────────
   describe('integration_webhook_resolve_delivery', () => {
-    // The worker resolves secrets (0070: app_worker only); the context-kind
-    // assertion (0068) still applies on that connection.
+    // The worker resolves secrets (0070: app_worker only, bound to the webhook job it
+    // holds — org A's here); the context-kind assertion (0068) still applies.
+    const ELEV_WORKER = `elev-webhook-worker-${RUN}`;
+    let heldWebhookA = '';
+    beforeAll(async () => {
+      heldWebhookA = (
+        await owner.query<{ id: string }>(
+          `insert into public.jobs (org_id, type, status, payload, next_run_at, claimed_by, claimed_at, heartbeat_at)
+           values ($1, 'webhook', 'running', '{}'::jsonb, now() + interval '30 days', $2, now(), now() + interval '30 days')
+           returning id`,
+          [orgA, ELEV_WORKER],
+        )
+      ).rows[0]!.id;
+    });
     const resolve = (ctx: Ctx, org: string, sub: string, pool: Pool = appWorker) =>
       asUser<{ is_active: boolean; signing_secret_ciphertext: string }>(
         ctx,
@@ -231,6 +247,7 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
            from public.integration_webhook_resolve_delivery($1::uuid, $2::uuid)`,
         [org, sub],
         pool,
+        { 'app.work_kind': 'job', 'app.work_id': heldWebhookA, 'app.worker_id': ELEV_WORKER },
       );
 
     it('app_user cannot resolve a secret in any context — not even its own org (0070)', async () => {
@@ -254,8 +271,11 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
     it('refuses another organization in every context kind', async () => {
       // A person naming another org.
       expect(await sqlstateOf(resolve({ personId: alice, orgId: orgA }, orgB, subB))).toBe('42501');
-      // The worker bound to org A naming org B.
+      // The worker holding org A's webhook job naming org B — with app.org_id saying A or B.
       expect(await sqlstateOf(resolve({ personId: SYSTEM_ACTOR, orgId: orgA }, orgB, subB))).toBe(
+        '42501',
+      );
+      expect(await sqlstateOf(resolve({ personId: SYSTEM_ACTOR, orgId: orgB }, orgB, subB))).toBe(
         '42501',
       );
       // No identity at all.

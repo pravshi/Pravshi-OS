@@ -118,6 +118,7 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
     ctx: { personId?: string; orgId?: string },
     sql: string,
     params: unknown[] = [],
+    extra: Record<string, string> = {},
   ): Promise<T[]> {
     const c: PoolClient = await pool.connect();
     try {
@@ -126,6 +127,9 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
         `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
         [ctx.personId ?? '', ctx.orgId ?? ''],
       );
+      for (const [name, value] of Object.entries(extra)) {
+        await c.query(`select set_config($1, $2, true)`, [name, value]);
+      }
       return (await c.query<T>(sql, params)).rows;
     } finally {
       await c.query('rollback').catch(() => undefined);
@@ -200,9 +204,13 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
       `select public.notification_channel_enabled('${orgA}'::uuid, '${personA}'::uuid, 'TASK_DUE', 'in_app')`,
       `select public.notifications_insert('${orgA}'::uuid, '${personA}'::uuid, 'forged', 'x', '{}'::jsonb)`,
     ]) {
-      expect(await codeOf(rolledBack(appUser, forged, sql)), sql).toBe('42501');
-      // The same call on the worker login, bound to that org, is answered.
-      expect(await codeOf(rolledBack(appWorker, forged, sql)), sql).toBe('ALLOWED');
+      // The complete worker context — system actor, org A, and org A's held job — on app_user.
+      const holding = { 'app.work_kind': 'job', 'app.work_id': heldJob, 'app.worker_id': 'probe' };
+      expect(await codeOf(rolledBack(appUser, forged, sql, [], holding)), sql).toBe('42501');
+      // The same call on the worker login, bound to that held job, is answered…
+      expect(await codeOf(rolledBack(appWorker, forged, sql, [], holding)), sql).toBe('ALLOWED');
+      // …and without a held work item it is refused even there (0070 binding).
+      expect(await codeOf(rolledBack(appWorker, forged, sql)), sql).toBe('42501');
     }
   });
 
@@ -251,6 +259,14 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
     let jobA = '';
     let jobB = '';
     try {
+      // A previous run of this test that stopped midway leaves its jobs behind (a reaper
+      // hands them back as pending, at the same priorities): retire them first, so this
+      // run's claims take exactly this run's two jobs.
+      await c.query(
+        `update public.jobs set status = 'cancelled'
+          where type = 'notification' and status in ('pending', 'claimed', 'running', 'failed')
+            and payload->>'title' like 'appw %'`,
+      );
       // Two orgs' notification jobs, at a priority no other suite uses, so this file's
       // claims take exactly these two and nothing another suite queued.
       const ins = async (org: string, person: string, priority: number) =>
@@ -285,11 +301,13 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
       for (const job of claimed) {
         await w.query(`select public.jobs_start($1, $2::uuid)`, [workerId, job.id]);
         await w.query(`select public.jobs_heartbeat($1, $2::uuid)`, [workerId, job.id]);
-        // The handler's write, bound to the job row's org (withWorkerContext shape).
+        // The handler's write, bound to the job it holds (withWorkerContext shape, 0070).
         await w.query('begin');
         await w.query(
-          `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
-          [SYSTEM_ACTOR, job.org_id],
+          `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true),
+                  set_config('app.work_kind','job',true), set_config('app.work_id',$3,true),
+                  set_config('app.worker_id',$4,true)`,
+          [SYSTEM_ACTOR, job.org_id, job.id, workerId],
         );
         const person = job.org_id === orgA ? personA : personB;
         await w.query(

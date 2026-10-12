@@ -235,14 +235,18 @@ that also introduces `app_worker` and `app_platform`).
 worker-plane function — claiming, starting, completing, failing, releasing and reaping jobs,
 retry sweeps, next-due lookups, reminder claims, scheduler ticks, partition maintenance and
 retention, protected email content, webhook signing secrets, the workflow execution principal —
-is executable by that role only. The person-less branch of the notification definers requires
-the `app_worker` login as well. The database recognises the worker by the role the connection
+is executable by that role only. The person-less branch of the notification and webhook-secret
+definers requires the `app_worker` login as well, and takes its organization — and, for a task
+reminder, its recipient — from the work item the worker holds (`authz.worker_bound_scope()`: the job
+running under its claim, or the reminder it claimed), never from `app.org_id`; a worker bug that
+names another organization or person is refused. The database recognises the worker by the role the connection
 authenticated as (`session_user`), which `app_user` cannot change: no membership exists, `SET
 ROLE` needs one and `SET SESSION AUTHORIZATION` needs a superuser. So an `app_user` caller with
 raw SQL can no longer claim jobs, read payloads or protected bodies, or forge the worker by
 writing `app.org_id`. `app_worker` holds no table, sequence or schema-object privilege and no RLS
 policy; workflow actions run as their real principal on `app_user`, resolved only for a job the
-asking worker holds. Pinned by `tests/db/app-worker-role.test.ts`.
+asking worker holds. Pinned by `tests/db/app-worker-role.test.ts` and
+`tests/db/worker-notification-binding.test.ts`.
 
 **Residual (T-22): what remains open to a raw-SQL `app_user` caller.** The checks bind functions to
 the transaction's identity, which stops a confused deputy. They do not stop someone who can
@@ -257,8 +261,9 @@ only, T-15).
 
 **Residual: a compromised worker host** holds `app_worker` (every organization's background work)
 and `app_user`. That is inherent to a multi-tenant worker; the mitigations are credential hygiene,
-access control on the worker host, and the job-bound checks (a workflow principal or a protected
-email body only for the job the worker holds).
+access control on the worker host, and the work-item binding (notifications, webhook secrets, a
+workflow principal or a protected email body only for the job or reminder the worker holds), which
+contains worker bugs — not a hostile holder of the credential, who can claim any job.
 
 **Credential-bearing email content (0069).** The password-reset email carries the reset token
 in its link, so its body never enters `jobs.payload` (which `jobs.view` holders can list): it is

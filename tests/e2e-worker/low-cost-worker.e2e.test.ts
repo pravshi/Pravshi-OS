@@ -103,12 +103,16 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
       headers: { 'x-pravshi-worker-token': TOKEN },
     }).then((r) => r.status);
 
-  /** Connections the worker (app_user) holds right now. */
+  /**
+   * Connections the worker holds right now — on BOTH of its logins: app_worker for the worker
+   * plane (0070) and app_user for work run as a real person. A sleeping worker must hold none.
+   */
   const workerConnections = async () =>
     Number(
       (
         await owner.query<{ n: string }>(
-          `select count(*)::text n from pg_stat_activity where usename = 'app_user'`,
+          `select count(*)::text n from pg_stat_activity
+            where usename in ('app_user', 'app_worker')`,
         )
       ).rows[0]!.n,
     );

@@ -87,22 +87,36 @@ export async function withWorkerTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
 }
 
 /**
- * One app_worker transaction carrying the system actor bound to a work item's organization
- * — for the shared definers whose person-less branch serves the worker (notifications,
- * webhook signing secrets). That branch requires the app_worker role AND app.org_id to equal
- * the organization asked about; the organization comes from the job or reminder row, never
- * from a payload. Transaction-local, exactly like withAuthorizedDb().
+ * The work item a worker-plane call acts for. The database derives the organization (and, for
+ * a reminder, the recipient) from this item's row — authz.worker_bound_scope(), migration 0070 —
+ * so it must name what the worker actually holds: the job it is running under its own claim,
+ * or the reminder it claimed.
+ */
+export type WorkItem =
+  { kind: 'job'; id: string; workerId: string } | { kind: 'reminder'; id: string };
+
+/**
+ * One app_worker transaction for a call bound to a held work item — the shared definers whose
+ * person-less branch serves the worker (notifications, webhook signing secrets). That branch
+ * requires the app_worker role and takes its organization from the item's row, never from
+ * app.org_id; asking about any other organization (or, for a reminder, any other person) is
+ * refused with 42501. The system actor and org are still set for the rest of the transaction.
+ * Transaction-local, exactly like withAuthorizedDb().
  */
 export async function withWorkerContext<T>(
   ctx: AuthContext,
+  item: WorkItem,
   fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   return withWorkerTx(async (tx) => {
     await tx.execute(sql`
       select
-        set_config('app.person_id', ${ctx.personId}, true),
-        set_config('app.org_id',    ${ctx.orgId},    true),
-        set_config('app.aal',       ${ctx.aal},      true)
+        set_config('app.person_id',  ${ctx.personId}, true),
+        set_config('app.org_id',     ${ctx.orgId},    true),
+        set_config('app.aal',        ${ctx.aal},      true),
+        set_config('app.work_kind',  ${item.kind},    true),
+        set_config('app.work_id',    ${item.id},      true),
+        set_config('app.worker_id',  ${item.kind === 'job' ? item.workerId : ''}, true)
     `);
     return fn(tx);
   });

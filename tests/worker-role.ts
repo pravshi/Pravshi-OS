@@ -24,6 +24,8 @@ export async function inWorkerContext<T extends Record<string, unknown> = Record
   ctx: { personId?: string | null; orgId?: string | null },
   text: string,
   params: unknown[] = [],
+  /** Further transaction-local settings, e.g. the work item a worker call is bound to. */
+  extra: Record<string, string> = {},
 ): Promise<{ rows: T[]; rowCount: number }> {
   const c = await pool.connect();
   try {
@@ -32,6 +34,9 @@ export async function inWorkerContext<T extends Record<string, unknown> = Record
       ctx.personId ?? '',
       ctx.orgId ?? '',
     ]);
+    for (const [name, value] of Object.entries(extra)) {
+      await c.query(`select set_config($1, $2, true)`, [name, value]);
+    }
     const r = await c.query<T>(text, params);
     await c.query('commit');
     return { rows: r.rows, rowCount: r.rowCount ?? 0 };

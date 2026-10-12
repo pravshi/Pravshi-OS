@@ -270,8 +270,28 @@ All checks must pass before the freeze is lifted.
    not yet deployed, instead run a role-connect check in the
    `scripts/db/run.mjs --verify-roles` shape against production: `app_user`
    connects, role attributes match `scripts/db/roles.sql`, and RLS is live.
-3. Record every result in the run record.
-4. Announce completion and **lift the freeze explicitly** — the freeze ends
+3. **Worker role (0070).** As the owner, confirm `app_worker` is a plain login with no
+   membership, that `app_user` can no longer claim jobs, and that `app_worker` can:
+
+   ```sql
+   select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+     from pg_roles where rolname = 'app_worker';            -- expect: t f f f f
+   select count(*) from pg_auth_members am join pg_roles m on m.oid = am.member
+     join pg_roles r on r.oid = am.roleid
+    where 'app_worker' in (m.rolname, r.rolname);           -- expect: 0
+   select has_function_privilege('app_user',   'public.jobs_claim_next(text,text[])', 'execute'),
+          has_function_privilege('app_worker', 'public.jobs_claim_next(text,text[])', 'execute');
+                                                            -- expect: f | t
+   ```
+
+   Then, from the worker host, through the **pooled** endpoint it will really use
+   (`DATABASE_URL_WORKER`), `select session_user` must answer `app_worker` — the worker
+   performs this check itself at start and exits with a message if it fails. This
+   pooler check has **not yet been run against Neon by the package author** (only through
+   CI's local proxy): it is a required operator step on the first branch that receives 0070.
+   Finally, the worker's log shows `[worker] starting …` and queued work drains.
+4. Record every result in the run record.
+5. Announce completion and **lift the freeze explicitly** — the freeze ends
    by announcement, not by assumption.
 
 ## Failure doctrine (binding)
@@ -289,6 +309,13 @@ and none are invented at incident time.
   the freeze are lost — which is exactly why the freeze exists and why it is
   never skipped. The 6-hour timestamp repoint is a fallback inside its
   window only, never the plan; the snapshot branch is the plan.
+- **(c) After 0070 the worker processes nothing.** Queued work waits; nothing is lost and
+  the web app is unaffected. Read the worker's start-up log: a missing
+  `DATABASE_URL_WORKER`, or one that does not authenticate as `app_worker`, stops the
+  worker with a message saying so. Check the role exists and its password matches the
+  variable, and that the URL uses the pooled host. Fix the configuration and restart the
+  worker. **Never re-grant the worker functions to `app_user` to get going** — that
+  re-opens the gap 0070 closes. A defect in 0070 itself is case (a).
 
 ## Abort criteria (any step)
 
@@ -334,7 +361,7 @@ after any repo change.
 | 66  | `0067_admin_audit_completeness` | 1791582728057 | `9b26f90ece4a2ad2c362bf89b28e262b1fc63e616c5f6f7659360add8c16fc55` |
 | 67  | `0068_elevated_function_boundaries` | 1791583728057 | `ad13aa14ed4611a8b78e64640cef3ae9ce64a4adc5ee269431c311d9cf551209` |
 | 68  | `0069_password_reset_email_content` | 1791584728057 | `0931683cfc7b407b044967f7b8d6e9d14f3011674e25765fdcb9a0bf5c99284c` |
-| 69  | `0070_app_worker_role` | 1791585728057 | `1464ffaabbd2986793bf49cb17211baf8710e3bb6a1530dde4c90a3b9567654e` |
+| 69  | `0070_app_worker_role` | 1791585728057 | `11bcc7a3746775dd62c21035643f8065dccc94a12cb1a7efcbcec72062e54c55` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

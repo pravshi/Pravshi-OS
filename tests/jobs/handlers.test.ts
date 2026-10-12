@@ -24,8 +24,12 @@ vi.mock('../../src/lib/db/authorized', () => ({
 vi.mock('../../src/lib/db/worker-pool', async () => {
   const authorized = await import('../../src/lib/db/authorized');
   return {
-    withWorkerContext: (...args: Parameters<typeof authorized.withAuthorizedDb>) =>
-      authorized.withAuthorizedDb(...args),
+    // (ctx, workItem, fn): the work item binds the call in SQL (0070); the mock ignores it.
+    withWorkerContext: (
+      ctx: Parameters<typeof authorized.withAuthorizedDb>[0],
+      _item: unknown,
+      fn: Parameters<typeof authorized.withAuthorizedDb>[1],
+    ) => authorized.withAuthorizedDb(ctx, fn),
     connectWorkerWithWake: vi.fn(async () => {
       throw new Error('no database in handler unit tests');
     }),

@@ -149,7 +149,9 @@ async function deliverReminder(row: ClaimedReminderRow): Promise<ReminderDeliver
   const title = row.task_title;
   // Worker connection (app_worker, 0070): the notification definers' person-less
   // branch serves only that role, for the reminder row's own organization.
-  return withWorkerContext(ctx, async (tx) => {
+  // Bound to the claimed reminder (0070): the database takes the organization AND the
+  // recipient from the reminder row.
+  return withWorkerContext(ctx, { kind: 'reminder', id: row.reminder_id }, async (tx) => {
     const recipient = await tx.execute<{ recipient_exists: boolean }>(sql`
       select public.notifications_recipient_exists(${row.org_id}::uuid, ${row.person_id}::uuid)
         as recipient_exists

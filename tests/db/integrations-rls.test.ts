@@ -655,8 +655,17 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
   }, 60_000);
 
   it('definer: resolve_delivery answers only the exact (org, subscription) pair', async () => {
-    // As the worker resolves it (0070): the app_worker login, the system actor
-    // bound to the job's organization (org A).
+    // As the worker resolves it (0070): the app_worker login, the system actor,
+    // bound to the webhook job of org A it holds.
+    const worker = `rls-webhook-worker-${RUN}`;
+    const heldJob = (
+      await owner.query<{ id: string }>(
+        `insert into public.jobs (org_id, type, status, payload, next_run_at, claimed_by, claimed_at, heartbeat_at)
+         values ($1, 'webhook', 'running', '{}'::jsonb, now() + interval '30 days', $2, now(), now() + interval '30 days')
+         returning id`,
+        [orgA, worker],
+      )
+    ).rows[0]!.id;
     const resolve = async (orgId: string, subscriptionId: string) =>
       (
         await inWorkerContext<{ is_active: boolean; signing_secret_ciphertext: string | null }>(
@@ -665,6 +674,7 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
           `select is_active, signing_secret_ciphertext
            from public.integration_webhook_resolve_delivery($1::uuid, $2::uuid)`,
           [orgId, subscriptionId],
+          { 'app.work_kind': 'job', 'app.work_id': heldJob, 'app.worker_id': worker },
         )
       ).rows;
     // A tenant request (alice, app_user) cannot resolve a secret at all, not even

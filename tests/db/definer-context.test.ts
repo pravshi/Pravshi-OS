@@ -47,6 +47,7 @@ async function inCtx<T extends Record<string, unknown> = Record<string, unknown>
   text: string,
   params: unknown[] = [],
   pool: Pool = asUser,
+  extra: Record<string, string> = {},
 ): Promise<{ rows: T[]; rowCount: number }> {
   const client = await pool.connect();
   try {
@@ -57,6 +58,9 @@ async function inCtx<T extends Record<string, unknown> = Record<string, unknown>
               set_config('app.aal', 'aal1', true)`,
       [ctx.personId, ctx.orgId],
     );
+    for (const [name, value] of Object.entries(extra)) {
+      await client.query(`select set_config($1, $2, true)`, [name, value]);
+    }
     const result = await client.query<T>(text, params);
     await client.query('commit');
     return { rows: result.rows, rowCount: result.rowCount ?? 0 };
@@ -90,6 +94,14 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
   const empCtx = (): Ctx => ({ personId: empA, orgId: orgA });
   const noCtx = (): Ctx => ({ personId: '', orgId: '' });
   const workerCtx = (): Ctx => ({ personId: SYSTEM_ACTOR, orgId: orgA });
+  // The notification job of org A the worker holds (0070 binds worker calls to it).
+  let heldJobA = '';
+  const DC_WORKER = `dc-worker-${RUN}`;
+  const holding = () => ({
+    'app.work_kind': 'job',
+    'app.work_id': heldJobA,
+    'app.worker_id': DC_WORKER,
+  });
 
   beforeAll(async () => {
     const fixtures = await import('../authz/fixtures');
@@ -140,6 +152,14 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
         [orgA, empA, randomUUID(), tokens],
       );
     }
+    heldJobA = (
+      await owner.query<{ id: string }>(
+        `insert into public.jobs (org_id, type, status, payload, next_run_at, claimed_by, claimed_at, heartbeat_at)
+         values ($1, 'notification', 'running', '{}'::jsonb, now() + interval '30 days', $2, now(), now() + interval '30 days')
+         returning id`,
+        [orgA, DC_WORKER],
+      )
+    ).rows[0]!.id;
     // A wildcard preference: empA muted the email channel.
     await owner.query(
       `insert into public.notification_preferences (org_id, person_id, event_type, channel, enabled)
@@ -248,12 +268,13 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
     expect(code).toBe('42501');
   });
 
-  it('worker plane preserved: recipient_exists answers under the system actor', async () => {
+  it('worker plane preserved: recipient_exists answers for the job the worker holds', async () => {
     const yes = await inCtx<{ recipient_exists: boolean }>(
       workerCtx(),
       `select public.notifications_recipient_exists($1::uuid, $2::uuid) as recipient_exists`,
       [orgA, empA],
       asWorker,
+      holding(),
     );
     expect(yes.rows[0]!.recipient_exists).toBe(true);
     const foreign = await inCtx<{ recipient_exists: boolean }>(
@@ -261,16 +282,18 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
       `select public.notifications_recipient_exists($1::uuid, $2::uuid) as recipient_exists`,
       [orgA, empB],
       asWorker,
+      holding(),
     );
     expect(foreign.rows[0]!.recipient_exists).toBe(false);
   });
 
-  it('worker plane preserved: notifications_insert writes under the system actor', async () => {
+  it('worker plane preserved: notifications_insert writes for the job the worker holds', async () => {
     const { rows } = await inCtx<{ id: string }>(
       workerCtx(),
       `select public.notifications_insert($1::uuid, $2::uuid, 'Phase 11 probe', 'worker-plane write', '{}'::jsonb) as id`,
       [orgA, empA],
       asWorker,
+      holding(),
     );
     const id = rows[0]!.id;
     expect(id).toBeTruthy();
@@ -281,17 +304,20 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
     expect(stored.rows[0]).toEqual({ org_id: orgA, person_id: empA });
   });
 
-  it('worker plane: notifications_insert refuses a mismatched org claim (42501, no row)', async () => {
+  it('worker plane: holding org A’s job, notifications_insert refuses org B whatever app.org_id says (42501, no row)', async () => {
     const title = `Phase 11 claim probe ${RUN}`;
-    const code = await sqlstateOf(
-      inCtx(
-        { personId: SYSTEM_ACTOR, orgId: orgB },
-        `select public.notifications_insert($1::uuid, $2::uuid, $3, 'worker-plane claim probe', '{}'::jsonb)`,
-        [orgA, empA, title],
-        asWorker,
-      ),
-    );
-    expect(code).toBe('42501');
+    for (const claim of [orgB, orgA]) {
+      const code = await sqlstateOf(
+        inCtx(
+          { personId: SYSTEM_ACTOR, orgId: claim },
+          `select public.notifications_insert($1::uuid, $2::uuid, $3, 'worker-plane claim probe', '{}'::jsonb)`,
+          [orgB, empB, title],
+          asWorker,
+          holding(),
+        ),
+      );
+      expect(code, `app.org_id=${claim === orgB ? 'B' : 'A'}`).toBe('42501');
+    }
     const stored = await owner.query<{ n: number }>(
       `select count(*)::int as n from public.notifications where title = $1`,
       [title],
@@ -299,24 +325,24 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
     expect(stored.rows[0]!.n).toBe(0);
   });
 
-  it('worker plane: notifications_recipient_exists refuses a mismatched org claim (42501)', async () => {
+  it('worker plane: holding org A’s job, notifications_recipient_exists refuses org B (42501)', async () => {
     const code = await sqlstateOf(
       inCtx(
         { personId: SYSTEM_ACTOR, orgId: orgB },
         `select public.notifications_recipient_exists($1::uuid, $2::uuid)`,
-        [orgA, empA],
+        [orgB, empB],
         asWorker,
+        holding(),
       ),
     );
     expect(code).toBe('42501');
   });
 
-  it('worker plane: both notification definers refuse with no org claim in context (42501)', async () => {
-    const noClaim: Ctx = { personId: SYSTEM_ACTOR, orgId: '' };
+  it('worker plane: both notification definers refuse without a held work item, even with a matching app.org_id (42501)', async () => {
     const insertCode = await sqlstateOf(
       inCtx(
-        noClaim,
-        `select public.notifications_insert($1::uuid, $2::uuid, 'Phase 11 no-claim probe', 'x', '{}'::jsonb)`,
+        workerCtx(),
+        `select public.notifications_insert($1::uuid, $2::uuid, 'Phase 11 no-item probe', 'x', '{}'::jsonb)`,
         [orgA, empA],
         asWorker,
       ),
@@ -324,7 +350,7 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
     expect(insertCode).toBe('42501');
     const existsCode = await sqlstateOf(
       inCtx(
-        noClaim,
+        workerCtx(),
         `select public.notifications_recipient_exists($1::uuid, $2::uuid)`,
         [orgA, empA],
         asWorker,
@@ -341,7 +367,9 @@ describe.skipIf(!HAS_DB)('definer context assertions (Phase 11 §4.1)', () => {
       `select public.notifications_insert($1::uuid, $2::uuid, 'forged worker', 'x', '{}'::jsonb)`,
       `select public.notification_channel_enabled($1::uuid, $2::uuid, 'TASK_DUE', 'in_app')`,
     ]) {
-      expect(await sqlstateOf(inCtx(workerCtx(), sql, [orgA, empA])), sql).toBe('42501');
+      expect(await sqlstateOf(inCtx(workerCtx(), sql, [orgA, empA], asUser, holding())), sql).toBe(
+        '42501',
+      );
     }
     const forged = await owner.query<{ n: number }>(
       `select count(*)::int as n from public.notifications where title = 'forged worker'`,

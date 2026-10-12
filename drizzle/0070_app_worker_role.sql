@@ -29,8 +29,11 @@
 --           under THIS worker's claim (the old 1-argument form is dropped)
 --   PART 5  shared functions: the person-less branch (notifications_insert,
 --           notifications_recipient_exists, notification_channel_enabled,
---           integration_webhook_resolve_delivery) requires the worker role;
---           app_user keeps EXECUTE for the person branch web requests use
+--           integration_webhook_resolve_delivery) requires the worker role AND
+--           takes its organization (and, for a reminder, its recipient) from
+--           the work item the worker holds — authz.worker_bound_scope() — never
+--           from app.org_id; app_user keeps EXECUTE for the person branch web
+--           requests use
 --   PART 6  verification
 --
 -- app_worker gets NO table, sequence or schema-object privilege and no RLS
@@ -280,8 +283,59 @@ grant execute on function public.workflow_execute_as_job(uuid, text) to app_work
 -- PART 5 — shared functions: the person-less branch is the worker's alone
 -- ═════════════════════════════════════════════════════════════════════════════
 -- Web requests call these with a person context (unchanged). The person-less
--- branch trusted the caller-set app.org_id; it now also requires the worker
--- role, so a forged app.org_id on an app_user connection is refused.
+-- branch trusted the caller-set app.org_id. It now requires the worker role,
+-- and its organization comes from the work item the worker HOLDS — a database
+-- row — never from a setting: the worker names the item (app.work_kind,
+-- app.work_id, app.worker_id; untrusted selectors) and the row decides.
+--   job       running, claimed_by = app.worker_id   -> the job's organization
+--   reminder  claimed (is_sent)                     -> its organization AND person
+-- So a worker bug, or a forged app.org_id, cannot reach another tenant.
+create function authz.worker_bound_scope()
+returns table (org_id uuid, person_id uuid)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_kind text := nullif(current_setting('app.work_kind', true), '');
+  v_raw text := nullif(current_setting('app.work_id', true), '');
+  v_worker text := nullif(current_setting('app.worker_id', true), '');
+  v_id uuid;
+begin
+  if not (select authz.is_worker()) or v_raw is null then
+    return;
+  end if;
+  begin
+    v_id := v_raw::uuid;
+  exception when invalid_text_representation then
+    return;
+  end;
+
+  if v_kind = 'job' and v_worker is not null then
+    return query
+    select j.org_id, null::uuid
+    from public.jobs j
+    where j.id = v_id
+      and j.status = 'running'
+      and j.claimed_by = v_worker;
+  elsif v_kind = 'reminder' then
+    return query
+    select r.org_id, r.person_id
+    from public.task_reminders r
+    where r.id = v_id
+      and r.is_sent;
+  end if;
+end;
+$$;
+
+comment on function authz.worker_bound_scope() is
+  'The organization (and, for a reminder, the recipient) a worker-plane call is bound to: '
+  'derived from the job the worker holds (running, claimed_by = app.worker_id) or the reminder '
+  'it claimed (is_sent). Empty for anyone but app_worker or for an unheld item (0070).';
+
+revoke all on function authz.worker_bound_scope() from public;
+
 create or replace function public.notifications_insert(
   p_org_id uuid,
   p_person_id uuid,
@@ -298,14 +352,23 @@ set search_path = ''
 as $$
 declare
   v_id uuid;
+  v_bound_org uuid;
+  v_bound_person uuid;
 begin
   if (select authz.person_id()) is not null then
     if p_org_id is distinct from (select authz.org_id()) then
       raise exception 'org_id mismatch' using errcode = '42501';
     end if;
-  elsif not (select authz.is_worker())
-     or p_org_id is distinct from nullif(current_setting('app.org_id', true), '')::uuid then
+  elsif not (select authz.is_worker()) then
     raise exception 'org_id mismatch' using errcode = '42501';
+  else
+    select b.org_id, b.person_id into v_bound_org, v_bound_person
+    from authz.worker_bound_scope() b;
+    if v_bound_org is null
+       or p_org_id is distinct from v_bound_org
+       or (v_bound_person is not null and p_person_id is distinct from v_bound_person) then
+      raise exception 'org_id mismatch' using errcode = '42501';
+    end if;
   end if;
 
   insert into public.notifications (org_id, person_id, title, message, data, type, event_id)
@@ -322,14 +385,24 @@ stable
 security definer
 set search_path = ''
 as $$
+declare
+  v_bound_org uuid;
+  v_bound_person uuid;
 begin
   if (select authz.person_id()) is not null then
     if p_org_id is distinct from (select authz.org_id()) then
       raise exception 'org_id mismatch' using errcode = '42501';
     end if;
-  elsif not (select authz.is_worker())
-     or p_org_id is distinct from nullif(current_setting('app.org_id', true), '')::uuid then
+  elsif not (select authz.is_worker()) then
     raise exception 'org_id mismatch' using errcode = '42501';
+  else
+    select b.org_id, b.person_id into v_bound_org, v_bound_person
+    from authz.worker_bound_scope() b;
+    if v_bound_org is null
+       or p_org_id is distinct from v_bound_org
+       or (v_bound_person is not null and p_person_id is distinct from v_bound_person) then
+      raise exception 'org_id mismatch' using errcode = '42501';
+    end if;
   end if;
 
   return exists (
@@ -354,14 +427,24 @@ stable
 security definer
 set search_path = ''
 as $$
+declare
+  v_bound_org uuid;
+  v_bound_person uuid;
 begin
   if (select authz.person_id()) is not null then
     if p_org_id is distinct from (select authz.org_id()) then
       raise exception 'org_id mismatch' using errcode = '42501';
     end if;
-  elsif not (select authz.is_worker())
-     or p_org_id is distinct from nullif(current_setting('app.org_id', true), '')::uuid then
+  elsif not (select authz.is_worker()) then
     raise exception 'org_id mismatch' using errcode = '42501';
+  else
+    select b.org_id, b.person_id into v_bound_org, v_bound_person
+    from authz.worker_bound_scope() b;
+    if v_bound_org is null
+       or p_org_id is distinct from v_bound_org
+       or (v_bound_person is not null and p_person_id is distinct from v_bound_person) then
+      raise exception 'org_id mismatch' using errcode = '42501';
+    end if;
   end if;
 
   return coalesce(
@@ -392,16 +475,28 @@ stable
 security definer
 set search_path = ''
 as $$
+declare
+  v_bound_org uuid;
+  v_bound_person uuid;
 begin
   if (select authz.person_id()) is not null then
     if p_org_id is distinct from (select authz.org_id()) then
       raise exception 'integration_webhook_resolve_delivery: organization mismatch'
         using errcode = '42501';
     end if;
-  elsif not (select authz.is_worker())
-     or p_org_id is distinct from nullif(current_setting('app.org_id', true), '')::uuid then
+  elsif not (select authz.is_worker()) then
     raise exception 'integration_webhook_resolve_delivery: organization mismatch'
       using errcode = '42501';
+  else
+    -- Only a held JOB resolves a secret (a reminder never does).
+    select b.org_id, b.person_id into v_bound_org, v_bound_person
+    from authz.worker_bound_scope() b;
+    if v_bound_org is null
+       or p_org_id is distinct from v_bound_org
+       or v_bound_person is not null then
+      raise exception 'integration_webhook_resolve_delivery: organization mismatch'
+        using errcode = '42501';
+    end if;
   end if;
 
   return query
@@ -472,11 +567,24 @@ begin
     where not has_function_privilege('app_user', s.sig, 'execute')
        or not has_function_privilege('app_worker', s.sig, 'execute')
     union all
-    select x.sig || ' person-less branch is not gated on authz.is_worker()'
+    select x.sig || ' person-less branch is not gated on the worker role and its held work item'
     from (select sig from shared
           union all select 'public.integration_webhook_resolve_delivery(uuid,uuid)') x
     join pg_proc p on p.oid = to_regprocedure(x.sig)
-    where strpos(p.prosrc, 'elsif not (select authz.is_worker())') = 0
+    where strpos(p.prosrc, 'elsif not (select authz.is_worker()) then') = 0
+       or strpos(p.prosrc, 'from authz.worker_bound_scope() b') = 0
+       or strpos(p.prosrc, 'current_setting(''app.org_id''') > 0
+    union all
+    select 'authz.worker_bound_scope() is missing'
+    where to_regprocedure('authz.worker_bound_scope()') is null
+    union all
+    select 'authz.worker_bound_scope() does not bind to the held job and the claimed reminder'
+    from pg_proc p
+    where p.oid = to_regprocedure('authz.worker_bound_scope()')
+      and (not p.prosecdef
+           or strpos(p.prosrc, 'j.claimed_by = v_worker') = 0
+           or strpos(p.prosrc, 'r.is_sent') = 0
+           or strpos(p.prosrc, 'authz.is_worker()') = 0)
     union all
     select 'workflow_execute_as_job does not bind to the claim'
     from pg_proc p
