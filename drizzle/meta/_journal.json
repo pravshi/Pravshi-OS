@@ -497,6 +497,14 @@
       "tag": "0066_worker_next_due",
       "breakpoints": true,
       "hash": "d0fe49560379f960ef2c5994371074007af36dfbfb28f0129c4afaaa2e9dbac6"
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791582728057,
+      "tag": "0067_admin_audit_completeness",
+      "breakpoints": true,
+      "hash": "9b26f90ece4a2ad2c362bf89b28e262b1fc63e616c5f6f7659360add8c16fc55"
     }
   ]
 }

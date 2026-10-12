@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0066 (production still pending — see the
+Database migrations: 0063–0067 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -44,6 +44,13 @@ Database migrations: 0063–0066 (production still pending — see the
 
 ### Fixed
 
+- Administrative actions that left no audit trail now record exactly one audit
+  entry each, committed with the change (migration 0067): creating and
+  archiving departments, creating, renaming, archiving and changing the
+  members of teams, and revoking one or all of a user's sessions. Each entry
+  carries the acting administrator and organization (derived by the database),
+  the request id, and before/after values; a refused action writes nothing, and
+  an audit failure rolls the action back.
 - The notification bell stops polling a page nobody has used for ten minutes
   and refreshes on the next activity; an unattended open tab no longer keeps the
   database awake overnight.

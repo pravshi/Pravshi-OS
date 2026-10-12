@@ -1,12 +1,15 @@
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
+import { setAuditRequestId } from './audit-context';
 
 /**
  * Team administration. Teams belong to exactly one department; membership joins
  * people to teams (migration 0004). Mutations go through the narrow SECURITY
  * DEFINER functions in migration 0028 — app_user holds no writes on these
- * tables. Listing is teams.view; every mutation is teams.manage.
+ * tables. Listing is teams.view; every mutation is teams.manage. Each write function
+ * records exactly one audit entry in the same transaction (migration 0067); the services
+ * hand it the request id first (setAuditRequestId).
  */
 
 export type TeamMember = {
@@ -101,6 +104,7 @@ export async function createTeam(
   const name = input.name.trim();
   if (name.length === 0) throw new Error('Team name is required.');
   return withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     const res = await tx.execute<{ id: string }>(sql`
       select public.create_team(
         ${input.departmentId}::uuid,
@@ -122,6 +126,7 @@ export async function updateTeam(
   const name = input.name.trim();
   if (name.length === 0) throw new Error('Team name is required.');
   await withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     await tx.execute(sql`
       select public.update_team(
         ${id}::uuid,
@@ -134,6 +139,7 @@ export async function updateTeam(
 
 export async function archiveTeam(auth: Authorization, id: string): Promise<void> {
   await withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     await tx.execute(sql`select public.archive_team(${id}::uuid)`);
   });
 }
@@ -144,6 +150,7 @@ export async function setTeamMembers(
   personIds: string[],
 ): Promise<void> {
   await withAuthorizedDb(auth.ctx, async (tx) => {
+    await setAuditRequestId(tx, auth);
     await tx.execute(sql`
       select public.set_team_members(${teamId}::uuid, ${personIds}::uuid[])
     `);
