@@ -185,6 +185,11 @@ export interface JobExecutionContext {
   auth: Authorization;
   /** Fires on SIGTERM/SIGINT so the handler can stop cooperatively. */
   signal: AbortSignal;
+  /**
+   * The id this worker claimed the job under. Worker-plane readers bound to the
+   * held job (job_email_content_for_worker, 0069) check it against claimed_by.
+   */
+  workerId: string;
 }
 
 // ── Handler registry ────────────────────────────────────────────────────────
@@ -353,7 +358,7 @@ async function executeJob(
   }, heartbeatIntervalMs);
 
   try {
-    await handler({ job, auth, signal: abort.signal });
+    await handler({ job, auth, signal: abort.signal, workerId });
     try {
       await completeJob(auth, job.id, undefined, workerId);
     } catch {

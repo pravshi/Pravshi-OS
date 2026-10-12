@@ -245,7 +245,12 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
 
   const runNotificationJob = async (job: Job): Promise<void> => {
     const auth = worker!.buildJobAuthorization(job);
-    await handlers!.handleNotification({ job, auth, signal: new AbortController().signal });
+    await handlers!.handleNotification({
+      job,
+      auth,
+      signal: new AbortController().signal,
+      workerId: 'test-worker',
+    });
   };
 
   const drainJob = async (jobId: string): Promise<void> => {

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0068 (production still pending — see the
+Database migrations: 0063–0069 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -77,6 +77,17 @@ Database migrations: 0063–0068 (production still pending — see the
 
 ### Security
 
+- A password-reset link could be read by other people in the same organization
+  (migration 0069). The reset email — whose link carries the reset token — was
+  stored as an email job, and the jobs list (`GET /api/jobs`) shows job contents
+  to anyone allowed to view jobs: administrators and project managers. Since
+  anyone can request a reset for any address, a project manager could request
+  one for a colleague and use the link first. The email body now lives in a
+  table no application role can read; the job keeps only the recipient and the
+  subject, the worker reads the body only for the job it is sending, and the
+  body is deleted once the job is finished. Existing reset jobs were cleaned in
+  the same migration. Reset links, expiry and single use are unchanged. Not
+  exploitable in production, which has never run this code.
 - Elevated database functions now check the organization they act on against
   the caller (migration 0068). Claiming jobs refuses a signed-in request;
   resolving a webhook's signing secret, checking a protected role and deleting a
