@@ -693,7 +693,13 @@ describe('role lifecycle', () => {
 
 // ── has() / scope_for() equivalence ──────────────────────────────────────────────
 
-describe('has() and scope_for() can never disagree', () => {
+// The sweeps below are this suite's heaviest work, and it is database CPU, not round
+// trips: one sweep is 254 SECURITY DEFINER calls, about 35 ms on a quiet database, and a
+// test runs six to fourteen of them. Under the full parallel suite the database shares
+// the host with every other worker, a single sweep has been measured at 1.5-7.7 s, and
+// the six sequential sweeps of the scope-ladder case overran the 30 s default. The
+// assertions are unchanged; only the wall-clock allowance reflects the work.
+describe('has() and scope_for() can never disagree', { timeout: 120_000 }, () => {
   it('is true by construction: has() is defined as scope_for() is not null', async () => {
     const { rows } = await owner.query<{ src: string }>(
       `select pg_get_functiondef(p.oid) src from pg_proc p

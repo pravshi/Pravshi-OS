@@ -394,7 +394,11 @@ describe.runIf(HAS_DB)(
       });
     }, 60_000);
 
-    const pwresetJobs = async () =>
+    // Reset jobs THIS request could have produced: one in this file's own org, or one
+    // addressed to the probed email. Other suites enqueue reset jobs for their own orgs
+    // while this one runs (the reset-content confidentiality suite, the auth journeys),
+    // so a database-wide id diff counted their jobs as this request's.
+    const pwresetJobs = async (email: string) =>
       owner!.query<{
         id: string;
         org_id: string;
@@ -404,11 +408,14 @@ describe.runIf(HAS_DB)(
         payload: { to?: string };
       }>(
         `select id, org_id, type, dedup_key, enqueued_by, payload
-         from public.jobs where dedup_key like 'pwreset:%'`,
+         from public.jobs
+        where dedup_key like 'pwreset:%'
+          and (org_id = $1::uuid or lower(payload->>'to') = lower($2))`,
+        [orgId, email],
       );
 
     it('the exists case: exactly one email job, dedup-keyed on the reset row, recipient + org derived', async () => {
-      const before = await pwresetJobs();
+      const before = await pwresetJobs(acct.email);
       const answer = await requestPasswordReset(acct.email, `198.51.100.${(ipSeq += 1)}`);
       expect(answer).toEqual({ ok: true });
 
@@ -423,7 +430,7 @@ describe.runIf(HAS_DB)(
       ).rows[0]!;
       expect(reset).toBeDefined();
 
-      const jobs = (await pwresetJobs()).rows.filter(
+      const jobs = (await pwresetJobs(acct.email)).rows.filter(
         (j) => !before.rows.some((b) => b.id === j.id),
       );
       expect(jobs).toHaveLength(1);
@@ -438,13 +445,14 @@ describe.runIf(HAS_DB)(
 
     it('the not-exists case: the same uniform answer, and nothing is created', async () => {
       const ghost = `ghost-${RUN}@example.test`;
-      const jobsBefore = await pwresetJobs();
+      const jobsBefore = await pwresetJobs(ghost);
       const answer = await requestPasswordReset(ghost, `198.51.100.${(ipSeq += 1)}`);
       expect(answer).toEqual({ ok: true });
-      // No new email job (id-set diff, immune to other suites' traffic), no
-      // reset row hangs off the ghost (it has no login to hang one on), and
-      // no reset-requested event leaks the probe server-side either.
-      const jobsAfter = await pwresetJobs();
+      // No new email job (id-set diff over the jobs this request could have
+      // produced — see pwresetJobs), no reset row hangs off the ghost (it has
+      // no login to hang one on), and no reset-requested event leaks the
+      // probe server-side either.
+      const jobsAfter = await pwresetJobs(ghost);
       expect(jobsAfter.rows.map((j) => j.id).sort()).toEqual(
         jobsBefore.rows.map((j) => j.id).sort(),
       );
