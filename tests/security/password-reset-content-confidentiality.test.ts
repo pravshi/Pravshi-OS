@@ -50,6 +50,9 @@ const NEW_PASSWORD = 'a fresh and sufficiently long passphrase 7';
 describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The worker's own login (0070): the job definers and the protected-content reader
+  // are app_worker's alone.
+  const asWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
   let org = '';
   let victim!: Account;
   let pm!: Account;
@@ -96,6 +99,7 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     spies.forEach((s) => s.mockRestore());
     await owner.end();
     await asUser.end();
+    await asWorker.end();
   });
 
   /** Request a reset for the victim through the real pre-auth entry; return its job. */
@@ -293,8 +297,8 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
 
   it('serves the content only to the worker holding the running job', async () => {
     const { jobId } = await requestResetJob();
-    const read = (workerId: string) =>
-      asUser.query(`select html from public.job_email_content_for_worker($1::uuid, $2)`, [
+    const read = (workerId: string, pool: Pool = asWorker) =>
+      pool.query(`select html from public.job_email_content_for_worker($1::uuid, $2)`, [
         jobId,
         workerId,
       ]);
@@ -306,6 +310,12 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     // The holder: served.
     const served = await read(`w-owner-${RUN}`);
     expect(LINK.test(String(served.rows[0]?.html))).toBe(true);
+    // 0070 closes the raw-SQL path Phase A documented: an app_user connection with no
+    // identity, naming the holder's worker id exactly, is refused — it is not the worker.
+    expect(await codeOf(read(`w-owner-${RUN}`, asUser))).toBe('42501');
+    expect(
+      await codeOf(asUser.query(`select id from public.jobs_claim_next('w', array['email'])`)),
+    ).toBe('42501');
   });
 
   it('a failed send, its job error, the retry and the logs carry no part of the link', async () => {
@@ -338,7 +348,7 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     expect(leaks(`${classified.code} ${classified.message}`, token)).toBe(false);
 
     // The worker records the failure exactly as the runtime does.
-    await asUser.query(`select * from public.jobs_fail($1, $2::uuid, $3, $4, true)`, [
+    await asWorker.query(`select * from public.jobs_fail($1, $2::uuid, $3, $4, true)`, [
       workerId,
       jobId,
       classified.code,
@@ -412,10 +422,10 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     const deadToken = await protectedToken(dead.jobId);
     const workerId = `w-dl-${RUN}`;
     await holdAsWorker(dead.jobId, workerId);
-    await asUser.query(`select * from public.jobs_fail($1, $2::uuid, 'CONFIG_ERROR', 'x', false)`, [
-      workerId,
-      dead.jobId,
-    ]);
+    await asWorker.query(
+      `select * from public.jobs_fail($1, $2::uuid, 'CONFIG_ERROR', 'x', false)`,
+      [workerId, dead.jobId],
+    );
     const deadStatus = (
       await owner.query<{ status: string }>(`select status from public.jobs where id = $1`, [
         dead.jobId,
@@ -486,7 +496,7 @@ describe.skipIf(!HAS_DB)('password-reset content confidentiality (0069, live DB)
     expect(token, 'the delivered email carries the link').toMatch(/^[0-9a-f]{64}$/);
 
     // The job completes; its protected content is gone with it.
-    await asUser.query(`select * from public.jobs_complete($1, $2::uuid)`, [workerId, jobId]);
+    await asWorker.query(`select * from public.jobs_complete($1, $2::uuid)`, [workerId, jobId]);
     const left = await owner.query(`select 1 from public.job_email_content where job_id = $1`, [
       jobId,
     ]);

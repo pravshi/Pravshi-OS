@@ -40,6 +40,7 @@ import { env, webhookSigningSecret } from '@/env';
 import { sendViaResend } from '../integrations/providers/email/send';
 import { decryptSecret, IntegrationsVaultError } from '../integrations/secrets';
 import { withAuthorizedDb } from '../db/authorized';
+import { withWorkerContext } from '../db/worker-pool';
 import type { Authorization } from '../authz/require-permission';
 import {
   CleanupPayloadSchema,
@@ -216,8 +217,9 @@ async function assertPersonInOrg(
   // and therefore cannot see the recipient through people_select RLS. Ask the
   // bounded SECURITY DEFINER check added by migration 0052 instead of reading
   // public.people directly: it returns only whether this exact person is a
-  // non-deleted member of the job row's organization.
-  const rows = await withAuthorizedDb(auth.ctx, (tx) =>
+  // non-deleted member of the job row's organization. Worker connection
+  // (app_worker, 0070): the definer's person-less branch serves only that role.
+  const rows = await withWorkerContext(auth.ctx, (tx) =>
     tx.execute<{ recipient_exists: boolean }>(
       sql`select public.notifications_recipient_exists(
             ${orgId}::uuid,
@@ -260,7 +262,7 @@ export const handleNotification: JobHandler = async (ctx: JobExecutionContext) =
     // insert so the notification is still delivered (the 0052 function keeps
     // the 5-arg call shape working via defaults once applied).
     try {
-      await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+      await withWorkerContext(ctx.auth.ctx, (tx) =>
         tx.execute(
           sql`select public.notifications_insert(
                  ${orgId}::uuid,
@@ -279,7 +281,7 @@ export const handleNotification: JobHandler = async (ctx: JobExecutionContext) =
         `[jobs] extended notifications_insert() unavailable job=${ctx.job.id} ` +
           '— falling back to the 5-argument signature (type/event_id defaulted)',
       );
-      await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+      await withWorkerContext(ctx.auth.ctx, (tx) =>
         tx.execute(
           sql`select public.notifications_insert(
                  ${orgId}::uuid,
@@ -1021,7 +1023,8 @@ async function resolveSubscriptionSigningSecret(
   subscriptionId: string,
 ): Promise<string | null> {
   const orgId = ctx.job.orgId;
-  const rows = await withAuthorizedDb(ctx.auth.ctx, (tx) =>
+  // Worker connection (app_worker, 0070): only that role may resolve a secret.
+  const rows = await withWorkerContext(ctx.auth.ctx, (tx) =>
     tx.execute<{ is_active: boolean; signing_secret_ciphertext: string | null }>(sql`
       select r.is_active, r.signing_secret_ciphertext
       from public.integration_webhook_resolve_delivery(

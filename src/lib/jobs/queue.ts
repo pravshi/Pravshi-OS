@@ -33,7 +33,7 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAuthorizedDb, type Tx } from '../db/authorized';
-import { connectWithWake } from '../db/pool';
+import { connectWorkerWithWake } from '../db/worker-pool';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { auditJobsMutation } from './audit';
@@ -124,7 +124,7 @@ async function requireJobPermission(auth: Authorization, permission: string): Pr
  *  through it — the definer verifies everything from the job row, so the
  *  caller identity is irrelevant). */
 export async function withQueueDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const client = await connectWithWake();
+  const client = await connectWorkerWithWake();
   try {
     const db = drizzle(client);
     return await db.transaction(fn);

@@ -30,6 +30,8 @@ import {
 describe.skipIf(!DB_READY)('worker_next_due_at (live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const appUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The worker's own login (0070): worker_next_due_at() is app_worker's alone.
+  const appWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
   let orgId = '';
   let personId = '';
   let workflowId = '';
@@ -47,6 +49,7 @@ describe.skipIf(!DB_READY)('worker_next_due_at (live DB)', () => {
     if (!DB_READY) return;
     await owner.end();
     await appUser.end();
+    await appWorker.end();
   });
 
   /** Run `seed` and read the answer inside one transaction that is always rolled back. */
@@ -145,18 +148,26 @@ describe.skipIf(!DB_READY)('worker_next_due_at (live DB)', () => {
     expect(due).toBe('2001-02-01T00:00:00');
   });
 
-  it('refuses a signed-in person context (42501)', async () => {
-    expect(
-      await sqlstateOf(
-        inContext(appUser, { personId, orgId }, `select public.worker_next_due_at()`),
-      ),
-    ).toBe('42501');
+  it('refuses a signed-in person context (42501), even on the worker login', async () => {
+    // On app_worker the function itself refuses a person (its body check); on
+    // app_user it is not executable at all (0070).
+    for (const pool of [appWorker, appUser]) {
+      expect(
+        await sqlstateOf(
+          inContext(pool, { personId, orgId }, `select public.worker_next_due_at()`),
+        ),
+      ).toBe('42501');
+    }
   });
 
-  it('answers app_user with no identity — the worker plane — and the TS wrapper parses it', async () => {
+  it('answers app_worker with no identity — the worker plane — and the TS wrapper parses it', async () => {
     await expect(
-      inContext(appUser, {}, `select public.worker_next_due_at() as due`),
+      inContext(appWorker, {}, `select public.worker_next_due_at() as due`),
     ).resolves.toBeDefined();
+    // app_user cannot ask at all (0070), even with no identity.
+    expect(
+      await sqlstateOf(inContext(appUser, {}, `select public.worker_next_due_at() as due`)),
+    ).toBe('42501');
     const { workerNextDueAt } = await import('@/lib/jobs/worker');
     const due = await workerNextDueAt();
     expect(due === null || Number.isFinite(due.getTime())).toBe(true);

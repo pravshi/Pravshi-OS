@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0069 (production still pending — see the
+Database migrations: 0063–0070 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -77,6 +77,15 @@ Database migrations: 0063–0069 (production still pending — see the
 
 ### Security
 
+- The background worker has its own database login, `app_worker` (migration 0070),
+  and the work only it should do — claiming and finishing jobs, retries, reminders,
+  scheduled runs, maintenance, reading a reset email's protected body, and resolving
+  webhook signing secrets — is now possible for that login only. Before, the web
+  app's own login could do all of it, so a flaw that let someone run database queries
+  as the web app would have exposed every organization's queued work. The database
+  recognises the worker by the login itself, not by any setting a caller could forge.
+  The worker needs the new `DATABASE_URL_WORKER` (worker host only; the app refuses it
+  on Vercel) and refuses to start without it.
 - A password-reset link could be read by other people in the same organization
   (migration 0069). The reset email — whose link carries the reset token — was
   stored as an email job, and the jobs list (`GET /api/jobs`) shows job contents

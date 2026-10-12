@@ -58,11 +58,15 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 import { mkOrg, mkPerson, mkRoleFor, mkWorkflow } from '../workflows/helpers';
+import { inWorkerContext, SYSTEM_ACTOR, workerPool } from '../worker-role';
 
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 
 const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+// The worker plane runs as its own login (0070): the job-lifecycle definers are
+// app_worker's alone, so they are exercised the way the worker calls them.
+const asWorker = workerPool();
 
 const RUN = Math.random()
   .toString(36)
@@ -140,6 +144,8 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
   let usageRowA = '';
 
   const aliceCtx = (): Ctx => ({ personId: alice, orgId: orgA });
+  /** The worker's context: the system actor bound to the job's organization. */
+  const workerCtx = () => ({ personId: SYSTEM_ACTOR, orgId: orgA });
   const empCtx = (): Ctx => ({ personId: empA, orgId: orgA });
 
   const insertJob = async (over: Record<string, unknown> = {}): Promise<string> => {
@@ -218,6 +224,7 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
   afterAll(async () => {
     await owner.end();
     await asUser.end();
+    await asWorker.end();
   });
 
   it('actor preconditions: both probe contexts resolve org, liveness and grants', async () => {
@@ -300,27 +307,31 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
 
   it('jobs: the worker definers run the lifecycle — start, heartbeat, fail, backoff, retry', async () => {
     await arrangeClaimed(jobFail);
-    const started = await inCtx<{ status: string }>(
-      aliceCtx(),
+    const started = await inWorkerContext<{ status: string }>(
+      asWorker,
+      workerCtx(),
       `select status from public.jobs_start($1, $2::uuid)`,
       [WORKER, jobFail],
     );
     expect(started.rows[0]!.status).toBe('running');
-    const beat = await inCtx<{ ok: boolean }>(
-      aliceCtx(),
+    const beat = await inWorkerContext<{ ok: boolean }>(
+      asWorker,
+      workerCtx(),
       `select public.jobs_heartbeat($1, $2::uuid) as ok`,
       [WORKER, jobFail],
     );
     expect(beat.rows[0]!.ok).toBe(true);
-    const failed = await inCtx<{ status: string; attempts: number }>(
-      aliceCtx(),
+    const failed = await inWorkerContext<{ status: string; attempts: number }>(
+      asWorker,
+      workerCtx(),
       `select status, attempts from public.jobs_fail($1, $2::uuid, 'ERR_PROBE', 'probe failure', true)`,
       [WORKER, jobFail],
     );
     expect(failed.rows[0]!.status).toBe('failed');
     expect(failed.rows[0]!.attempts).toBe(1);
-    const backedOff = await inCtx<{ ok: boolean }>(
-      aliceCtx(),
+    const backedOff = await inWorkerContext<{ ok: boolean }>(
+      asWorker,
+      workerCtx(),
       `select public.jobs_apply_backoff($1::uuid, now() - interval '1 minute') as ok`,
       [jobFail],
     );
@@ -341,17 +352,22 @@ describe.skipIf(!HAS_DB)('identity freeze (Phase 11 §4.2)', () => {
 
   it('jobs: the worker definers complete and release jobs', async () => {
     await arrangeClaimed(jobDone);
-    await inCtx(aliceCtx(), `select * from public.jobs_start($1, $2::uuid)`, [WORKER, jobDone]);
-    const done = await inCtx<{ status: string }>(
-      aliceCtx(),
+    await inWorkerContext(asWorker, workerCtx(), `select * from public.jobs_start($1, $2::uuid)`, [
+      WORKER,
+      jobDone,
+    ]);
+    const done = await inWorkerContext<{ status: string }>(
+      asWorker,
+      workerCtx(),
       `select status from public.jobs_complete($1, $2::uuid)`,
       [WORKER, jobDone],
     );
     expect(done.rows[0]!.status).toBe('succeeded');
 
     await arrangeClaimed(jobRelease);
-    const released = await inCtx<{ ok: boolean }>(
-      aliceCtx(),
+    const released = await inWorkerContext<{ ok: boolean }>(
+      asWorker,
+      workerCtx(),
       `select public.jobs_release_claim($1::uuid, $2) as ok`,
       [jobRelease, WORKER],
     );

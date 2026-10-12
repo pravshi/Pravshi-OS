@@ -18,6 +18,19 @@ vi.mock('../../src/lib/jobs/worker', () => ({
 vi.mock('../../src/lib/db/authorized', () => ({
   withAuthorizedDb: vi.fn(),
 }));
+// Since 0070 the worker's system-actor calls run on the app_worker connection
+// (withWorkerContext); route them to the same mock so these tests keep asserting
+// exactly what they did.
+vi.mock('../../src/lib/db/worker-pool', async () => {
+  const authorized = await import('../../src/lib/db/authorized');
+  return {
+    withWorkerContext: (...args: Parameters<typeof authorized.withAuthorizedDb>) =>
+      authorized.withAuthorizedDb(...args),
+    connectWorkerWithWake: vi.fn(async () => {
+      throw new Error('no database in handler unit tests');
+    }),
+  };
+});
 
 // Phase 10 (Wave P): the Resend SDK is stubbed so the wired email adapter
 // path can be asserted without network access or a real provider account.

@@ -521,6 +521,14 @@
       "tag": "0069_password_reset_email_content",
       "breakpoints": true,
       "hash": "0931683cfc7b407b044967f7b8d6e9d14f3011674e25765fdcb9a0bf5c99284c"
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1791585728057,
+      "tag": "0070_app_worker_role",
+      "breakpoints": true,
+      "hash": "1464ffaabbd2986793bf49cb17211baf8710e3bb6a1530dde4c90a3b9567654e"
     }
   ]
 }

@@ -37,6 +37,11 @@ vi.mock('@/lib/jobs/queue', () => ({
   heartbeatJob: vi.fn(async () => undefined),
 }));
 
+// Since 0070 the worker plane connects as app_worker (worker-pool); the same mocked
+// connect serves it, so assertions on connectWithWake keep their meaning.
+vi.mock('@/lib/db/worker-pool', async () => ({
+  connectWorkerWithWake: (await import('@/lib/db/pool')).connectWithWake,
+}));
 vi.mock('@/lib/db/pool', () => ({
   connectWithWake: vi.fn(async () => ({ release: hoisted.releaseClient })),
 }));

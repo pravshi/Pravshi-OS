@@ -21,7 +21,7 @@
  */
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWithWake } from '../db/pool';
+import { connectWorkerWithWake } from '../db/worker-pool';
 import type { Tx } from '../db/authorized';
 
 /** Rows per retention target per call. 0065 accepts 1..10000. */
@@ -41,7 +41,7 @@ export interface DbMaintenanceResult {
 // ── Worker-plane DB (same model as reapStaleJobs in worker.ts) ──────────────
 
 async function withWorkerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const client = await connectWithWake();
+  const client = await connectWorkerWithWake();
   try {
     const db = drizzle(client);
     return await db.transaction(fn);

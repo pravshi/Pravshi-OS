@@ -56,8 +56,8 @@
 
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWithWake } from '../db/pool';
-import { withAuthorizedDb, type Tx } from '../db/authorized';
+import { connectWorkerWithWake, withWorkerContext } from '../db/worker-pool';
+import type { Tx } from '../db/authorized';
 import type { AuthContext } from '../db/context';
 import { isPgCode } from '../work/errors';
 import { notificationTitle } from '../notifications/emit';
@@ -80,7 +80,7 @@ const TASK_REMINDER_SWEEP_MAX_LIMIT = 1000;
 // ── Worker-plane DB (same model as reapStaleJobs in worker.ts) ──────────────
 
 async function withWorkerDb<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  const client = await connectWithWake();
+  const client = await connectWorkerWithWake();
   try {
     const db = drizzle(client);
     return await db.transaction(fn);
@@ -147,7 +147,9 @@ async function deliverReminder(row: ClaimedReminderRow): Promise<ReminderDeliver
   }
   const ctx: AuthContext = { personId: SYSTEM_ACTOR_ID, orgId: row.org_id, aal: 'aal1' };
   const title = row.task_title;
-  return withAuthorizedDb(ctx, async (tx) => {
+  // Worker connection (app_worker, 0070): the notification definers' person-less
+  // branch serves only that role, for the reminder row's own organization.
+  return withWorkerContext(ctx, async (tx) => {
     const recipient = await tx.execute<{ recipient_exists: boolean }>(sql`
       select public.notifications_recipient_exists(${row.org_id}::uuid, ${row.person_id}::uuid)
         as recipient_exists

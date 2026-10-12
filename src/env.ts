@@ -14,6 +14,19 @@ const runtimeSchema = z.object({
     .refine((u) => u.includes('-pooler.'), {
       message: 'DATABASE_URL must use the pooled Neon endpoint (host contains "-pooler")',
     }),
+  /**
+   * The background worker's own connection (role app_worker, migration 0070) — the only
+   * credential that can claim jobs or run the other worker-plane functions. Worker host
+   * only (Railway): never on Vercel, which parseRuntimeEnv refuses. Optional here because
+   * the web app never needs it; the worker requires it at start (src/lib/jobs/runner.ts).
+   */
+  DATABASE_URL_WORKER: z
+    .string()
+    .url()
+    .refine((u) => u.includes('-pooler.'), {
+      message: 'DATABASE_URL_WORKER must use the pooled Neon endpoint (host contains "-pooler")',
+    })
+    .optional(),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
@@ -167,6 +180,15 @@ export function parseRuntimeEnv(raw: Record<string, unknown>): RuntimeEnv {
         );
       }
     }
+  }
+  // The worker credential belongs on the worker host only. Vercel sets VERCEL=1 in every
+  // build and runtime it hosts; the worker host does not. Refused in builds too: the
+  // variable has no business in any Vercel environment.
+  if (raw.VERCEL && raw.DATABASE_URL_WORKER) {
+    throw new Error(
+      'DATABASE_URL_WORKER must never be present on Vercel. It uses app_worker, the role ' +
+        'that can claim every organization’s jobs. Set it on the worker host only.',
+    );
   }
   const r = runtimeSchema.safeParse(withoutBlanks(raw));
   return r.success ? r.data : fail(r.error.issues);

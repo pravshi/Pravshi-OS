@@ -30,7 +30,7 @@ The probe table is named `public._rls_probe`, with a leading underscore, on purp
 guard (which checks that every application table has a policy) excludes `_`-prefixed tables, so a
 probe left behind by accident cannot make that unrelated guard fail for the wrong reason.
 
-## The three roles
+## The four roles
 
 - **`app_owner`** owns the schema and every table in it, and is the role CI runs migrations as.
 - **`app_user`** is what the running application connects as. It must never be able to bypass RLS,
@@ -42,6 +42,12 @@ probe left behind by accident cannot make that unrelated guard fail for the wron
   just ownership.
 - **`app_admin`** covers three narrow, audited paths only: bootstrap, provisioning, and the audit
   writer. It is not the application's runtime role.
+- **`app_worker`** is the background worker's login (migration 0070). It holds EXECUTE on the
+  worker-plane functions and nothing else — no table or sequence privilege, no RLS policy, no
+  membership in or of any role. The database recognises the worker by this login
+  (`session_user`), so an `app_user` connection cannot pass itself off as the worker by setting
+  `app.person_id` / `app.org_id`. Its credential (`DATABASE_URL_WORKER`) lives on the worker host
+  only. `roles.sql` creates it like the others; 0070 refuses to run if it is missing.
 
 `NOBYPASSRLS` is already Postgres's default for a new role. `roles.sql` sets it explicitly anyway,
 because this file is where a future reader comes to confirm it — and a default that is never

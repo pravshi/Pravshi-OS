@@ -600,7 +600,7 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has twenty-eight authz helpers, and one app_user policy per table (two on login_events)', async () => {
+  it('has twenty-nine authz helpers, and one app_user policy per table (two on login_events)', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
@@ -620,6 +620,7 @@ describe('the rest of the authorization model is unchanged', () => {
       'is_active_person',
       'is_project_manager',
       'is_project_member',
+      'is_worker',
       'login_person_active',
       'mfa_enrollment_required',
       'my_departments',
@@ -640,7 +641,8 @@ describe('the rest of the authorization model is unchanged', () => {
     // owner-visibility RLS policies; 0063 added is_project_member and
     // is_project_manager for the project_members policy fix; 0068 added
     // next_identity_code_for_current_org, the runtime role's own-org door to
-    // the identity-code generator); if this fails the literal list is stale.
+    // the identity-code generator; 0070 added is_worker, the app_worker session
+    // test); if this fails the literal list is stale.
     const migrationSql = readdirSync(join(process.cwd(), 'drizzle'))
       .filter((f) => f.endsWith('.sql'))
       .sort()

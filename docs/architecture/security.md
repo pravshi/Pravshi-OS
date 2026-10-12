@@ -231,26 +231,43 @@ run SQL as `app_user` — and anyone with that can already confirm an address ex
 unchanged until a dedicated pre-authentication database role exists (the infrastructure package
 that also introduces `app_worker` and `app_platform`).
 
-**Residual (T-22): what the 0068 checks do not stop.** They bind each function to the
-transaction's identity, which stops a confused deputy — application code passing the wrong
-organization's id. They do not stop someone who can already run arbitrary SQL as `app_user`:
-that role can set `app.person_id` / `app.org_id` itself, and until the worker functions move to
-a dedicated `app_worker` role it can call them with no identity at all. In that position a
-caller can claim any organization's job (payload included), and can set `app.org_id` to satisfy
-the person-less branch of `integration_webhook_resolve_delivery` (it returns signing-secret
-ciphertext; the decryption key is not in the database). Impersonating a person additionally
-needs a valid person id of the target organization, which no API returns and RLS does not
-expose. The defence against that position is keeping SQL execution out of reach (parameterised
-queries only, T-15) and, next, the dedicated roles.
+**The worker's own role (0070).** The background worker connects as `app_worker`, and every
+worker-plane function — claiming, starting, completing, failing, releasing and reaping jobs,
+retry sweeps, next-due lookups, reminder claims, scheduler ticks, partition maintenance and
+retention, protected email content, webhook signing secrets, the workflow execution principal —
+is executable by that role only. The person-less branch of the notification definers requires
+the `app_worker` login as well. The database recognises the worker by the role the connection
+authenticated as (`session_user`), which `app_user` cannot change: no membership exists, `SET
+ROLE` needs one and `SET SESSION AUTHORIZATION` needs a superuser. So an `app_user` caller with
+raw SQL can no longer claim jobs, read payloads or protected bodies, or forge the worker by
+writing `app.org_id`. `app_worker` holds no table, sequence or schema-object privilege and no RLS
+policy; workflow actions run as their real principal on `app_user`, resolved only for a job the
+asking worker holds. Pinned by `tests/db/app-worker-role.test.ts`.
+
+**Residual (T-22): what remains open to a raw-SQL `app_user` caller.** The checks bind functions to
+the transaction's identity, which stops a confused deputy. They do not stop someone who can
+already run arbitrary SQL as `app_user`, because that role:
+- can write `app.person_id` / `app.org_id` itself — impersonating a person needs a valid person
+  id of the target organization, which no API returns and RLS does not expose;
+- can call `authz.update_credential_password(auth_user_id, hash)` (the reset-completion
+  primitive), which checks nothing beyond the account existing, and `resolve_login_org(email)`.
+Closing those needs a pre-authentication role or a server-held proof inside the database (a
+separate design). The defence today is keeping SQL execution out of reach (parameterised queries
+only, T-15).
+
+**Residual: a compromised worker host** holds `app_worker` (every organization's background work)
+and `app_user`. That is inherent to a multi-tenant worker; the mitigations are credential hygiene,
+access control on the worker host, and the job-bound checks (a workflow principal or a protected
+email body only for the job the worker holds).
 
 **Credential-bearing email content (0069).** The password-reset email carries the reset token
 in its link, so its body never enters `jobs.payload` (which `jobs.view` holders can list): it is
 kept in `public.job_email_content` — no privilege for any application role, RLS forced with an
 owner-only policy — and read only through `job_email_content_for_worker(job_id, worker_id)`, which
 serves the email job the caller holds (running, `claimed_by` = that worker id) and refuses a
-signed-in caller. The body is deleted when the job is finished. Residual until the worker has its
-own role: a raw-SQL `app_user` caller with no identity can claim the job and read the body — a
-caller that can already set any password through `authz.update_credential_password`. Pinned by
+signed-in caller. The body is deleted when the job is finished. Since 0070 the reader is
+executable by `app_worker` only, so a raw-SQL `app_user` caller can no longer claim the job or
+read the body. Pinned by
 `tests/security/password-reset-content-confidentiality.test.ts`.
 
 **Inbound endpoint-key rotation during a request.** A receipt's status changes prove the

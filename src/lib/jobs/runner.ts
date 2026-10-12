@@ -17,6 +17,9 @@
  * ── REQUIRED ENV VARS ───────────────────────────────────────────────────────
  * Validated by `@/env` on startup — the process refuses to boot without them:
  *   DATABASE_URL        pooled Neon connection string (host contains "-pooler.")
+ *   DATABASE_URL_WORKER pooled connection string for role app_worker (0070) — every
+ *                       worker-plane operation runs on it; checked at start
+ *                       (must authenticate as app_worker). Worker host only.
  *   APP_URL             public app URL
  *   NODE_ENV            development | test | production
  *   BETTER_AUTH_SECRET  >= 32 chars (session signing)
@@ -118,7 +121,7 @@ Usage:
   pnpm worker            Start the worker (claims jobs, runs scheduler ticks).
   pnpm worker --help     Show this help.
 
-Required env (validated before start): DATABASE_URL, APP_URL, NODE_ENV,
+Required env (validated before start): DATABASE_URL, DATABASE_URL_WORKER, APP_URL, NODE_ENV,
 BETTER_AUTH_SECRET, HEALTH_CHECK_TOKEN.
 Optional env: SCHEDULER_TICK_MS (default 60000), HOSTNAME.
 
@@ -199,6 +202,25 @@ async function main(): Promise<void> {
   pool.on('error', (err: unknown) => {
     console.error('[worker] pool error (worker continues):', err);
   });
+
+  // The worker plane runs as app_worker (migration 0070). Without its credential, or with a
+  // credential that is not app_worker, every claim would be refused — fail fast and loudly
+  // instead, so the supervisor and the logs say why.
+  if (!env.DATABASE_URL_WORKER) {
+    console.error(
+      '[worker] DATABASE_URL_WORKER is not set: the worker connects as app_worker for every ' +
+        'worker-plane operation. Set it on the worker host (never on Vercel).',
+    );
+    process.exit(1);
+  }
+  const { workerSessionRole } = await import('../db/worker-pool');
+  const workerRole = await workerSessionRole();
+  if (workerRole !== 'app_worker') {
+    console.error(
+      `[worker] DATABASE_URL_WORKER authenticates as '${workerRole}', not app_worker. Refusing to start.`,
+    );
+    process.exit(1);
+  }
 
   const workerId = buildWorkerId();
   // SCHEDULER_TICK_MS is a non-secret numeric tuning knob with a validated safe

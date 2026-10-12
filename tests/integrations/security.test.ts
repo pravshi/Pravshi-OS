@@ -1149,10 +1149,17 @@ describe.skipIf(!HAS_DB)('integrations security (§4.7) — isolation, authoriza
     const aliceManage = await authFor(aliceAcct, 'integrations.manage');
 
     // Exactly the worker's resolution path (jobs/handlers.ts
-    // resolveSubscriptionSigningSecret): the 0059 definer under an
-    // authorized context, then the vault decrypt.
+    // resolveSubscriptionSigningSecret): the 0059 definer on the app_worker
+    // connection (0070) under the system actor bound to the job's org, then
+    // the vault decrypt.
+    const { withWorkerContext } = await import('@/lib/db/worker-pool');
     const resolveSecret = async (): Promise<string | null> => {
-      const rows = await authorized!.withAuthorizedDb(aliceManage.ctx, async (tx) => {
+      const workerCtx = {
+        personId: '00000000-0000-4000-8000-000000000000',
+        orgId: orgA,
+        aal: 'aal1' as const,
+      };
+      const rows = await withWorkerContext(workerCtx, async (tx) => {
         const res = await tx.execute<{ signing_secret_ciphertext: string | null }>(sql`
           select r.signing_secret_ciphertext
           from public.integration_webhook_resolve_delivery(${orgA}::uuid, ${subA}::uuid) r

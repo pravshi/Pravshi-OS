@@ -976,7 +976,7 @@ describe('the rest of the model is untouched', () => {
     );
     // The literal list is the census as of this suite's migration; 0063 later
     // added is_project_member and is_project_manager (the project_members
-    // policy fix) and 0068 added next_identity_code_for_current_org, so those
+    // policy fix), 0068 added next_identity_code_for_current_org and 0070 is_worker, so those
     // names are pinned here as well — the census this
     // test guards is "no helper appears without a migration accounting for it".
     expect(rows.map((r) => r.proname)).toEqual([
@@ -994,6 +994,7 @@ describe('the rest of the model is untouched', () => {
       'is_active_person',
       'is_project_manager',
       'is_project_member',
+      'is_worker',
       'login_person_active',
       'mfa_enrollment_required',
       'my_departments',

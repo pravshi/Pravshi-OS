@@ -15,6 +15,13 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'app_admin') then
     create role app_admin login nobypassrls;
   end if;
+  -- The background worker's own login (migration 0070). It is granted EXECUTE on the
+  -- worker-plane functions by that migration and nothing else: no table privileges, no
+  -- RLS policy, no membership in or of any other role. Its connection string
+  -- (DATABASE_URL_WORKER) belongs on the worker host only — never Vercel.
+  if not exists (select 1 from pg_roles where rolname = 'app_worker') then
+    create role app_worker login nobypassrls;
+  end if;
 end $$;
 
 -- Defensive: assert, rather than correct. BYPASSRLS and SUPERUSER defeat RLS directly:
@@ -50,7 +57,7 @@ begin
     ', '
   ) into bad
   from pg_roles
-  where rolname in ('app_owner','app_user','app_admin')
+  where rolname in ('app_owner','app_user','app_admin','app_worker')
     and (rolbypassrls or rolsuper or rolcreaterole or rolcreatedb);
   if bad is not null then
     raise exception 'FAIL: role(s) % hold an attribute this script asserts against. BYPASSRLS and SUPERUSER defeat RLS directly. CREATEROLE and CREATEDB are asserted as defense-in-depth, not as known RLS bypasses: they are privilege-escalation surface these roles have no legitimate reason to hold. Fix the role attributes rather than deleting this check.', bad;
@@ -102,4 +109,4 @@ alter default privileges for role app_owner in schema public
 
 -- Nobody creates objects in public except the owner, and nobody rewrites history.
 -- audit_logs arrives in Phase 1; this is the standing rule it will inherit.
-revoke create on schema public from app_user, app_admin, public;
+revoke create on schema public from app_user, app_admin, app_worker, public;
