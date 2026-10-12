@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0067 (production still pending — see the
+Database migrations: 0063–0068 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -74,6 +74,25 @@ Database migrations: 0063–0067 (production still pending — see the
   (`RESEND_API_KEY` + `EMAIL_FROM`). Reset email is a job, and the job email
   adapter previously required `EMAIL_PROVIDER=resend` as well, so those emails
   silently dead-lettered.
+
+### Security
+
+- Elevated database functions now check the organization they act on against
+  the caller (migration 0068). Claiming jobs refuses a signed-in request;
+  resolving a webhook's signing secret, checking a protected role and deleting a
+  schedule act on the caller's own organization only (deleting a schedule also
+  re-checks `jobs.delete`); a login event can only be attributed to the
+  organization of its login or email; moving an inbound webhook receipt requires
+  that connection's endpoint key; and the runtime role allocates identity codes
+  (EMP-…, INV-…) only for its own organization. None of these was reachable
+  through the API; each closes a path open to anyone able to run SQL as the
+  application.
+- Background work stops for an organization that is suspended, archived or
+  deleted: its jobs are not claimed, failed jobs are not retried, reminders and
+  schedules do not fire, and its inbound webhook endpoints answer with the
+  ordinary rejection. Nothing is cancelled — the work resumes when the
+  organization is active again. A job already running when the organization is
+  suspended finishes, or is recovered if its worker dies.
 
 ### Changed
 

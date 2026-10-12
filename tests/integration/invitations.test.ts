@@ -477,10 +477,13 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
   });
 
   it('keeps login_events append-only', async () => {
+    // An address that resolves to nobody records with no organization —
+    // since 0068 the function refuses to attribute it to one (orgA) it
+    // cannot derive from the login or the email.
     const id = await inContext<{ record_login_event: string }>(
       {},
-      `select public.record_login_event($1::uuid, 'LOGIN_FAILURE', $2::citext, null, null, null, '{}')`,
-      [orgA, `probe.${RUN}@example.test`],
+      `select public.record_login_event(null, 'LOGIN_FAILURE', $1::citext, null, null, null, '{}')`,
+      [`probe.${RUN}@example.test`],
     );
     const eventId = id[0]!.record_login_event;
     await expect(

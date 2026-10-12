@@ -224,8 +224,8 @@ export async function createInvitation(
     const tokenHash = hashInvitationToken(token);
 
     const codeRow = await tx.execute<{ code: string }>(sql`
-      select authz.next_identity_code(
-        ${ctx.orgId}::uuid, 'INV',
+      select authz.next_identity_code_for_current_org(
+        'INV',
         to_char(now() at time zone o.timezone, 'YYYY')
       ) as code
       from public.organizations o where o.id = ${ctx.orgId}::uuid

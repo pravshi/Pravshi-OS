@@ -656,7 +656,9 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     expect(await resolve(orgA, subA)).toEqual([
       { is_active: true, signing_secret_ciphertext: `ciphertext-a-${RUN}` },
     ]);
-    expect(await resolve(orgB, subA)).toEqual([]);
+    // Naming another organization is refused outright since 0068 (the
+    // context-kind assertion), not merely answered empty.
+    expect(await sqlstateOf(resolve(orgB, subA))).toBe('42501');
     expect(await resolve(orgA, subB)).toEqual([]);
     expect(await resolve(orgA, '11111111-2222-4333-8444-555555555555')).toEqual([]);
   }, 60_000);
@@ -715,11 +717,24 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     // The transition definer moves it to PROCESSED and stamps
     // processed_at — and the row's org is still org A afterwards: the
     // definer derives the org from the receipt row itself, so no call
-    // can steer a receipt into another tenant.
+    // can steer a receipt into another tenant. Since 0068 the caller must
+    // also present the receipt connection's endpoint digest, as for the write.
+    // Another connection's digest is refused 42501 and moves nothing…
+    expect(
+      await sqlstateOf(
+        inCtx(
+          ctx,
+          `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+          [receiptId, KEYHASH_B, 'PROCESSED', true],
+        ),
+      ),
+    ).toBe('42501');
+    expect(await receiptRow(receiptId)).toMatchObject({ status: 'RECEIVED' });
+    // …the right one moves it.
     const transitioned = await inCtx<{ ok: boolean }>(
       ctx,
-      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
-      [receiptId, 'PROCESSED', true],
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+      [receiptId, KEYHASH_A, 'PROCESSED', true],
     );
     expect(transitioned.rows[0]!.ok).toBe(true);
     const settled = await receiptRow(receiptId);
@@ -729,8 +744,8 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
     // transitions are fire-and-forget by design).
     const missing = await inCtx<{ ok: boolean }>(
       ctx,
-      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3) as ok`,
-      ['11111111-2222-4333-8444-555555555555', 'PROCESSED', true],
+      `select public.integration_inbound_set_receipt_status($1::uuid, $2, $3, $4) as ok`,
+      ['11111111-2222-4333-8444-555555555555', KEYHASH_A, 'PROCESSED', true],
     );
     expect(missing.rows[0]!.ok).toBe(false);
 

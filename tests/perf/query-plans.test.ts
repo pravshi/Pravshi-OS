@@ -30,7 +30,8 @@ const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL
  *
  * The one exception is #4: jobs_claim_next() is plpgsql, so EXPLAIN of the
  * call shows only a Function Scan. Its candidate query is therefore
- * explained verbatim from the 0045 definer body, as the owner (the
+ * explained verbatim from the definer body (0045, with 0068's
+ * ACTIVE-organization predicate), as the owner (the
  * definer's own planning context), and the canonical jobs_claim_idx is
  * named, as §4.4 requires.
  *
@@ -248,11 +249,12 @@ describe.skipIf(!HAS_DB)('Tier-1 query plans (Phase 12 §4.4)', () => {
   });
 
   it('4. jobs claim internals (jobs_claim_next due-scan) — 0045 definer, canonical jobs_claim_idx', async () => {
-    // The candidate query, verbatim from the jobs_claim_next() body in
-    // drizzle/0045_automation_jobs.sql (p_worker_id stamps the claimed
-    // row and does not appear in the scan). Explained as the owner — the
-    // SECURITY DEFINER's planning context — because plpgsql bodies are
-    // opaque to EXPLAIN of the call itself.
+    // The candidate query, verbatim from the jobs_claim_next() body —
+    // drizzle/0045_automation_jobs.sql, plus the ACTIVE-organization
+    // predicate 0068 added (p_worker_id stamps the claimed row and does
+    // not appear in the scan). Explained as the owner — the SECURITY
+    // DEFINER's planning context — because plpgsql bodies are opaque to
+    // EXPLAIN of the call itself.
     const { rows } = await owner.query<{ 'QUERY PLAN': unknown }>(
       `explain (format json)
          select id
@@ -260,6 +262,10 @@ describe.skipIf(!HAS_DB)('Tier-1 query plans (Phase 12 §4.4)', () => {
           where status = 'pending'
             and next_run_at <= now()
             and ($1::text[] is null or type = any($1::text[]))
+            and exists (
+              select 1 from public.organizations o
+              where o.id = jobs.org_id and o.status = 'ACTIVE' and o.deleted_at is null
+            )
           order by priority desc, next_run_at asc
           limit 1
           for update skip locked`,

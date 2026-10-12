@@ -104,6 +104,11 @@ async function guardRows(personId: string, orgId: string) {
     );
     await c.query('commit');
     return r.rows[0]!;
+  } catch (error) {
+    // Since 0068 the function can refuse (42501): never hand an aborted
+    // transaction back to the pool for the next test to inherit.
+    await c.query('rollback').catch(() => undefined);
+    throw error;
   } finally {
     c.release();
   }
@@ -232,12 +237,16 @@ describe('person_holds_protected_role() (migration 0030)', () => {
     expect((await guardRows(capTarget, org)).target_protected).toBe(true);
   });
 
-  it('is false for ordinary people, unknown ids, and other tenants', async () => {
+  it('is false for ordinary people and unknown ids', async () => {
     expect((await guardRows(empTarget, org)).target_protected).toBe(false);
     expect((await guardRows(editor, org)).target_protected).toBe(false);
     expect((await guardRows(randomUUID(), org)).target_protected).toBe(false);
-    // Same person, wrong org: no cross-tenant read.
-    expect((await guardRows(saTarget, otherOrg)).target_protected).toBe(false);
+  });
+
+  it('refuses another tenant outright (0068) — no cross-tenant read', async () => {
+    // Same person, wrong org: before 0068 a quiet false; now the definer
+    // refuses any organization but the caller's own.
+    await expect(guardRows(saTarget, otherOrg)).rejects.toMatchObject({ code: '42501' });
   });
 
   it('answers the actor side from roles.manage at GLOBAL with a live engagement', async () => {

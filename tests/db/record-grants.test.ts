@@ -957,6 +957,7 @@ describe('the rest of the authorization model is untouched', () => {
       'mfa_enrollment_required',
       'my_departments',
       'next_identity_code',
+      'next_identity_code_for_current_org',
       'org_id',
       'person_id',
       'record_login_failure',
@@ -969,7 +970,8 @@ describe('the rest of the authorization model is untouched', () => {
     ]);
     // The pin above must agree with the migration SQL (0027 added the five
     // lockout/MFA helpers; 0033 added crm_owner_reachable; 0063 added
-    // is_project_member and is_project_manager); if this fails the literal
+    // is_project_member and is_project_manager; 0068 added
+    // next_identity_code_for_current_org); if this fails the literal
     // list is stale.
     expect(authzHelperNamesFromSql()).toEqual(names);
     // is_project_member was the last deferred-as-stub name; it arrived for

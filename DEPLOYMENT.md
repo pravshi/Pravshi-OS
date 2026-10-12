@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0067; project records indicate the `production` Neon branch stopped at 0044 (October
+  0068; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -215,6 +215,12 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   use `FOR UPDATE SKIP LOCKED`, so two processes never execute the same job. This is a
   deliberate V1 contract, recorded with its reasoning in
   [docs/phase12-performance.md](docs/phase12-performance.md).
+- **Organizations that are not ACTIVE (migration 0068):** the worker does not claim the
+  jobs of a suspended, archived or deleted organization, does not retry its failed jobs,
+  fire its reminders or schedules, and does not wake for them; its inbound webhook
+  endpoints answer with the ordinary rejection. The work is left in place, not cancelled,
+  and resumes on its own once the organization is ACTIVE again. A job already claimed when
+  the organization was suspended still finishes, or is recovered if its worker dies.
 - **Idle cost — low-cost mode (WP-W, the default):** Neon Free suspends compute only after
   5 minutes without a query and gives a project 100 CU-hours a month; spending them
   suspends **every** compute in the project, production included, until the next billing

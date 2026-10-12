@@ -409,12 +409,20 @@ async function recordReceipt(row: {
  * the direct UPDATE this replaced stamped processed_at on EVERY
  * transition (including the reprocess reset to RECEIVED), and the
  * definer's flag preserves that behaviour exactly.
+ *
+ * The presented endpoint key hash rides along (0068): the definer refuses
+ * to move a receipt unless that hash is the receipt connection's key, the
+ * same proof write_receipt demands.
  */
-async function setReceiptStatus(receiptId: string, status: InboundReceiptStatus): Promise<void> {
+async function setReceiptStatus(
+  receiptId: string,
+  endpointKeyHash: string,
+  status: InboundReceiptStatus,
+): Promise<void> {
   await withAuthorizedDb(RESOLUTION_CONTEXT, async (tx) => {
     await tx.execute(sql`
       select public.integration_inbound_set_receipt_status(
-        ${receiptId}::uuid, ${status}, true
+        ${receiptId}::uuid, ${endpointKeyHash}, ${status}, true
       )
     `);
   });
@@ -559,7 +567,7 @@ export async function receiveInbound(
   let receiptId: string;
   if (decision.action === 'reprocess') {
     receiptId = decision.receiptId;
-    await setReceiptStatus(receiptId, 'RECEIVED');
+    await setReceiptStatus(receiptId, presentedHash, 'RECEIVED');
   } else {
     try {
       receiptId = await recordReceipt({
@@ -583,7 +591,7 @@ export async function receiveInbound(
   // connected_by there is no principal whose authority could run a
   // workflow — the receipt fails closed rather than inventing one.
   if (resolved.connected_by === null) {
-    await setReceiptStatus(receiptId, 'FAILED');
+    await setReceiptStatus(receiptId, presentedHash, 'FAILED');
     return acceptedResult();
   }
   const requestId = randomUUID();
@@ -616,14 +624,14 @@ export async function receiveInbound(
         data,
       },
     });
-    await setReceiptStatus(receiptId, 'PROCESSED');
+    await setReceiptStatus(receiptId, presentedHash, 'PROCESSED');
   } catch (error) {
     console.error('[integrations/inbound] dispatch pipeline failed', {
       connectionId: resolved.connection_id,
       receiptId,
       name: error instanceof Error ? error.name : typeof error,
     });
-    await setReceiptStatus(receiptId, 'FAILED');
+    await setReceiptStatus(receiptId, presentedHash, 'FAILED');
   }
   return acceptedResult();
 }
