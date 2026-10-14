@@ -5,7 +5,7 @@ import { sqlstateOf } from './invitations';
 import { validateNewPasswordPolicy, PasswordResetError } from './password-reset';
 import { writeAuditEntry, type RequestMetadata } from '@/lib/audit/log';
 import type { AuthContext } from '@/lib/db/context';
-import { logAuthFailure } from './safe-log';
+import { reportAuthFailure, type AuthFailureContext } from './safe-log';
 
 /**
  * Authenticated password change — the signed-in user's own credential rotation.
@@ -30,9 +30,10 @@ import { logAuthFailure } from './safe-log';
  * DrizzleQueryError, whose message lists its bound parameters — here the new
  * credential hash and the current session's bearer token — and an error the
  * Server Action rethrows is logged by Next.js. So every database step below
- * answers a failure with a fixed ChangePasswordError and one safe log line (the
- * error's class and codes, src/lib/auth/safe-log.ts); the original is never
- * chained as a cause.
+ * answers a failure with a fixed ChangePasswordError, one safe log line and a
+ * Sentry alert (src/lib/auth/safe-log.ts reportAuthFailure: the error's class and
+ * codes, with the login and request ids to reconcile it); the original error is
+ * never chained as a cause, logged or sent.
  *
  * The credential update and the session deletion (step 3) are ONE
  * transaction: a failed session deletion rolls the new
@@ -62,9 +63,9 @@ export class ChangePasswordError extends Error {
   }
 }
 
-/** A database failure before or during the change: logged safely, answered fixed. */
-function unavailable(step: string, e: unknown): ChangePasswordError {
-  logAuthFailure(`auth.password_change.${step}_failed`, e);
+/** A database failure before or during the change: logged and alerted safely, answered fixed. */
+function unavailable(step: string, e: unknown, context: AuthFailureContext): ChangePasswordError {
+  reportAuthFailure(`auth.password_change.${step}_failed`, e, context);
   return new ChangePasswordError(
     'UNAVAILABLE',
     null,
@@ -81,6 +82,8 @@ export async function changePassword(opts: {
   meta: RequestMetadata;
 }): Promise<{ ok: true }> {
   const { ctx, authUserId, currentSessionToken, currentPassword, newPassword, meta } = opts;
+  // Who and which request a failure concerns, for the operator who has to reconcile it.
+  const failure: AuthFailureContext = { authUserId, requestId: meta.requestId };
 
   let allowed: boolean;
   try {
@@ -93,7 +96,7 @@ export async function changePassword(opts: {
     `);
     allowed = rate.rows[0]?.allowed === true;
   } catch (e) {
-    throw unavailable('rate_limit', e);
+    throw unavailable('rate_limit', e, failure);
   }
   if (!allowed) {
     throw new ChangePasswordError(
@@ -117,7 +120,7 @@ export async function changePassword(opts: {
     `);
     storedHash = hashRows.rows[0]?.password ?? null;
   } catch (e) {
-    throw unavailable('credential_read', e);
+    throw unavailable('credential_read', e, failure);
   }
   const currentOk =
     storedHash !== null &&
@@ -164,7 +167,7 @@ export async function changePassword(opts: {
         'This account cannot change its password this way.',
       );
     }
-    throw unavailable('update', e);
+    throw unavailable('update', e, failure);
   }
 
   // Audit, attributed to the person by write_audit_log via the ctx identity. The
@@ -183,7 +186,8 @@ export async function changePassword(opts: {
       meta,
     );
   } catch (e) {
-    logAuthFailure('auth.password_change.audit_failed', e);
+    // A credential change with no audit record: alert, with who and which request.
+    reportAuthFailure('auth.password_change.audit_failed', e, failure);
     throw new ChangePasswordError(
       'NOT_RECORDED',
       null,

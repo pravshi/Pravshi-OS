@@ -288,6 +288,38 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
       (thrown: unknown) => ({ result: null, thrown }),
     );
 
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /**
+   * Exactly one Sentry alert for `event`, built from safe parts only — no canary, query text or
+   * hash-like run anywhere in what was passed — and carrying the same login and request ids as
+   * the safe log line, so the operation can be reconciled.
+   */
+  const expectAlert = (event: string, authUserId: string, secrets: string[]) => {
+    const capture = vi.mocked(Sentry.captureException);
+    expect(capture).toHaveBeenCalledTimes(1);
+    const [alert, hint] = capture.mock.calls[0]! as unknown as [
+      Error,
+      { tags?: Record<string, string>; extra?: Record<string, unknown> },
+    ];
+    expect(alert.name).toBe('AuthFailureAlert');
+    expect(alert.message.startsWith(`${event} `)).toBe(true);
+    expect((alert as Error & { cause?: unknown }).cause).toBeUndefined();
+    expect(hint.tags?.auth_event).toBe(event);
+    expect(hint.extra?.authUserId).toBe(authUserId);
+    const requestId = String(hint.extra?.requestId);
+    expect(requestId).toMatch(UUID);
+    const payload = deep([alert, hint]);
+    for (const s of secrets) expectAbsent(payload, s, 'the Sentry alert');
+    expect(payload).not.toMatch(/Failed query|params:|auth_sessions|update_credential_password/);
+    // No hash- or token-like run in the alert's data (UUIDs have dashes). The stack is left out of
+    // this one check only: its frames are code locations, and pnpm store paths carry hashes.
+    expect(deep([alert.message, hint])).not.toMatch(/[0-9a-f]{32,}/i);
+    const line = sink.find((l) => l.includes(`[auth] ${event}`));
+    expect(line, `a safe [auth] ${event} line`).toBeDefined();
+    expect(line).toContain(authUserId);
+    expect(line).toContain(requestId);
+  };
+
   // ── the legitimate path ─────────────────────────────────────────────────────────────
   it('a successful change keeps the current session, ends every other one, rotates the credential and audits it', async () => {
     const a = await account('cplok');
@@ -302,8 +334,10 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
     expect(await auditCount(a.authUserId)).toBe(1);
     expect(await signsIn(a.email, NEW_PASSWORD)).toBe(true);
     expect(await signsIn(a.email, fx.PASSWORD)).toBe(false);
-    // No failure was logged (the old password's refused sign-in above logs its usual warning).
+    // No failure was logged or alerted (the old password's refused sign-in above logs its usual
+    // warning).
     expect(sink.filter((l) => l.includes('[auth] auth.password_change'))).toEqual([]);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
   // ── the session deletion fails ──────────────────────────────────────────────────────
@@ -338,7 +372,8 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
       expect(line, 'a safe [auth] line').toBeDefined();
       if (mode === 'missing-table') expect(line).toContain('42P01');
       if (mode === 'nested') expect(line).toContain('08006');
-      expect(Sentry.captureException).not.toHaveBeenCalled();
+      // Not swallowed: one sanitized alert, correlated to the login and request.
+      expectAlert('auth.password_change.update_failed', a.authUserId, [a.canary]);
     });
   }
 
@@ -389,6 +424,7 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
     expectAbsent(all, a.canary, 'the captured logs');
     expectAbsent(all, NEW_PASSWORD, 'the captured logs (new password)');
     expect(all).not.toMatch(/params:\s*[^\s[]/); // the bound new hash is never printed
+    expectAlert('auth.password_change.update_failed', a.authUserId, [a.canary, NEW_PASSWORD]);
   });
 
   // ── the audit write fails after the change committed ────────────────────────────────
@@ -411,6 +447,22 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
     const all = sink.join('\n');
     expectAbsent(all, auditFault.canary, 'the captured logs');
     expectAbsent(all, a.canary, 'the captured logs (session token)');
-    expect(sink.some((l) => l.includes('[auth] auth.password_change.audit_failed'))).toBe(true);
+    // A credential change with no audit record is alerted, with who and which request.
+    expectAlert('auth.password_change.audit_failed', a.authUserId, [
+      auditFault.canary,
+      a.canary,
+      NEW_PASSWORD,
+    ]);
+  });
+
+  it('correlation context accepts identifiers only: a token passed as context is dropped, not logged', async () => {
+    const { logAuthFailure } = await import('@/lib/auth/safe-log');
+    const canary = newCanary();
+    const id = crypto.randomUUID();
+    logAuthFailure('auth.test.context', new Error('x'), { authUserId: canary, requestId: id });
+    const line = sink.find((l) => l.includes('[auth] auth.test.context'));
+    expect(line).toBeDefined();
+    expectAbsent(line!, canary, 'the log line');
+    expect(line).toContain(id);
   });
 });
