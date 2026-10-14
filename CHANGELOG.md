@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0073 (production still pending — see the
+Database migrations: 0063–0074 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -84,7 +84,10 @@ Database migrations: 0063–0073 (production still pending — see the
   authentication part of the app can reach it, through `DATABASE_URL_AUTH` (required on Vercel;
   never on the worker host). Administrators ending another person's sessions or resetting their
   password are checked by the database against their own signed-in session, rather than trusted
-  from the application; ending sessions and its audit record happen together.
+  from the application; ending sessions and its audit record happen together. They reach only
+  people they are allowed to see (`people.view` at its scope — migration 0074), as before the
+  move: a department-scoped administrator cannot reset the password of, or list or end the
+  sessions of, someone in another department.
 - The `cleanup` job type (deleting an organization's old finished jobs, or handing
   stuck jobs back to the queue) now runs on the worker's own login (migration 0071).
   It was the last worker path that ran its queries as the web app, and it could only

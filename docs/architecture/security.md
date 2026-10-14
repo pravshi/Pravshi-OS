@@ -238,7 +238,11 @@ fallback to `DATABASE_URL`, and the worker host never holds it. Administrator ac
 person's sessions and credential (`authz.admin_session_action`,
 `authz.admin_issue_credential_reset`) take their actor from the administrator's own session
 token, verified in the database — never from `app.person_id` / `app.org_id` / `app.aal` — and
-re-check the permission at its scope, the MFA rule, ADR-001 and the organization there; a session
+re-check the permission at its scope, the MFA rule, ADR-001 and the organization there. The target
+must also be a person the administrator can see under `people_select` (`people.view` at its scope,
+a person record grant, or themselves — `authz.person_visible`, 0074): as owner-run definers they
+would otherwise see the whole organization, wider than the RLS-filtered lookup they replaced. A
+person out of reach is refused exactly like a missing one. A session
 revocation and its audit entry are one transaction. A failed call's error never carries the token
 (DrizzleQueryError messages include parameters, so the auth layer replaces them). Pinned by
 `tests/db/app-auth-role.test.ts`, `tests/db/auth-pool-config.test.ts` and

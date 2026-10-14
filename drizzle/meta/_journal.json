@@ -553,6 +553,14 @@
       "tag": "0073_auth_role_contract",
       "breakpoints": true,
       "hash": "a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d"
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1791589728057,
+      "tag": "0074_admin_target_visibility",
+      "breakpoints": true,
+      "hash": "3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53"
     }
   ]
 }

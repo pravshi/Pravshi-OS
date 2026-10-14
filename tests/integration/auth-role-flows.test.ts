@@ -42,6 +42,7 @@ describe.skipIf(!READY)('authentication flows on app_auth (0072/0073, live DB)',
   let org = '';
   let otherOrg = '';
   let dept = '';
+  let secondDept = ''; // same organization, another department
   let otherDept = '';
   let ipSeq = 0;
   const nextIp = () => `198.18.${200 + Math.floor(Math.random() * 50)}.${(ipSeq += 1) % 250}`;
@@ -66,6 +67,7 @@ describe.skipIf(!READY)('authentication flows on app_auth (0072/0073, live DB)',
     org = await fx.mkOrg(owner, `arf-${RUN}`);
     otherOrg = await fx.mkOrg(owner, `arf-o-${RUN}`);
     dept = await fx.mkDept(owner, org, `ARF${RUN.toUpperCase()}`);
+    secondDept = await fx.mkDept(owner, org, `ARS${RUN.toUpperCase()}`);
     otherDept = await fx.mkDept(owner, otherOrg, `ARO${RUN.toUpperCase()}`);
   }, 60_000);
 
@@ -279,15 +281,18 @@ describe.skipIf(!READY)('authentication flows on app_auth (0072/0073, live DB)',
   });
 
   describe('administrator session actions, proven by a real Better Auth session (0072)', () => {
-    it('lists and revokes a same-organization person’s sessions; refuses another organization', async () => {
+    it('lists and revokes a visible same-organization person’s sessions; refuses another department (people.view, 0074) and another organization', async () => {
       const { requirePermission } = await import('@/lib/authz/require-permission');
       const { listUserSessions, revokeAllUserSessions } = await import('@/lib/admin/sessions');
       const role = await fx.mkCustomRole(owner, org, `ARFADM${RUN.toUpperCase()}`, [
         ['sessions.revoke', 'GLOBAL'],
+        ['people.view', 'DEPARTMENT'],
       ]);
       const admin = await account('arfadmin', { customRoles: [role] });
       const target = await account('arftarget');
       await fx.signIn(target.email);
+      const elsewhere = await account('arfelsewhere', { dept: secondDept });
+      await fx.signIn(elsewhere.email);
       const foreign = await fx.mkAccount(owner, {
         org: otherOrg,
         dept: otherDept,
@@ -306,6 +311,19 @@ describe.skipIf(!READY)('authentication flows on app_auth (0072/0073, live DB)',
       const listed = await listUserSessions(authz, token, target.personId);
       expect(listed.length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(listed)).not.toContain('token');
+
+      // Same organization, outside the administrator's people.view reach: not found, untouched.
+      // Ids only: a failing comparison must not print a token.
+      const idsOf = async (login: string) => (await sessionsOf(login)).map((s) => s.id);
+      const elsewhereBefore = await idsOf(elsewhere.authUserId);
+      expect(elsewhereBefore.length).toBeGreaterThanOrEqual(1);
+      await expect(listUserSessions(authz, token, elsewhere.personId)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      await expect(revokeAllUserSessions(authz, token, elsewhere.personId)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      expect(await idsOf(elsewhere.authUserId)).toEqual(elsewhereBefore);
 
       await expect(listUserSessions(authz, token, foreign.personId)).rejects.toMatchObject({
         code: 'NOT_FOUND',
@@ -331,6 +349,44 @@ describe.skipIf(!READY)('authentication flows on app_auth (0072/0073, live DB)',
       await expect(listUserSessions(forged, token, target.personId)).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
+    });
+
+    it('a DEPARTMENT-scoped credential reset reaches its own department only — no reset link, no reset row for anyone else (audit H1, 0074)', async () => {
+      const { requirePermission } = await import('@/lib/authz/require-permission');
+      const { adminResetCredential } = await import('@/lib/admin/credential-reset');
+      const role = await fx.mkCustomRole(owner, org, `ARFRST${RUN.toUpperCase()}`, [
+        ['users.edit', 'DEPARTMENT'],
+        ['people.view', 'DEPARTMENT'],
+      ]);
+      const admin = await account('arfresetter', { customRoles: [role] });
+      const near = await account('arfnear');
+      const far = await account('arffar', { dept: secondDept });
+      const resetsOf = async (login: string) =>
+        Number(
+          (
+            await owner.query<{ n: string }>(
+              `select count(*)::text n from auth.password_resets where auth_user_id = $1`,
+              [login],
+            )
+          ).rows[0]!.n,
+        );
+
+      const h = fx.headersFor(admin.cookie);
+      const authz = await requirePermission(h, { permission: 'users.edit' });
+      const token = (await currentSessionToken(h))!;
+
+      const before = await resetsOf(far.authUserId);
+      const refused = await adminResetCredential(authz, token, far.personId, meta()).then(
+        (r) => r as unknown,
+        (e: unknown) => e,
+      );
+      expect(refused).toMatchObject({ name: 'AdminAuthActionError', code: 'NOT_FOUND' });
+      expect((refused as { resetUrl?: unknown }).resetUrl).toBeUndefined();
+      expect(await resetsOf(far.authUserId)).toBe(before);
+
+      const issued = await adminResetCredential(authz, token, near.personId, meta());
+      expect(issued.email).toBe(near.email);
+      expect(await resetsOf(near.authUserId)).toBe(1);
     });
   });
 });

@@ -58,7 +58,7 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 73 72 0073_auth_role_contract
+      # expected at the current release: 74 73 0074_admin_target_visibility
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -86,17 +86,19 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
       authenticates through `DATABASE_URL_AUTH` must be deployed before 0073 is applied (0072
       is additive and safe under either app). On the first production rollout — the web app
       has never served production — apply 0072 and 0073 together and deploy the new app with
-      `DATABASE_URL_AUTH` set.
+      `DATABASE_URL_AUTH` set. 0074 only narrows the two administrator definers 0072 adds (the
+      target must be visible to the administrator under `people.view`); it is safe under either
+      app and is applied in the same run — never stop the chain between 0072 and 0074.
 - [ ] **Calendar gate:** any step that touches Neon (Steps 0–4) consumes the
       Neon allowance. Before **2026-11-01** these steps are written but not
       executed, unless Nani directs otherwise.
 
 ## The chain as of writing
 
-The repo journal holds 73 entries (idx 0–72). Per project records, production
+The repo journal holds 74 entries (idx 0–73). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-28 migrations **idx 45–72 (0045–0073)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4572). Step 0 verifies this;
+29 migrations **idx 45–73 (0045–0074)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4573). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the runner selects what to
@@ -199,18 +201,18 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 73, last applied created_at: 1791111413392
+   journal entries: 74, last applied created_at: 1791111413392
    applying idx 45 0045_automation_jobs (… statements)
    …
-   applying idx 72 0073_auth_role_contract (… statements)
-   done: applied 28, total 73
+   applying idx 73 0074_admin_target_visibility (… statements)
+   done: applied 29, total 74
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `73`, max_created_at `1791588728057`, and the
-     ordered hash list equal to the file-byte hashes of idx 0…72.
+     full repo state: count `74`, max_created_at `1791589728057`, and the
+     ordered hash list equal to the file-byte hashes of idx 0…73.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit) run green against the branch, or in CI's equivalent
@@ -267,8 +269,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `73`, max_created_at `1791588728057`, ordered hash list equal to the
-   file-byte hashes of idx 0…72 (same comparison method as Step 0).
+   count `74`, max_created_at `1791589728057`, ordered hash list equal to the
+   file-byte hashes of idx 0…73 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -317,6 +319,10 @@ All checks must pass before the freeze is lifted.
    select has_function_privilege('app_user', 'authz.update_credential_password(uuid,text)', 'execute'),
           has_function_privilege('app_auth', 'authz.update_credential_password(uuid,text)', 'execute');
                                                             -- expect: f | t
+   select count(*) from pg_proc
+    where proname in ('admin_session_action', 'admin_issue_credential_reset')
+      and position('authz.person_visible(p.id)' in prosrc) > 0;
+                                                            -- expect: 2 (0074)
    ```
 
    Then through the **pooled** endpoint Vercel really uses (`DATABASE_URL_AUTH`),
@@ -369,7 +375,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–72)
+## Appendix A — The pending chain (idx 45–73)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -409,13 +415,14 @@ after any repo change.
 | 70  | `0071_cleanup_job_worker_plane` | 1791586728057 | `593e317c1d66cfcd1ddec6dc85b0c92eff661805ee23baf262ef0de95626d51d` |
 | 71  | `0072_auth_role_expand` | 1791587728057 | `8e43f37fc0dd3399ab713d4877d6f7d047264e0803fd5857555c38802e99efb0` |
 | 72  | `0073_auth_role_contract` | 1791588728057 | `a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d` |
+| 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `73`,
-max_created_at `1791588728057`.
+Final expected state after a complete run: count `74`,
+max_created_at `1791589728057`.
 
 ## Appendix B — Run record template
 
@@ -446,7 +453,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 73 / max 1791588728057 / hashes): yes/no
+  - journal == repo (count 74 / max 1791589728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

@@ -15,7 +15,10 @@
  *      take their actor from the presented session token alone: a forged app.person_id /
  *      app.org_id / app.aal grants nothing; scope, the MFA rule and the organization boundary hold;
  *      failures change nothing; revocation and its audit entry are one transaction; no token is
- *      ever returned, echoed or audited.
+ *      ever returned, echoed or audited;
+ *   E. those definers reach only a person the administrator can see under people_select
+ *      (people.view: GLOBAL / DEPARTMENT / TEAM / SELF / record grant — 0074, audit H1 / M1), and
+ *      authz.person_visible() agrees with that policy row for row.
  *
  * Isolation: every case builds its own organizations and people; nothing global is touched.
  */
@@ -190,11 +193,13 @@ describe.skipIf(!READY)(
       if (!READY) return;
       orgA = await mkOrg(owner, `appa-a-${RUN}`);
       orgB = await mkOrg(owner, `appa-b-${RUN}`);
+      // people.view: an administrator definer acts only on a person the administrator can see
+      // under people_select (0074) — the reach the pre-0072 RLS lookup gave. Section E tests it.
       admin = await mkPerson(owner, orgA, `Appa Admin ${RUN}`);
-      await grant(orgA, admin, ['sessions.revoke', 'users.edit']);
+      await grant(orgA, admin, ['sessions.revoke', 'users.edit', 'people.view']);
       adminToken = (await seedSession(owner, admin)).token;
       mfaAdmin = await mkPerson(owner, orgA, `Appa Mfa Admin ${RUN}`);
-      await grant(orgA, mfaAdmin, ['sessions.revoke', 'users.edit', 'roles.manage']);
+      await grant(orgA, mfaAdmin, ['sessions.revoke', 'users.edit', 'roles.manage', 'people.view']);
       deptAdmin = await mkPerson(owner, orgA, `Appa Dept Admin ${RUN}`);
       await grant(orgA, deptAdmin, ['sessions.revoke'], 'DEPARTMENT');
       plain = await mkPerson(owner, orgA, `Appa Plain ${RUN}`);
@@ -714,7 +719,7 @@ describe.skipIf(!READY)(
         );
 
         const rv = await mkPerson(owner, orgA, `Appa Revoked ${RUN}`);
-        await grant(orgA, rv, ['sessions.revoke']);
+        await grant(orgA, rv, ['sessions.revoke', 'people.view']);
         const rvTok = (await seedSession(owner, rv, { createdSecondsAgo: 120 })).token;
         expect(await refused(rvTok)).toBeUndefined(); // live: accepted
         await owner.query(`update public.people set sessions_revoked_at = now() where id = $1`, [
@@ -766,7 +771,7 @@ describe.skipIf(!READY)(
       it('refuses an administrator of a suspended organization', async () => {
         const orgS = await mkOrg(owner, `appa-s-${RUN}`);
         const sa = await mkPerson(owner, orgS, `Appa Org Suspended ${RUN}`);
-        await grant(orgS, sa, ['sessions.revoke']);
+        await grant(orgS, sa, ['sessions.revoke', 'people.view']);
         const tok = (await seedSession(owner, sa)).token;
         const victim = await mkPerson(owner, orgS, `Appa S Victim ${RUN}`);
         await seedSession(owner, victim);
@@ -1087,6 +1092,436 @@ describe.skipIf(!READY)(
         // The MFA rule: the roles.manage holder on an aal1 session.
         const aal1 = (await seedSession(owner, mfaAdmin)).token;
         expect((await errorOf(issue(appAuth, aal1, target)))?.code).toBe('42501');
+      });
+    });
+
+    // ═══ E. target visibility: people.view, as people_select (0074; audit H1 / M1) ═══════
+    //
+    // Before 0072 both operations found the target on app_user under RLS, so a person outside
+    // the administrator's people.view reach was "Person not found." 0072's definers looked the
+    // target up as the owner and lost that. These cases pin the restored rule, on its own
+    // organization with two departments, a manager chain and a record grant.
+    describe('E. target visibility (people.view, as people_select)', () => {
+      let orgV = '';
+      let deptA = '';
+      let deptB = '';
+      let globalAdmin = ''; // users.edit, sessions.revoke, people.view, roles.manage: GLOBAL
+      let globalTok = '';
+      let deptResetter = ''; // deptA; users.edit + people.view DEPARTMENT; sessions.revoke GLOBAL
+      let deptTok = '';
+      let teamLead = ''; // deptA; users.edit + people.view TEAM; sessions.revoke GLOBAL
+      let teamTok = '';
+      let selfOnly = ''; // deptA; users.edit + people.view SELF; sessions.revoke GLOBAL
+      let grantee = ''; // deptA; users.edit + sessions.revoke GLOBAL, no people.view; one record grant
+      let granteeTok = '';
+      let noView = ''; // deptA; users.edit + sessions.revoke GLOBAL, no people.view at all
+      let inScope = ''; // deptA
+      let outScope = ''; // deptB
+      let report = ''; // deptB, reports to teamLead
+      let granted = ''; // deptB, the subject of grantee's record grant
+      let protectedIn = ''; // deptA, holds a protected role
+      let protectedOut = ''; // deptB, holds a protected role
+      let deleted = ''; // deptA, soft-deleted
+      const IP = '203.0.113.77';
+      const UA = `ua-visibility-probe-${RUN}`;
+
+      /** A person in `dept` of orgV, with a live engagement (and `manager` when given). */
+      const personIn = async (name: string, dept: string, manager: string | null = null) => {
+        const id = await mkPerson(owner, orgV, `${name} ${RUN}`);
+        // mkPerson gives each person a department of their own; move the engagement into
+        // the department this case needs — owner, before any actor exists for this person.
+        await owner.query(
+          `update public.engagements set department_id = $2, manager_person_id = $3 where person_id = $1`,
+          [id, dept, manager],
+        );
+        return id;
+      };
+      const mkDept = async (code: string) =>
+        (
+          await owner.query<{ id: string }>(
+            `insert into public.departments (org_id, code, name) values ($1, $2, $2) returning id`,
+            [orgV, `${code}${RUN.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`],
+          )
+        ).rows[0]!.id;
+
+      const issueAs = async (
+        token: string,
+        person: string,
+        ctx: { personId?: string; orgId?: string; aal?: string } = {},
+      ) => {
+        const c = await appAuth.connect();
+        try {
+          await c.query('begin');
+          await c.query(
+            `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true),
+                  set_config('app.aal',$3,true)`,
+            [ctx.personId ?? '', ctx.orgId ?? '', ctx.aal ?? ''],
+          );
+          const r = await c.query<{ outcome: string; reset_id: string | null }>(
+            `select outcome, reset_id from authz.admin_issue_credential_reset(
+               $1, $2::uuid, $3, $4::uuid, null, 'vitest')`,
+            [
+              token,
+              person,
+              createHash('sha256').update(randomBytes(32)).digest('hex'),
+              randomUUID(),
+            ],
+          );
+          await c.query('commit');
+          return r.rows[0]!;
+        } catch (e) {
+          await c.query('rollback').catch(() => undefined);
+          throw e;
+        } finally {
+          c.release();
+        }
+      };
+      const sessionAs = async (
+        token: string,
+        person: string,
+        act: string,
+        sessionId: string | null = null,
+        ctx: { personId?: string; orgId?: string; aal?: string } = {},
+      ) => {
+        const c = await appAuth.connect();
+        try {
+          await c.query('begin');
+          await c.query(
+            `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true),
+                  set_config('app.aal',$3,true)`,
+            [ctx.personId ?? '', ctx.orgId ?? '', ctx.aal ?? ''],
+          );
+          const r = await c.query<Record<string, unknown>>(
+            `select * from authz.admin_session_action($1, $2::uuid, $3, $4::uuid, $5::uuid, null, 'vitest')`,
+            [token, person, act, sessionId, randomUUID()],
+          );
+          await c.query('commit');
+          return r.rows;
+        } catch (e) {
+          await c.query('rollback').catch(() => undefined);
+          throw e;
+        } finally {
+          c.release();
+        }
+      };
+
+      const loginOf = async (person: string) =>
+        (
+          await owner.query<{ auth_user_id: string }>(
+            `select auth_user_id from public.people where id = $1`,
+            [person],
+          )
+        ).rows[0]!.auth_user_id;
+      /** Everything an out-of-reach attempt must leave untouched, for one target. */
+      const footprint = async (person: string) => {
+        const login = await loginOf(person);
+        const r = await owner.query<{
+          resets: string;
+          sessions: string;
+          stamped: boolean;
+          audits: string;
+        }>(
+          `select
+             (select count(*) from auth.password_resets where auth_user_id = $1)::text resets,
+             (select string_agg(id::text, ',' order by id) from auth.auth_sessions where user_id = $1) sessions,
+             (select sessions_revoked_at is not null from public.people where id = $2) stamped,
+             (select count(*) from public.audit_logs where entity_id = $2)::text audits`,
+          [login, person],
+        );
+        return r.rows[0]!;
+      };
+
+      beforeAll(async () => {
+        if (!READY) return;
+        orgV = await mkOrg(owner, `appa-v-${RUN}`);
+        deptA = await mkDept('VA');
+        deptB = await mkDept('VB');
+
+        // The organization's first protected grant needs no actor; later ones are made by it.
+        globalAdmin = await personIn('Vis Global', deptA);
+        await grant(orgV, globalAdmin, [
+          'users.edit',
+          'sessions.revoke',
+          'people.view',
+          'roles.manage',
+        ]);
+        globalTok = (await seedSession(owner, globalAdmin, { aal2: true })).token;
+
+        deptResetter = await personIn('Vis Dept', deptA);
+        await grant(orgV, deptResetter, ['users.edit', 'people.view'], 'DEPARTMENT');
+        await grant(orgV, deptResetter, ['sessions.revoke'], 'GLOBAL');
+        deptTok = (await seedSession(owner, deptResetter)).token;
+
+        teamLead = await personIn('Vis Team', deptA);
+        await grant(orgV, teamLead, ['users.edit', 'people.view'], 'TEAM');
+        await grant(orgV, teamLead, ['sessions.revoke'], 'GLOBAL');
+        teamTok = (await seedSession(owner, teamLead)).token;
+
+        selfOnly = await personIn('Vis Self', deptA);
+        await grant(orgV, selfOnly, ['users.edit', 'people.view'], 'SELF');
+        await grant(orgV, selfOnly, ['sessions.revoke'], 'GLOBAL');
+
+        grantee = await personIn('Vis Grantee', deptA);
+        await grant(orgV, grantee, ['users.edit', 'sessions.revoke'], 'GLOBAL');
+        granteeTok = (await seedSession(owner, grantee)).token;
+
+        noView = await personIn('Vis No View', deptA);
+        await grant(orgV, noView, ['users.edit', 'sessions.revoke'], 'GLOBAL');
+
+        inScope = await personIn('Vis In', deptA);
+        outScope = await personIn('Vis Out', deptB);
+        report = await personIn('Vis Report', deptB, teamLead);
+        granted = await personIn('Vis Granted', deptB);
+        protectedIn = await personIn('Vis Protected In', deptA);
+        protectedOut = await personIn('Vis Protected Out', deptB);
+        await grant(orgV, protectedIn, ['roles.manage'], 'GLOBAL', globalAdmin);
+        await grant(orgV, protectedOut, ['roles.manage'], 'GLOBAL', globalAdmin);
+        deleted = await personIn('Vis Deleted', deptA);
+
+        for (const p of [inScope, outScope, report, granted, protectedIn, protectedOut, deleted]) {
+          await seedSession(owner, p);
+          await seedSession(owner, p);
+        }
+        // Distinctive session details: an out-of-reach refusal must not carry them anywhere.
+        await owner.query(
+          `update auth.auth_sessions set ip_address = $2, user_agent = $3
+            where user_id = (select auth_user_id from public.people where id = $1)`,
+          [outScope, IP, UA],
+        );
+        await owner.query(
+          `insert into public.record_grants
+             (org_id, entity_type, entity_id, person_id, permission_id, granted_by, reason)
+           select $1, 'person', $2, $3, p.id, $4, 'visibility test'
+           from public.permissions p where p.key = 'people.view'`,
+          [orgV, granted, grantee, globalAdmin],
+        );
+        await owner.query(`update public.people set deleted_at = now() where id = $1`, [deleted]);
+      }, 180_000);
+
+      // ── the helper is the policy ─────────────────────────────────────────────────
+      it('authz.person_visible agrees with people_select row for row: every scope, a record grant, self, a deleted person, another tenant, a forged tenant claim', async () => {
+        const targets = [
+          globalAdmin,
+          deptResetter,
+          teamLead,
+          selfOnly,
+          grantee,
+          noView,
+          inScope,
+          outScope,
+          report,
+          granted,
+          protectedIn,
+          protectedOut,
+          deleted,
+          foreigner,
+        ];
+        const viewers: { name: string; personId: string; orgId: string }[] = [
+          { name: 'GLOBAL', personId: globalAdmin, orgId: orgV },
+          { name: 'DEPARTMENT', personId: deptResetter, orgId: orgV },
+          { name: 'TEAM', personId: teamLead, orgId: orgV },
+          { name: 'SELF', personId: selfOnly, orgId: orgV },
+          { name: 'record grant', personId: grantee, orgId: orgV },
+          { name: 'no people.view', personId: noView, orgId: orgV },
+          { name: 'forged tenant', personId: globalAdmin, orgId: orgB },
+          { name: 'no identity', personId: '', orgId: '' },
+        ];
+        let compared = 0;
+        for (const v of viewers) {
+          const ctx = { personId: v.personId, orgId: v.orgId };
+          const policy = new Set(
+            (
+              await rolledBack<{ id: string }>(
+                appUser,
+                ctx,
+                `select id from public.people where id = any($1::uuid[])`,
+                [targets],
+              )
+            ).map((r) => r.id),
+          );
+          const helper = await rolledBack<{ id: string; visible: boolean }>(
+            owner,
+            ctx,
+            `select t as id, authz.person_visible(t) visible from unnest($1::uuid[]) t`,
+            [targets],
+          );
+          for (const h of helper) {
+            expect(h.visible, `${v.name} → ${h.id}`).toBe(policy.has(h.id));
+            compared++;
+          }
+        }
+        expect(compared).toBe(viewers.length * targets.length);
+        // The sample is not degenerate: each scope sees a different, non-trivial set.
+        const seen = async (personId: string) =>
+          (
+            await rolledBack<{ id: string }>(
+              owner,
+              { personId, orgId: orgV },
+              `select t as id from unnest($1::uuid[]) t where authz.person_visible(t)`,
+              [targets],
+            )
+          ).map((r) => r.id);
+        expect(await seen(deptResetter)).toEqual(
+          expect.arrayContaining([inScope, protectedIn, deptResetter]),
+        );
+        expect(await seen(deptResetter)).not.toContain(outScope);
+        expect(await seen(teamLead)).toEqual(expect.arrayContaining([report, teamLead]));
+        expect(await seen(teamLead)).not.toContain(inScope);
+        expect((await seen(grantee)).sort()).toEqual([grantee, granted].sort());
+        expect(await seen(selfOnly)).toEqual([selfOnly]);
+        expect(await seen(globalAdmin)).not.toContain(deleted);
+        expect(await seen(globalAdmin)).not.toContain(foreigner);
+      });
+
+      it('authz.person_visible is callable by nobody but its owner', async () => {
+        for (const pool of [appUser, appAuth, appWorker]) {
+          expect(await codeOf(pool.query(`select authz.person_visible($1::uuid)`, [inScope]))).toBe(
+            '42501',
+          );
+        }
+      });
+
+      // ── H1: credential reset ─────────────────────────────────────────────────────
+      it('H1: a DEPARTMENT administrator cannot reset a person in another department — no reset, no session change, no audit, same answer as a missing person', async () => {
+        const before = await footprint(outScope);
+        const out = await errorOf(issueAs(deptTok, outScope));
+        const missing = await errorOf(issueAs(deptTok, randomUUID()));
+        expect(out?.code).toBe('42501');
+        expect(out?.message).toBe(missing?.message);
+        expect(await footprint(outScope)).toEqual(before);
+        // Nor a protected-role holder out of reach: refused before ADR-001, so no DENIED entry.
+        const pBefore = await footprint(protectedOut);
+        expect((await errorOf(issueAs(deptTok, protectedOut)))?.code).toBe('42501');
+        expect(await footprint(protectedOut)).toEqual(pBefore);
+      });
+
+      it('H1: through the application layer the refusal is NOT_FOUND, carries no token, and no reset is minted', async () => {
+        const { issueAdminPasswordReset } = await import('@/lib/auth/admin-credentials');
+        const before = await footprint(outScope);
+        const e = (await errorOf(
+          issueAdminPasswordReset(deptTok, outScope, {
+            requestId: randomUUID(),
+            ip: `198.51.100.${1 + Math.floor(Math.random() * 250)}`,
+            userAgent: 'vitest',
+          }),
+        )) as unknown as { name: string; code: string; message: string; cause?: unknown };
+        expect(e?.name).toBe('AdminAuthActionError');
+        expect(e.code).toBe('NOT_FOUND');
+        expect(e.cause).toBeUndefined();
+        expect(JSON.stringify(e).includes(deptTok)).toBe(false);
+        expect(await footprint(outScope)).toEqual(before);
+      });
+
+      it('H1: the same DEPARTMENT administrator can still reset a person in their own department', async () => {
+        const r = await issueAs(deptTok, inScope);
+        expect(r.outcome).toBe('ISSUED');
+        expect(r.reset_id).toMatch(/^[0-9a-f-]{36}$/);
+      });
+
+      it('H1: TEAM reaches the manager chain, a record grant reaches its one person, SELF and no people.view reach no one else', async () => {
+        expect((await issueAs(teamTok, report)).outcome).toBe('ISSUED');
+        expect((await errorOf(issueAs(teamTok, inScope)))?.code).toBe('42501');
+        expect((await issueAs(granteeTok, granted)).outcome).toBe('ISSUED');
+        expect((await errorOf(issueAs(granteeTok, outScope)))?.code).toBe('42501');
+        const selfTok = (await seedSession(owner, selfOnly)).token;
+        expect((await errorOf(issueAs(selfTok, inScope)))?.code).toBe('42501');
+        const noViewTok = (await seedSession(owner, noView)).token;
+        expect((await errorOf(issueAs(noViewTok, inScope)))?.code).toBe('42501');
+      });
+
+      it('H1: a GLOBAL administrator (verified second factor) resets anyone in the organization, protected roles included under ADR-001', async () => {
+        expect((await issueAs(globalTok, outScope)).outcome).toBe('ISSUED');
+        expect((await issueAs(globalTok, protectedOut)).outcome).toBe('ISSUED');
+      });
+
+      it('H1: ADR-001 still refuses a VISIBLE protected-role holder — DENIED, audited', async () => {
+        const before = Number((await footprint(protectedIn)).audits);
+        expect(await issueAs(deptTok, protectedIn)).toEqual({ outcome: 'DENIED', reset_id: null });
+        expect(Number((await footprint(protectedIn)).audits)).toBe(before + 1);
+      });
+
+      it('H1: forged identity settings do not widen visibility, and other tenants and deleted people stay out of reach', async () => {
+        for (const ctx of [
+          { personId: globalAdmin, orgId: orgV, aal: 'aal2' },
+          { personId: SYSTEM_ACTOR, orgId: orgV },
+        ]) {
+          expect((await errorOf(issueAs(deptTok, outScope, ctx)))?.code).toBe('42501');
+        }
+        expect((await errorOf(issueAs(globalTok, foreigner)))?.code).toBe('42501');
+        expect((await errorOf(issueAs(globalTok, deleted)))?.code).toBe('42501');
+      });
+
+      // ── M1: session actions ──────────────────────────────────────────────────────
+      it('M1: GLOBAL sessions.revoke alone does not reach a person outside people.view — list, revoke one, revoke all are refused and change nothing', async () => {
+        const before = await footprint(outScope);
+        const oneId = before.sessions.split(',')[0]!;
+        for (const [act, sid] of [
+          ['list', null],
+          ['revoke_one', oneId],
+          ['revoke_all', null],
+        ] as const) {
+          const e = await errorOf(sessionAs(deptTok, outScope, act, sid));
+          expect(e?.code, act).toBe('42501');
+          // Nothing about the target's sessions in the refusal.
+          const text = [e?.message, e?.detail, e?.hint, e?.where].join(' ');
+          expect(text.includes(IP), act).toBe(false);
+          expect(text.includes(UA), act).toBe(false);
+          expect(text.includes(oneId), act).toBe(false);
+        }
+        expect(await footprint(outScope)).toEqual(before);
+        // The answer is the one a missing person gets.
+        const missing = await errorOf(sessionAs(deptTok, randomUUID(), 'list'));
+        expect((await errorOf(sessionAs(deptTok, outScope, 'list')))?.message).toBe(
+          missing?.message,
+        );
+      });
+
+      it('M1: through the application layer the refusal is NOT_FOUND with no session details', async () => {
+        const { listSessionsAsAdmin } = await import('@/lib/auth/admin-credentials');
+        const e = (await errorOf(
+          listSessionsAsAdmin(deptTok, outScope, { requestId: null, ip: null, userAgent: null }),
+        )) as unknown as { code: string; message: string; stack?: string };
+        expect(e.code).toBe('NOT_FOUND');
+        const everything = `${e.message} ${String(e.stack)} ${JSON.stringify(e)}`;
+        expect(everything.includes(IP) || everything.includes(UA)).toBe(false);
+      });
+
+      it('M1: the same administrator lists and revokes sessions of a person they can see', async () => {
+        const rows = await sessionAs(deptTok, inScope, 'list');
+        expect(rows.length).toBeGreaterThanOrEqual(2);
+        const one = rows[0]!.session_id as string;
+        const revoked = await sessionAs(deptTok, inScope, 'revoke_one', one);
+        expect(revoked[0]!.affected).toBe(1);
+        expect((await footprint(inScope)).sessions.split(',')).not.toContain(one);
+      });
+
+      it('M1: TEAM and record-grant reach apply to sessions too; a GLOBAL viewer reaches everyone in the organization and no one outside it', async () => {
+        expect((await sessionAs(teamTok, report, 'list')).length).toBeGreaterThanOrEqual(1);
+        expect((await errorOf(sessionAs(teamTok, inScope, 'list')))?.code).toBe('42501');
+        expect((await sessionAs(granteeTok, granted, 'list')).length).toBeGreaterThanOrEqual(1);
+        expect((await sessionAs(globalTok, outScope, 'list')).length).toBeGreaterThanOrEqual(1);
+        expect((await errorOf(sessionAs(globalTok, foreigner, 'list')))?.code).toBe('42501');
+        expect((await errorOf(sessionAs(globalTok, deleted, 'list')))?.code).toBe('42501');
+      });
+
+      it('M1: forged identity settings do not widen visibility for session actions', async () => {
+        const before = await footprint(outScope);
+        for (const ctx of [
+          { personId: globalAdmin, orgId: orgV, aal: 'aal2' },
+          { personId: SYSTEM_ACTOR, orgId: orgV },
+        ]) {
+          expect((await errorOf(sessionAs(deptTok, outScope, 'revoke_all', null, ctx)))?.code).toBe(
+            '42501',
+          );
+        }
+        expect(await footprint(outScope)).toEqual(before);
+      });
+
+      it('M1: the GLOBAL sessions.revoke requirement is unchanged — people.view GLOBAL without it is refused', async () => {
+        const viewer = await personIn('Vis Viewer', deptA);
+        await grant(orgV, viewer, ['people.view'], 'GLOBAL');
+        const tok = (await seedSession(owner, viewer)).token;
+        expect((await errorOf(sessionAs(tok, inScope, 'list')))?.code).toBe('42501');
       });
     });
   },

@@ -13,7 +13,9 @@ import { sqlstateOf } from './invitations';
  * decides everything from it in the database: the session is live, the person behind it is an
  * active administrator of a live organization with the permission at the required scope and a
  * verified second factor where the MFA rule demands one, and the target person is in that same
- * organization. Nothing here, and nothing a caller writes into app.person_id / app.org_id /
+ * organization and visible to the administrator under people.view (people_select, 0074 — the
+ * reach the business-role lookup had before 0072; a person out of reach is "not found").
+ * Nothing here, and nothing a caller writes into app.person_id / app.org_id /
  * app.aal, can widen that. The Server Actions still call requirePermission() first, for clear
  * errors; the database decides again.
  *
@@ -173,8 +175,9 @@ export type AdminResetIssue =
 
 /**
  * Issue a password reset for a same-organization person, at an administrator's request. The
- * database decides who may (users.edit, the MFA rule, and ADR-001: a protected-role holder only
- * by an administrator holding roles.manage at GLOBAL scope) and mints the reset for the target's
+ * database decides who may (users.edit, the MFA rule, a target the administrator can see under
+ * people.view — 0074 — and ADR-001: a protected-role holder only by an administrator holding
+ * roles.manage at GLOBAL scope) and mints the reset for the target's
  * own login: digest only, single use, one-hour expiry, prior unused tokens retired. An ADR-001
  * refusal is audited there and answered as DENIED. Returns the plaintext token — the caller
  * delivers it exactly once. The administrator's IP is rate-limited to the self-service window.
