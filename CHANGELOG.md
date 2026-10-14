@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0070 (production still pending — see the
+Database migrations: 0063–0071 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -77,6 +77,15 @@ Database migrations: 0063–0070 (production still pending — see the
 
 ### Security
 
+- The `cleanup` job type (deleting an organization's old finished jobs, or handing
+  stuck jobs back to the queue) now runs on the worker's own login (migration 0071).
+  It was the last worker path that ran its queries as the web app, and it could only
+  have worked by giving the web app the power to purge and reset any job — so it
+  failed or did nothing. The database now does the work only for a cleanup job the
+  calling worker holds, inside that job's organization, with the job's own settings
+  checked there; it never deletes a job that still has webhook delivery records, and
+  never resets a job whose last heartbeat is under a minute old (`staleThresholdMs`
+  below 60000 is now refused rather than accepted).
 - The background worker has its own database login, `app_worker` (migration 0070),
   and the work only it should do — claiming and finishing jobs, retries, reminders,
   scheduled runs, maintenance, reading a reset email's protected body, and resolving

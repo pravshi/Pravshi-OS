@@ -529,6 +529,14 @@
       "tag": "0070_app_worker_role",
       "breakpoints": true,
       "hash": "11bcc7a3746775dd62c21035643f8065dccc94a12cb1a7efcbcec72062e54c55"
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1791586728057,
+      "tag": "0071_cleanup_job_worker_plane",
+      "breakpoints": true,
+      "hash": "593e317c1d66cfcd1ddec6dc85b0c92eff661805ee23baf262ef0de95626d51d"
     }
   ]
 }

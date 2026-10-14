@@ -8,6 +8,8 @@
  * NON-retryable so bad jobs dead-letter instead of retry-looping.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 vi.mock('../../src/lib/jobs/worker', () => ({
   registerHandler: vi.fn(),
@@ -512,12 +514,47 @@ describe('normalizeCleanupPayload', () => {
   it('rejects unknown targets (non-retryable)', async () => {
     await expectNonRetryable(() => normalizeCleanupPayload({ target: 'everything' }));
   });
+
+  it('refuses a lease threshold under the 60 s reaper floor, over 30 days, or not a number (0071)', async () => {
+    for (const staleThresholdMs of [1000, 59_999, 30 * 86_400_000 + 1, '600000', Number.NaN]) {
+      await expectNonRetryable(() =>
+        normalizeCleanupPayload({ target: 'expired_leases', params: { staleThresholdMs } }),
+      );
+    }
+  });
 });
 
-describe('handleCleanup validation', () => {
+describe('handleCleanup', () => {
+  const dbMock = vi.mocked(withAuthorizedDb);
+  const dialect = new PgDialect();
+
+  beforeEach(() => {
+    dbMock.mockReset();
+  });
+
   it('throws non-retryable on unknown target without touching the DB', async () => {
     const ctx = makeCtx(makeJob({ type: 'cleanup', payload: { target: 'nuke' } }));
     await expectNonRetryable(() => handleCleanup(ctx));
+    expect(dbMock).not.toHaveBeenCalled();
+  });
+
+  it('runs only public.jobs_run_cleanup, naming the held job and this worker — no raw SQL on jobs', async () => {
+    const queries: { sql: string; params: unknown[] }[] = [];
+    dbMock.mockImplementation(async (_ctx, fn) =>
+      fn({
+        execute: async (query: SQL) => {
+          queries.push(dialect.sqlToQuery(query));
+          return { rows: [{ target: 'stale_jobs', dry_run: false, affected: 3 }] };
+        },
+      } as never),
+    );
+    const job = makeJob({ type: 'cleanup', payload: { target: 'stale_jobs', olderThanDays: 30 } });
+    await handleCleanup(makeCtx(job));
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.sql).toMatch(/from public\.jobs_run_cleanup\(\$1::uuid, \$2\)/);
+    expect(queries[0]!.sql).not.toMatch(/\b(delete|update)\b/i);
+    expect(queries[0]!.params).toEqual([job.id, 'test-worker']);
   });
 });
 

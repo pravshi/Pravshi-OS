@@ -243,7 +243,11 @@ names another organization or person is refused. The database recognises the wor
 authenticated as (`session_user`), which `app_user` cannot change: no membership exists, `SET
 ROLE` needs one and `SET SESSION AUTHORIZATION` needs a superuser. So an `app_user` caller with
 raw SQL can no longer claim jobs, read payloads or protected bodies, or forge the worker by
-writing `app.org_id`. `app_worker` holds no table, sequence or schema-object privilege and no RLS
+writing `app.org_id`. The `cleanup` job (0071) runs in `public.jobs_run_cleanup(job, worker)`,
+the worker's alone, which acts only for a `cleanup` job running under the caller's claim and
+reads the organization, target, retention and lease threshold from that job row; `app_user`
+holds no DELETE on `public.jobs` and no path to the purge or the lease reset (pinned by
+`tests/db/cleanup-job-worker-plane.test.ts`). `app_worker` holds no table, sequence or schema-object privilege and no RLS
 policy; workflow actions run as their real principal on `app_user`, resolved only for a job the
 asking worker holds. Pinned by `tests/db/app-worker-role.test.ts` and
 `tests/db/worker-notification-binding.test.ts`.
