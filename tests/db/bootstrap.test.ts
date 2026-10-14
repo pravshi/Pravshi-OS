@@ -73,11 +73,27 @@ const HASH_SHAPED = `${'0'.repeat(32)}:${'f'.repeat(128)}`;
 const bootstrapOn = async (c: PoolClient, a: Args) =>
   (await c.query<Bootstrapped>(BOOTSTRAP, paramsFor(a))).rows[0]!;
 
+/**
+ * Partition maintenance — public.ensure_audit_log_partitions (0062/0065), run by other suites —
+ * creates audit_logs partitions under an exclusive advisory lock, and creating one locks
+ * audit_logs and THEN the tables it references (organizations, people). A bootstrap transaction
+ * takes them the other way round: its organization and person rows first, an audit entry later.
+ * When maintenance ran inside that window the two deadlocked (reproduced: 5 runs of 5 with
+ * partitions recreated alongside this file). So every bootstrap transaction here first takes the
+ * same advisory key SHARED: maintenance waits for it, or it for maintenance, instead of
+ * interleaving. Shared, so this file's own concurrent cases still run side by side. Take it ONCE
+ * per test, before anything else: a second shared request queues behind a waiting maintenance
+ * call, which itself waits on the first.
+ */
+const holdPartitionDdl = (c: PoolClient) =>
+  c.query(`select pg_advisory_xact_lock_shared(hashtext('ensure-audit-log-partitions'))`);
+
 /** Run fn in a transaction that is ALWAYS rolled back. Nothing a rehearsal does is committed. */
 async function rehearse<T>(fn: (c: PoolClient) => Promise<T>, pool: Pool = owner): Promise<T> {
   const c = await pool.connect();
   try {
     await c.query('begin');
+    await holdPartitionDdl(c);
     return await fn(c);
   } finally {
     await c.query('rollback').catch(() => undefined);
@@ -640,6 +656,10 @@ describe('bootstrap, rehearsed', () => {
   });
 
   it('makes a concurrent attempt wait on the gate, and lets it proceed if the first rolls back', async () => {
+    // One holder of the partition-maintenance key for the whole race (see holdPartitionDdl).
+    const guard = await owner.connect();
+    await guard.query('begin');
+    await holdPartitionDdl(guard);
     const first = await owner.connect();
     const second = await owner.connect();
     try {
@@ -660,6 +680,8 @@ describe('bootstrap, rehearsed', () => {
       await second.query('rollback').catch(() => undefined);
       first.release();
       second.release();
+      await guard.query('rollback').catch(() => undefined);
+      guard.release();
     }
     expect(await count(owner, `select count(*)::int n from public.bootstrap_state`)).toBe(0);
   });
@@ -951,6 +973,11 @@ describe('the one real bootstrap of this database, committed', () => {
     );
 
   it('lets exactly one of two concurrent attempts succeed, and leaves nothing of the other', async () => {
+    // One holder of the partition-maintenance key for the whole race (see holdPartitionDdl): the
+    // loser's attempt is a single autocommit statement, so it cannot take the key itself.
+    const guard = await owner.connect();
+    await guard.query('begin');
+    await holdPartitionDdl(guard);
     const first = await owner.connect();
     const second = await owner.connect();
     let outcome: Outcome;
@@ -968,6 +995,8 @@ describe('the one real bootstrap of this database, committed', () => {
     } finally {
       first.release();
       second.release();
+      await guard.query('rollback').catch(() => undefined);
+      guard.release();
     }
 
     expect(outcome.ok).toBe(false);
