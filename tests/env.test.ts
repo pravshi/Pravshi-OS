@@ -120,7 +120,7 @@ describe('parseRuntimeEnv', () => {
 });
 
 describe('DATABASE_URL_AUTH — the authentication plane’s own login (0072/0073)', () => {
-  const AUTH = 'postgresql://app_auth:p@ep-a-pooler.ap-southeast-1.aws.neon.tech/db';
+  const AUTH = 'postgresql://u:p@ep-x-auth-pooler.ap-southeast-1.aws.neon.tech/db';
   const base = {
     DATABASE_URL: POOLED,
     APP_URL: 'https://os.pravshi.com',
