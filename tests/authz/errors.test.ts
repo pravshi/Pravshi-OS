@@ -501,9 +501,11 @@ describe('actionError()', () => {
   it('returns anything else as an internal error with no detail', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const envelope = actionError(new Error('token=abc'));
+      // The secret must not be hex: the envelope carries a random UUID request id, and a hex
+      // secret ('abc') turned up inside one (d308abc6-…) and failed this case by chance.
+      const envelope = actionError(new Error('token=zqxsecretzqx'));
       expect(envelope.error.code).toBe('INTERNAL');
-      expect(JSON.stringify(envelope)).not.toContain('abc');
+      expect(JSON.stringify(envelope)).not.toContain('zqxsecretzqx');
     } finally {
       log.mockRestore();
     }
