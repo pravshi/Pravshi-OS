@@ -835,29 +835,44 @@ describe.skipIf(!READY)(
 
       // ── atomicity ────────────────────────────────────────────────────────────────
       it('rolls the deletion back when the audit entry cannot be written', async () => {
+        // The audit write is made to fail without touching any shared object. audit_logs has a
+        // foreign key to the acting administrator's people row, so its insert needs a KEY SHARE
+        // lock on that row: a dedicated administrator's row is held FOR UPDATE on another
+        // connection, and the caller allows one second of lock waiting — so the audit insert,
+        // and nothing before it, fails after the sessions were deleted. (Not a trigger on
+        // public.audit_logs: it is cloned onto every partition, and creating or dropping it
+        // under the parallel suite deadlocked and leaked into the audit-logs trigger census.)
+        const atomicAdmin = await mkPerson(owner, orgA, `Appa Atomic Admin ${RUN}`);
+        await grant(orgA, atomicAdmin, ['sessions.revoke', 'people.view']);
+        const atomicTok = (await seedSession(owner, atomicAdmin)).token;
         const victim = await mkPerson(owner, orgA, `Appa Atomic ${RUN}`);
         const s = await seedSession(owner, victim);
-        // A refusal on audit insert for this one person only, so no other suite is affected.
-        const fn = `appa_refuse_${RUN}`;
-        const trg = `appa_refuse_trg_${RUN}`;
-        await owner.query(
-          `create function public.${fn}() returns trigger language plpgsql as $f$
-         begin
-           if new.entity_id = '${victim}'::uuid then
-             raise exception 'audit refused for this test' using errcode = 'P0001';
-           end if;
-           return new;
-         end $f$`,
-        );
-        await owner.query(
-          `create trigger ${trg} before insert on public.audit_logs for each row execute function public.${fn}()`,
-        );
+
+        const holder = await owner.connect();
         try {
-          const err = await errorOf(action(appAuth, adminToken, victim, 'revoke_all'));
-          expect(err?.code).toBe('P0001');
+          await holder.query('begin');
+          await holder.query(`select 1 from public.people where id = $1 for update`, [atomicAdmin]);
+          for (const act of ['revoke_one', 'revoke_all'] as const) {
+            const c = await appAuth.connect();
+            try {
+              await c.query('begin');
+              await c.query(`set local lock_timeout = '1s'`);
+              const err = await errorOf(
+                c.query(
+                  `select * from authz.admin_session_action($1, $2::uuid, $3, $4::uuid, $5::uuid, null, 'vitest')`,
+                  [atomicTok, victim, act, act === 'revoke_one' ? s.sessionId : null, randomUUID()],
+                ),
+              );
+              expect(err?.code, act).toBe('55P03'); // lock_not_available
+              expect(err?.where ?? '', act).toContain('write_audit_log');
+            } finally {
+              await c.query('rollback').catch(() => undefined);
+              c.release();
+            }
+          }
         } finally {
-          await owner.query(`drop trigger if exists ${trg} on public.audit_logs`);
-          await owner.query(`drop function if exists public.${fn}()`);
+          await holder.query('rollback').catch(() => undefined);
+          holder.release();
         }
         expect(await sessionsOf(s.authUserId)).toEqual([s.sessionId]);
         const stamped = await owner.query<{ s: boolean }>(
@@ -865,6 +880,14 @@ describe.skipIf(!READY)(
           [victim],
         );
         expect(stamped.rows[0]!.s).toBe(false);
+
+        // Control: with the row free, the same call succeeds and is audited — so the refusals
+        // above were the audit write's, not anything earlier.
+        const before = await auditCount(victim);
+        const ok = await action(appAuth, atomicTok, victim, 'revoke_all');
+        expect(ok[0]!.affected).toBe(1);
+        expect(await sessionsOf(s.authUserId)).toEqual([]);
+        expect(await auditCount(victim)).toBe(before + 1);
       });
 
       // ── workflows and the worker ─────────────────────────────────────────────────
