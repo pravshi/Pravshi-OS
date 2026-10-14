@@ -11,6 +11,7 @@
 | `DATABASE_URL_MIGRATE`   | `app_owner`  | direct   | GitHub Actions and local machines ONLY                           |
 | `DATABASE_URL_TEST`      | `app_user`   | pooled   | GitHub Actions and local machines ONLY                           |
 | `DATABASE_URL_WORKER`    | `app_worker` | pooled   | The worker host (Railway) + local — NEVER Vercel                 |
+| `DATABASE_URL_AUTH`      | `app_auth`   | pooled   | Vercel (all envs) + local — NEVER the worker host                |
 | `DATABASE_URL_BOOTSTRAP` | `app_admin`  | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions |
 
 **`DATABASE_URL_BOOTSTRAP` must never leave the operator's machine.** It connects as
@@ -27,6 +28,15 @@ secrets — for every organization. The web app never needs it: `src/env.ts` ref
 when it is present on Vercel (`VERCEL` set), builds included, and the worker refuses to start
 without it or when it authenticates as any other role. CI creates a per-run `app_worker`
 password for its disposable database, exactly as for `app_user`.
+
+**`DATABASE_URL_AUTH` belongs to the web app only.** It connects as `app_auth` (migrations
+0072/0073), the authentication plane's own login: Better Auth and every pre-login flow run on it,
+and it alone holds the credential store — password hashes, sessions and their tokens, second
+factors — and the pre-login functions. `app_user` holds nothing in the `auth` schema, so there is no
+fallback: the auth module refuses to load without it, `src/env.ts` refuses a Vercel deployment
+without it and refuses it when it equals `DATABASE_URL`, and the pool refuses any connection that
+did not authenticate as `app_auth`. The worker never authenticates anyone and refuses to start
+when it is present. CI creates a per-run `app_auth` password, exactly as for the other roles.
 
 **`DATABASE_URL_MIGRATE` must never be added to Vercel.** It uses `app_owner`, which owns the
 schema and is precisely what RLS does not constrain. A deployed application holding that
@@ -49,13 +59,14 @@ absolute everywhere else. Both halves are pinned by tests in `tests/env.test.ts`
 
 ### Database
 
-| Variable                 | Required  | Notes                                                                  |
-| ------------------------ | --------- | ---------------------------------------------------------------------- |
-| `DATABASE_URL`           | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL  |
-| `DATABASE_URL_MIGRATE`   | tooling   | Must **not** contain `-pooler`; migrations need one real session       |
-| `DATABASE_URL_TEST`      | tooling   | Integration tests. Point at your own branch, never `production`        |
-| `DATABASE_URL_WORKER`    | worker    | `app_worker`, pooled. Required by `pnpm worker`; never on Vercel       |
-| `DATABASE_URL_BOOTSTRAP` | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs` |
+| Variable                 | Required  | Notes                                                                   |
+| ------------------------ | --------- | ----------------------------------------------------------------------- |
+| `DATABASE_URL`           | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL   |
+| `DATABASE_URL_MIGRATE`   | tooling   | Must **not** contain `-pooler`; migrations need one real session        |
+| `DATABASE_URL_TEST`      | tooling   | Integration tests. Point at your own branch, never `production`         |
+| `DATABASE_URL_WORKER`    | worker    | `app_worker`, pooled. Required by `pnpm worker`; never on Vercel        |
+| `DATABASE_URL_AUTH`      | yes (web) | `app_auth`, pooled. Required on Vercel and locally; never on the worker |
+| `DATABASE_URL_BOOTSTRAP` | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs`  |
 
 ### First-run bootstrap — operator machine only
 

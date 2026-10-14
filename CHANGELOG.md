@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0071 (production still pending — see the
+Database migrations: 0063–0073 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -77,6 +77,14 @@ Database migrations: 0063–0071 (production still pending — see the
 
 ### Security
 
+- Sign-in, sessions and passwords now run on their own database login, `app_auth`
+  (migrations 0072 and 0073). Before, the web app's everyday login could read and change the
+  whole credential store — password hashes, sessions, second-factor secrets — so a flaw that let
+  someone run database queries as the web app could have taken over any account. Now only the
+  authentication part of the app can reach it, through `DATABASE_URL_AUTH` (required on Vercel;
+  never on the worker host). Administrators ending another person's sessions or resetting their
+  password are checked by the database against their own signed-in session, rather than trusted
+  from the application; ending sessions and its audit record happen together.
 - The `cleanup` job type (deleting an organization's old finished jobs, or handing
   stuck jobs back to the queue) now runs on the worker's own login (migration 0071).
   It was the last worker path that ran its queries as the web app, and it could only

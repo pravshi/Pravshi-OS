@@ -224,12 +224,25 @@ What each role can *see at all*, independent of the action:
 anomaly detection beyond denial-rate review; no field-level encryption above what Postgres provides
 at rest; no formal penetration test until §37 recommendation 8 is funded.
 
-**Residual (T-22): `public.resolve_login_org(email)`** answers which organization an email
-address belongs to, and the runtime role can call it with no identity: sign-in needs the answer
-before anyone is authenticated. No API response returns it, so reaching it takes the ability to
-run SQL as `app_user` — and anyone with that can already confirm an address exists. It stays
-unchanged until a dedicated pre-authentication database role exists (the infrastructure package
-that also introduces `app_worker` and `app_platform`).
+**The authentication plane's own role (0072/0073).** Better Auth and every pre-login flow connect
+as `app_auth` (`DATABASE_URL_AUTH`, `src/lib/db/auth-pool.ts`), which alone holds the credential
+store — password hashes, sessions and their bearer tokens, TOTP secrets and backup codes, login
+emails, verification values, rate-limit state — and the pre-login functions
+(`update_credential_password`, reset minting and consumption, lockouts, login events,
+`resolve_login_org`, `resolve_auth_identity`, invitation acceptance, bootstrap completion).
+`app_user` holds nothing in the `auth` schema and EXECUTE on none of those, so SQL run as the
+business role can no longer read or set a password, mint or read a session, read or switch off a
+second factor, list logins or resolve an email to its organization. `app_auth` holds nothing in
+`public`. The pool refuses a connection that did not authenticate as `app_auth`, there is no
+fallback to `DATABASE_URL`, and the worker host never holds it. Administrator actions on another
+person's sessions and credential (`authz.admin_session_action`,
+`authz.admin_issue_credential_reset`) take their actor from the administrator's own session
+token, verified in the database — never from `app.person_id` / `app.org_id` / `app.aal` — and
+re-check the permission at its scope, the MFA rule, ADR-001 and the organization there; a session
+revocation and its audit entry are one transaction. A failed call's error never carries the token
+(DrizzleQueryError messages include parameters, so the auth layer replaces them). Pinned by
+`tests/db/app-auth-role.test.ts`, `tests/db/auth-pool-config.test.ts` and
+`tests/integration/auth-role-flows.test.ts`.
 
 **The worker's own role (0070).** The background worker connects as `app_worker`, and every
 worker-plane function — claiming, starting, completing, failing, releasing and reaping jobs,
@@ -252,16 +265,17 @@ policy; workflow actions run as their real principal on `app_user`, resolved onl
 asking worker holds. Pinned by `tests/db/app-worker-role.test.ts` and
 `tests/db/worker-notification-binding.test.ts`.
 
-**Residual (T-22): what remains open to a raw-SQL `app_user` caller.** The checks bind functions to
-the transaction's identity, which stops a confused deputy. They do not stop someone who can
-already run arbitrary SQL as `app_user`, because that role:
-- can write `app.person_id` / `app.org_id` itself — impersonating a person needs a valid person
-  id of the target organization, which no API returns and RLS does not expose;
-- can call `authz.update_credential_password(auth_user_id, hash)` (the reset-completion
-  primitive), which checks nothing beyond the account existing, and `resolve_login_org(email)`.
-Closing those needs a pre-authentication role or a server-held proof inside the database (a
-separate design). The defence today is keeping SQL execution out of reach (parameterised queries
-only, T-15).
+**Residual (T-22, part 1 — design D6): what remains open to a raw-SQL `app_user` caller.** The
+checks bind business functions to the transaction's identity, which stops a confused deputy. They
+do not stop someone who can already run arbitrary SQL as `app_user`, because that role can write
+`app.person_id` / `app.org_id` / `app.aal` itself and so read and change business data as a person
+whose id it knows — at aal2 if that person has a verified second factor (`authz.aal()` trusts
+`app.aal` once a factor exists). Impersonating a person needs a valid person id of the target
+organization, which no API returns and RLS does not expose. The credential half of T-22 is closed
+by 0072/0073 (above); this half needs the database to verify a server-held proof (the session
+token, which `app_user` can no longer read) instead of trusting the settings, and a matching proof
+for workflow actions, which run as a person without a session — a separate package (D6). The
+defence today is keeping SQL execution out of reach (parameterised queries only, T-15).
 
 **Residual: a compromised worker host** holds `app_worker` (every organization's background work)
 and `app_user`. That is inherent to a multi-tenant worker; the mitigations are credential hygiene,
