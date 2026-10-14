@@ -282,7 +282,18 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     let out = '';
     refused.stdout!.on('data', (d: Buffer) => (out += d.toString()));
     refused.stderr!.on('data', (d: Buffer) => (out += d.toString()));
-    const code = await new Promise<number | null>((resolve) => refused.once('exit', resolve));
+    // A worker that does NOT refuse would run until stopped: stop it after 30 s and fail, so a
+    // regression never leaves a worker process behind.
+    const code = await new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => {
+        refused.kill('SIGKILL');
+        resolve(-1);
+      }, 30_000);
+      refused.once('exit', (c) => {
+        clearTimeout(timer);
+        resolve(c);
+      });
+    });
     expect(code).toBe(1);
     expect(out).toContain('DATABASE_URL_AUTH is set on the worker host');
     // The message names the variable, never its value.
