@@ -273,7 +273,8 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
 
   it('7. refuses to start on a host that holds the web app’s authentication login (0072/0073)', async () => {
     await stopWorker();
-    const authUrl = process.env.DATABASE_URL_AUTH ?? 'postgresql://u:p@ep-x-auth-pooler.example.test/db';
+    const authUrl =
+      process.env.DATABASE_URL_AUTH ?? 'postgresql://u:p@ep-x-auth-pooler.example.test/db';
     const refused = spawn(process.env.WPW_NODE ?? process.execPath, WORKER_ARGS, {
       env: workerEnv({ DATABASE_URL_AUTH: authUrl, PORT: String(PORT + 1) }),
       stdio: ['ignore', 'pipe', 'pipe'],
