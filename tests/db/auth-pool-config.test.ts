@@ -2,7 +2,8 @@
  * The authentication plane's pool (src/lib/db/auth-pool.ts, migrations 0072/0073). LIVE DB.
  *
  *   - the configured DATABASE_URL_AUTH authenticates as app_auth, and the auth client uses it;
- *   - without DATABASE_URL_AUTH the module refuses to load — there is no fallback;
+ *   - without DATABASE_URL_AUTH the pool loads (opening nothing) and refuses its first use — there
+ *     is no fallback — so the worker, which must not hold the variable, can load shared code;
  *   - a DATABASE_URL_AUTH that authenticates as another login (the business role) is refused on
  *     first use by the pool itself, for every caller, including the Better Auth adapter's client.
  *
@@ -31,13 +32,29 @@ describe.skipIf(!READY)('the app_auth pool (live DB)', () => {
     expect(r.rows[0]!.role).toBe('app_auth');
   });
 
-  it('refuses to load without DATABASE_URL_AUTH — no fallback to DATABASE_URL', async () => {
+  it('without DATABASE_URL_AUTH: loads (opens nothing), and refuses its first use — no fallback', async () => {
     vi.resetModules();
     const actual = await vi.importActual<typeof import('@/env')>('@/env');
     vi.doMock('@/env', () => ({ ...actual, env: { ...actual.env, DATABASE_URL_AUTH: undefined } }));
-    await expect(import('@/lib/db/auth-pool')).rejects.toThrow(
-      /DATABASE_URL_AUTH is not configured/,
+    const pool = await import('@/lib/db/auth-pool');
+    await expect(pool.authSessionRole()).rejects.toThrow(/DATABASE_URL_AUTH is not configured/);
+    // The adapter's client refuses too — it never reaches DATABASE_URL instead.
+    const { authDb } = await import('@/lib/db/auth-client');
+    const err = await authDb.execute(sql`select session_user`).then(
+      () => null,
+      (e: { message?: string; cause?: { message?: string } }) => `${e.message} ${e.cause?.message}`,
     );
+    expect(err).toMatch(/DATABASE_URL_AUTH is not configured/);
+  });
+
+  it('the worker’s module graph loads without DATABASE_URL_AUTH (it reaches the auth client transitively)', async () => {
+    // runner → workflow-jobs → workflow engine → integrations fan-out → authorization helpers →
+    // session → auth client → auth pool. The worker host must not hold DATABASE_URL_AUTH, so
+    // merely loading that chain must not need it (a WP-A1 regression found by the worker E2E).
+    vi.resetModules();
+    const actual = await vi.importActual<typeof import('@/env')>('@/env');
+    vi.doMock('@/env', () => ({ ...actual, env: { ...actual.env, DATABASE_URL_AUTH: undefined } }));
+    await expect(import('@/lib/jobs/workflow-jobs')).resolves.toBeTruthy();
   });
 
   it('refuses a DATABASE_URL_AUTH that authenticates as the business role, on first use', async () => {

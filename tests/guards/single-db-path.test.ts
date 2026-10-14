@@ -82,9 +82,13 @@ describe('there is exactly one path to Postgres', () => {
     expect(src).toMatch(/verify: verifyAuthLogin/);
   });
 
-  it('the worker plane never reaches the authentication plane', () => {
-    // The worker host must not hold DATABASE_URL_AUTH (runner.ts refuses it); nothing it runs
-    // may import the auth module, the auth client or the auth pool.
+  it('the worker plane imports nothing from the authentication plane directly', () => {
+    // The worker host must not hold DATABASE_URL_AUTH (runner.ts refuses it); no worker-plane
+    // file may import the auth module, the auth client or the auth pool. This is a DIRECT-import
+    // check only: shared code the worker loads (the workflow engine's integrations fan-out uses
+    // the authorization helpers) does reach the auth client transitively. That is safe only
+    // because the auth pool is created on first use and needs no configuration to load — pinned
+    // by tests/db/auth-pool-config.test.ts and by the worker E2E starting without the variable.
     const hits = grep(
       `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs src/lib/workflows`,
     );
