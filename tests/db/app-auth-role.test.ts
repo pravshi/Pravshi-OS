@@ -1401,7 +1401,10 @@ describe.skipIf(!READY)(
         const e = (await errorOf(
           issueAdminPasswordReset(deptTok, outScope, {
             requestId: randomUUID(),
-            ip: `198.51.100.${1 + Math.floor(Math.random() * 250)}`,
+            // Its own limiter key: the reset limiter (pwreset:req:<ip>, 5 a minute) is shared with
+            // self-service resets, and other suites walk 198.51.100.x in sequence. The IPv6
+            // documentation prefix with a per-call suffix collides with nobody.
+            ip: `2001:db8:a1::${randomBytes(2).toString('hex')}`,
             userAgent: 'vitest',
           }),
         )) as unknown as { name: string; code: string; message: string; cause?: unknown };
