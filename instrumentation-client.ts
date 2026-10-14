@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
+import { scrubBreadcrumb, scrubEvent } from '@/lib/observability/redact';
 
 /**
  * THE ONE INTENTIONAL EXCEPTION to the "no process.env outside src/env.ts" rule.
@@ -20,6 +21,12 @@ Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   tracesSampleRate: 0.1,
   sendDefaultPii: false,
+  // One-time credentials travel in this app's URLs — /reset-password?token=…, /invite#token=…,
+  // /setup#token=… — and the browser SDK records the page URL on every event and navigation
+  // breadcrumb. The server's redaction applies here too (src/lib/observability/redact.ts).
+  beforeSend: (event) => scrubEvent(event),
+  beforeSendTransaction: (event) => scrubEvent(event),
+  beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb),
 });
 
 /** Reports client-side navigation timing to Sentry. Inert without a DSN. */

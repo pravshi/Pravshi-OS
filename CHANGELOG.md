@@ -77,6 +77,11 @@ Database migrations: 0063–0074 (production still pending — see the
 
 ### Security
 
+- A database failure during sign-in or a session check no longer writes the session token to
+  the server log. Database errors carry every query parameter, and the authentication library
+  printed them whole; the session's token was one of them. Authentication now logs errors as
+  their type and code only, and Sentry events, breadcrumbs and traces (server, edge and browser)
+  are scrubbed of tokens, passwords, cookies and credential-bearing URLs before they leave.
 - Sign-in, sessions and passwords now run on their own database login, `app_auth`
   (migrations 0072 and 0073). Before, the web app's everyday login could read and change the
   whole credential store — password hashes, sessions, second-factor secrets — so a flaw that let

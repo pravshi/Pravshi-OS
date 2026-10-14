@@ -248,6 +248,25 @@ revocation and its audit entry are one transaction. A failed call's error never 
 `tests/db/app-auth-role.test.ts`, `tests/db/auth-pool-config.test.ts` and
 `tests/integration/auth-role-flows.test.ts`.
 
+**Diagnostics never carry a credential.** A failed query surfaces as drizzle's DrizzleQueryError,
+whose message lists every bound parameter — for the session lookup, the session's bearer token —
+and drizzle wraps every failure that way (permission, timeout, exhausted pool). One policy,
+`src/lib/observability/redact.ts`, decides what may leave the process: an error is written as its
+class and codes (SQLSTATE, errno, API code) and those of its causes, never its message, parameters,
+detail or stack; credential-named keys are replaced at any depth; remaining text loses drizzle's
+`params:` tail, credential query and fragment parameters (`?token=`, `#token=`), bearer and cookie
+values, connection-string passwords and token-shaped runs. Better Auth logs only through it
+(`logger.log`, `src/lib/auth/safe-log.ts`); its router no longer prints raw errors
+(`onAPIError.throw`), so a failure outside the library's own handling reaches the auth route's
+last resort, which logs a safe line, raises a Sentry alert built from the class and code, and
+answers a fixed 500. Sentry's server, edge and browser configurations pass every event,
+transaction and breadcrumb through the same policy. Pinned by
+`tests/integration/auth-token-logging.test.ts` (real handler, real database, failing session
+lookups) and `tests/observability/redaction.test.ts` (the real SDK pipeline with each runtime's
+own options and an in-memory transport). Not verified here: a deployed Sentry project's
+server-side processing, and platform request logs, which record `/reset-password?token=…` URLs
+before the application sees them.
+
 **The worker's own role (0070).** The background worker connects as `app_worker`, and every
 worker-plane function — claiming, starting, completing, failing, releasing and reaping jobs,
 retry sweeps, next-due lookups, reminder claims, scheduler ticks, partition maintenance and
