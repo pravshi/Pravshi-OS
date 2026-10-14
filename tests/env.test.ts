@@ -119,6 +119,48 @@ describe('parseRuntimeEnv', () => {
   });
 });
 
+describe('DATABASE_URL_AUTH — the authentication plane’s own login (0072/0073)', () => {
+  const AUTH = 'postgresql://app_auth:p@ep-a-pooler.ap-southeast-1.aws.neon.tech/db';
+  const base = {
+    DATABASE_URL: POOLED,
+    APP_URL: 'https://os.pravshi.com',
+    NODE_ENV: 'production',
+    BETTER_AUTH_SECRET: SECRET,
+  };
+
+  it('is required on Vercel — a deployment without it is refused, a blank value counts as missing', () => {
+    expect(() => parseRuntimeEnv({ ...base, VERCEL: '1' })).toThrow(
+      /DATABASE_URL_AUTH must be set on Vercel/,
+    );
+    expect(() => parseRuntimeEnv({ ...base, VERCEL: '1', DATABASE_URL_AUTH: '' })).toThrow(
+      /DATABASE_URL_AUTH must be set on Vercel/,
+    );
+    expect(
+      parseRuntimeEnv({ ...base, VERCEL: '1', DATABASE_URL_AUTH: AUTH }).DATABASE_URL_AUTH,
+    ).toBe(AUTH);
+  });
+
+  it('never falls back to the business connection: the same URL as DATABASE_URL is refused', () => {
+    expect(() => parseRuntimeEnv({ ...base, DATABASE_URL_AUTH: POOLED })).toThrow(
+      /must not be the same connection string as DATABASE_URL/,
+    );
+  });
+
+  it('must use the pooled endpoint', () => {
+    expect(() => parseRuntimeEnv({ ...base, DATABASE_URL_AUTH: DIRECT })).toThrow(
+      /DATABASE_URL_AUTH must use the pooled/,
+    );
+  });
+
+  it('is absent on the worker host, which parses without it (runner.ts refuses its presence)', () => {
+    const parsed = parseRuntimeEnv({
+      ...base,
+      DATABASE_URL_WORKER: POOLED.replace('ep-x', 'ep-w'),
+    });
+    expect(parsed.DATABASE_URL_AUTH).toBeUndefined();
+  });
+});
+
 describe('parseToolingEnv', () => {
   it('rejects a pooled URL for migrations', () => {
     expect(() => parseToolingEnv({ DATABASE_URL_MIGRATE: POOLED })).toThrow(

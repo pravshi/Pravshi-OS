@@ -20,6 +20,8 @@
  *   DATABASE_URL_WORKER pooled connection string for role app_worker (0070) — every
  *                       worker-plane operation runs on it; checked at start
  *                       (must authenticate as app_worker). Worker host only.
+ *   DATABASE_URL_AUTH   must NOT be set: the web app's authentication login (app_auth,
+ *                       0072/0073). The worker refuses to start when it is present.
  *   APP_URL             public app URL
  *   NODE_ENV            development | test | production
  *   BETTER_AUTH_SECRET  >= 32 chars (session signing)
@@ -123,6 +125,7 @@ Usage:
 
 Required env (validated before start): DATABASE_URL, DATABASE_URL_WORKER, APP_URL, NODE_ENV,
 BETTER_AUTH_SECRET, HEALTH_CHECK_TOKEN.
+Must not be set: DATABASE_URL_AUTH (the web app's authentication login).
 Optional env: SCHEDULER_TICK_MS (default 60000), HOSTNAME.
 
 The worker claims jobs from the queue, fires due schedules on a tick
@@ -202,6 +205,17 @@ async function main(): Promise<void> {
   pool.on('error', (err: unknown) => {
     console.error('[worker] pool error (worker continues):', err);
   });
+
+  // The authentication plane's credential (app_auth, migrations 0072/0073) belongs to the web
+  // app alone. The worker never authenticates anyone; holding it here would only widen what a
+  // compromised worker host could reach — every password hash and session token.
+  if (env.DATABASE_URL_AUTH) {
+    console.error(
+      '[worker] DATABASE_URL_AUTH is set on the worker host. It is the web app’s authentication ' +
+        'login (app_auth) and must never be present here. Remove it. Refusing to start.',
+    );
+    process.exit(1);
+  }
 
   // The worker plane runs as app_worker (migration 0070). Without its credential, or with a
   // credential that is not app_worker, every claim would be refused — fail fast and loudly

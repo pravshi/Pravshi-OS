@@ -41,6 +41,8 @@ type Ctx = { personId?: string | null; orgId?: string | null };
 describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () => {
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   const appUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+  // The authentication plane's own login (0072/0073): record_login_event is a pre-login function.
+  const appAuth = new Pool({ connectionString: process.env.DATABASE_URL_AUTH });
   // The worker's own login (0070): worker-plane functions belong to it alone.
   const appWorker = new Pool({ connectionString: process.env.DATABASE_URL_WORKER });
 
@@ -143,6 +145,7 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
   afterAll(async () => {
     await owner.end();
     await appUser.end();
+    await appAuth.end();
     await appWorker.end();
   });
 
@@ -336,12 +339,14 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
 
   // ── PART 4: record_login_event ──────────────────────────────────────────
   describe('record_login_event', () => {
+    // Called on the authentication plane's login, as the auth module calls it (0072/0073).
+    const sql = `select public.record_login_event($1::uuid, 'LOGIN_FAILURE', $2::citext, $3::uuid, null, null, '{}') as id`;
     const record = (org: string | null, email: string | null, authUser: string | null) =>
-      asUser<{ id: string }>(
-        {},
-        `select public.record_login_event($1::uuid, 'LOGIN_FAILURE', $2::citext, $3::uuid, null, null, '{}') as id`,
-        [org, email, authUser],
-      );
+      asUser<{ id: string }>({}, sql, [org, email, authUser], appAuth);
+
+    it('is not callable by the business role at all (0073)', async () => {
+      expect(await sqlstateOf(asUser({}, sql, [orgA, aliceEmail, null]))).toBe('42501');
+    });
 
     it('records against the organization the email resolves to (the pre-auth callers)', async () => {
       expect((await record(orgA, aliceEmail, null))[0]!.id).toMatch(/^[0-9a-f-]{36}$/);
@@ -669,6 +674,8 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
       'public.claim_due_task_reminders(integer)',
       'public.jobs_sweep_retryable(integer)',
       'public.worker_next_due_at()',
+      // 0073: a pre-login function — the authentication plane's (app_auth) alone.
+      'public.record_login_event(uuid,text,public.citext,uuid,inet,text,jsonb)',
     ]);
     const sigs = [
       'public.jobs_claim_next(text,text[])',
@@ -708,7 +715,8 @@ describe.skipIf(!DB_READY)('elevated function boundaries (0068, live DB)', () =>
       expect(r.owner_name, r.sig).toBe('app_owner');
       expect(r.public_exec, r.sig).toBe(false);
       // 0070: worker-plane functions belong to app_worker alone; the organization-taking
-      // identity-code generator is not app_user's either (0068).
+      // identity-code generator is not app_user's either (0068); 0073 moved the pre-login
+      // functions to app_auth.
       expect(r.user_exec, r.sig).toBe(!NOT_APP_USER.has(r.sig));
     }
   });

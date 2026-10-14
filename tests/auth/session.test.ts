@@ -401,6 +401,12 @@ describe('the authorization boundary is unmoved', () => {
       // the function body.
       audit_two_factor_change: ['auth_users'],
       mfa_enrollment_required: ['auth_two_factors'],
+      // 0072: the administrator definers prove their actor from the presented session token
+      // (verified_session_actor) and act on that login's sessions, or mint a reset for a
+      // same-organization person's own login.
+      verified_session_actor: ['auth_sessions'],
+      admin_session_action: ['auth_sessions'],
+      admin_issue_credential_reset: ['auth_users'],
     };
     for (const r of rows) {
       // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of

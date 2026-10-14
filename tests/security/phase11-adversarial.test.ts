@@ -112,7 +112,9 @@ vi.hoisted(() => {
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 
 const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE }) : null;
-const asUser = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_TEST }) : null;
+// The authentication plane's own login (0072/0073): the reset-email enqueue definer is a pre-login
+// function, called by the auth module on app_auth — the business role holds no EXECUTE on it.
+const asAuth = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_AUTH }) : null;
 
 const RUN = randomBytes(4).toString('hex');
 const STRONG_PW = 'correct horse battery staple 001';
@@ -194,7 +196,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await owner?.end();
-  await asUser?.end();
+  await asAuth?.end();
 });
 
 /** Plant an invitation row exactly as the app would issue it. */
@@ -469,7 +471,7 @@ describe.runIf(HAS_DB)(
         return row.id;
       };
       const callDefiner = async (resetId: string, subject = 'Reset', html = '<p>reset</p>') => {
-        const r = await asUser!.query<{ job_id: string | null }>(
+        const r = await asAuth!.query<{ job_id: string | null }>(
           `select public.enqueue_password_reset_email($1::uuid, $2, $3) as job_id`,
           [resetId, subject, html],
         );
@@ -511,7 +513,7 @@ describe.runIf(HAS_DB)(
         )
       ).rows[0]!.id;
       const jobId = (
-        await asUser!.query<{ job_id: string | null }>(
+        await asAuth!.query<{ job_id: string | null }>(
           `select public.enqueue_password_reset_email($1::uuid, $2, $3) as job_id`,
           [resetId, 'Send it to victim@other.test', '<p>deliver to victim@other.test</p>'],
         )

@@ -301,7 +301,7 @@ describe('structure and privileges', () => {
     expect(rows.map((r) => r.provolatile)).toEqual(['v', 's', 'v']);
   });
 
-  it('grants the bootstrap to app_admin alone, and completion to app_user alone', async () => {
+  it('grants the bootstrap to app_admin alone, and completion to app_auth alone', async () => {
     const grantees = async (fn: string) =>
       (
         await owner.query<{ grantee: string }>(
@@ -316,9 +316,10 @@ describe('structure and privileges', () => {
         .sort();
 
     expect(await grantees('bootstrap_organization')).toEqual(['app_admin', 'app_owner']);
-    // Authentication is not an app_admin path; bootstrap is not an app_user one.
-    expect(await grantees('complete_bootstrap_setup')).toEqual(['app_owner', 'app_user']);
-    expect(await grantees('bootstrap_setup_token_is_valid')).toEqual(['app_owner', 'app_user']);
+    // Authentication is not an app_admin path; bootstrap is not an app_admin one either. Completion
+    // creates the first login, so it belongs to the authentication plane's login (0072/0073).
+    expect(await grantees('complete_bootstrap_setup')).toEqual(['app_auth', 'app_owner']);
+    expect(await grantees('bootstrap_setup_token_is_valid')).toEqual(['app_auth', 'app_owner']);
     expect(await grantees('bootstrap_state_immutable')).toEqual(['app_owner']);
     expect(await grantees('bootstrap_setup_token_consume_once')).toEqual(['app_owner']);
   });

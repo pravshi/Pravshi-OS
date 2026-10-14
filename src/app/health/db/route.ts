@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import * as Sentry from '@sentry/nextjs';
 import { connectWithWake } from '@/lib/db/pool';
+import { AUTH_ROLE, authSessionRole } from '@/lib/db/auth-pool';
 import { env } from '@/env';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,11 @@ export async function GET(req: Request) {
     } finally {
       client.release();
     }
+    // The authentication plane's own login (app_auth, 0072/0073): a wrong or missing
+    // DATABASE_URL_AUTH fails sign-in for everyone, so the deploy check must see it too. The
+    // pool itself refuses a connection that did not authenticate as app_auth.
+    const authRole = await authSessionRole();
+    if (authRole !== AUTH_ROLE) throw new Error('authentication connection is not app_auth');
     return Response.json({ status: 'ok', wake_ms: Date.now() - started });
   } catch (e) {
     // Detail goes to observability. The caller gets nothing: database and

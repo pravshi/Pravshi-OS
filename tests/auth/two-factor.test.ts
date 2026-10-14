@@ -779,7 +779,7 @@ describe('secret and recovery material', () => {
     expect(triggers.rows).toEqual([{ name: 'audit_two_factor_change', tbl: 'auth_two_factors' }]);
   });
 
-  it('gives the runtime role the minimum it needs on the factor table', async () => {
+  it('gives the authentication role (app_auth, 0072/0073) the minimum it needs on the factor table, and nobody else any', async () => {
     const { rows } = await owner.query<{ grantee: string; privs: string }>(
       `select grantee, string_agg(privilege_type, ',' order by privilege_type) privs
        from information_schema.table_privileges
@@ -787,7 +787,7 @@ describe('secret and recovery material', () => {
        group by grantee`,
     );
     expect(rows.length).toBe(1);
-    expect(rows[0]!.grantee).toBe('app_user');
+    expect(rows[0]!.grantee).toBe('app_auth');
     expect(rows[0]!.privs).toBe('DELETE,INSERT,SELECT,UPDATE');
   });
 });
@@ -881,6 +881,12 @@ describe('the rest of the model is untouched', () => {
       // the function body.
       audit_two_factor_change: ['auth_users'],
       mfa_enrollment_required: ['auth_two_factors'],
+      // 0072: the administrator definers prove their actor from the presented session token
+      // (verified_session_actor) and act on that login's sessions, or mint a reset for a
+      // same-organization person's own login.
+      verified_session_actor: ['auth_sessions'],
+      admin_session_action: ['auth_sessions'],
+      admin_issue_credential_reset: ['auth_users'],
     };
     for (const r of rows) {
       // aal() reads auth.auth_users from Task 1.13 onward: it has to check a claim of

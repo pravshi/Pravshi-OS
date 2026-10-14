@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 import { adminResetCredential } from '@/lib/admin/credential-reset';
+import { seedSession } from '../auth-role';
 import type { Authorization } from '@/lib/authz/require-permission';
 import type { RequestMetadata } from '@/lib/audit/log';
 import {
@@ -51,6 +52,9 @@ const empAccount = {} as { personId: string; email: string };
 const saAccount = {} as { personId: string; email: string };
 
 /** The service only ever touches auth.ctx. */
+const tokens = new Map<string, string>();
+const tokenOf = (personId: string) => tokens.get(personId)!;
+
 const asActor = (personId: string, orgId: string) =>
   ({ ctx: { personId, orgId, aal: 'aal2' } }) as unknown as Authorization;
 
@@ -220,6 +224,12 @@ beforeAll(async () => {
   );
 
   noLogin = await mkPerson(owner, org, 'No Login Person');
+
+  // Since 0072 the database proves the administrator from their own session token
+  // (authz.admin_issue_credential_reset). The SUPER_ADMIN holds sensitive permissions at GLOBAL
+  // scope, so the MFA rule needs a verified second factor on that session.
+  tokens.set(editor, (await seedSession(owner, editor)).token);
+  tokens.set(saTarget, (await seedSession(owner, saTarget, { aal2: true })).token);
 }, 60_000);
 
 afterAll(async () => {
@@ -258,9 +268,9 @@ describe('person_holds_protected_role() (migration 0030)', () => {
 describe('adminResetCredential target guard', () => {
   it('refuses a protected-role target for an actor who may not manage protected roles', async () => {
     const m = meta('10.9.0.1');
-    await expect(adminResetCredential(asActor(editor, org), saTarget, m)).rejects.toThrow(
-      /protected role/,
-    );
+    await expect(
+      adminResetCredential(asActor(editor, org), tokenOf(editor), saTarget, m),
+    ).rejects.toThrow(/protected role/);
 
     const rows = await auditRows(m.requestId);
     expect(rows).toHaveLength(1);
@@ -277,26 +287,26 @@ describe('adminResetCredential target guard', () => {
 
   it('refuses regardless of which protected role the target holds', async () => {
     await expect(
-      adminResetCredential(asActor(editor, org), saTarget2, meta('10.9.0.2')),
+      adminResetCredential(asActor(editor, org), tokenOf(editor), saTarget2, meta('10.9.0.2')),
     ).rejects.toThrow(/protected role/);
     // Derived protection counts too.
     await expect(
-      adminResetCredential(asActor(editor, org), capTarget, meta('10.9.0.3')),
+      adminResetCredential(asActor(editor, org), tokenOf(editor), capTarget, meta('10.9.0.3')),
     ).rejects.toThrow(/protected role/);
   });
 
   it('keeps the existing target errors, in the existing order', async () => {
     await expect(
-      adminResetCredential(asActor(editor, org), randomUUID(), meta('10.9.0.4')),
+      adminResetCredential(asActor(editor, org), tokenOf(editor), randomUUID(), meta('10.9.0.4')),
     ).rejects.toThrow('Person not found.');
     await expect(
-      adminResetCredential(asActor(editor, org), noLogin, meta('10.9.0.5')),
+      adminResetCredential(asActor(editor, org), tokenOf(editor), noLogin, meta('10.9.0.5')),
     ).rejects.toThrow('This person has no login.');
   });
 
   it('still resets an ordinary target for the unprivileged actor', async () => {
     const m = meta('10.9.0.6');
-    const res = await adminResetCredential(asActor(editor, org), empTarget, m);
+    const res = await adminResetCredential(asActor(editor, org), tokenOf(editor), empTarget, m);
     expect(res.email).toBe(empAccount.email);
     expect(res.resetUrl).toContain('/reset-password');
     expect(res.emailSent).toBe(false); // no Resend in test env
@@ -315,7 +325,7 @@ describe('adminResetCredential target guard', () => {
 
   it('lets a SUPER_ADMIN reset a protected-role holder', async () => {
     const m = meta('10.9.0.7');
-    const res = await adminResetCredential(asActor(saTarget, org), saTarget2, m);
+    const res = await adminResetCredential(asActor(saTarget, org), tokenOf(saTarget), saTarget2, m);
     expect(res.email).toBeTruthy();
     expect(res.resetUrl).toContain('/reset-password');
 

@@ -537,6 +537,22 @@
       "tag": "0071_cleanup_job_worker_plane",
       "breakpoints": true,
       "hash": "593e317c1d66cfcd1ddec6dc85b0c92eff661805ee23baf262ef0de95626d51d"
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1791587728057,
+      "tag": "0072_auth_role_expand",
+      "breakpoints": true,
+      "hash": "8e43f37fc0dd3399ab713d4877d6f7d047264e0803fd5857555c38802e99efb0"
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1791588728057,
+      "tag": "0073_auth_role_contract",
+      "breakpoints": true,
+      "hash": "a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d"
     }
   ]
 }

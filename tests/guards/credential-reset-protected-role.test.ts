@@ -24,6 +24,15 @@ const MIGRATION = readFileSync(
   'utf8',
 );
 const SERVICE = readFileSync(join(process.cwd(), 'src/lib/admin/credential-reset.ts'), 'utf8');
+// Since 0072 the decision is made in the database, by the definer that proves the administrator
+// from their own session token: the ADR-001 rule, its DENIED audit and the target errors live
+// there; the service maps the outcome and writes the success entry.
+const DEFINER = (() => {
+  const sql = readFileSync(join(process.cwd(), 'drizzle/0072_auth_role_expand.sql'), 'utf8');
+  const start = sql.indexOf('create function authz.admin_issue_credential_reset(');
+  return sql.slice(start, sql.indexOf('$$;', start));
+})();
+const AUTH_LAYER = readFileSync(join(process.cwd(), 'src/lib/auth/admin-credentials.ts'), 'utf8');
 
 describe('0030: person_holds_protected_role is an app-callable definer function', () => {
   it('is SECURITY DEFINER with a pinned search_path', () => {
@@ -55,19 +64,24 @@ describe('0030: person_holds_protected_role is an app-callable definer function'
 });
 
 describe('adminResetCredential refuses protected-role targets for unprivileged callers', () => {
-  it('asks the definer function about the target, not a local join', () => {
-    expect(SERVICE).toMatch(/public\.person_holds_protected_role\(/);
+  it('asks the definer function about the target, not a local join (in the 0072 definer)', () => {
+    expect(DEFINER).toMatch(/public\.person_holds_protected_role\(p_target_person_id, v_org\)/);
   });
 
-  it('checks the actor holds roles.manage at GLOBAL scope', () => {
-    expect(SERVICE).toMatch(/authz\.scope_for\('roles\.manage'\)/);
-    expect(SERVICE).toMatch(/= 'GLOBAL'/);
+  it('checks the actor holds roles.manage at GLOBAL scope (in the 0072 definer)', () => {
+    expect(DEFINER).toMatch(/authz\.scope_for\('roles\.manage'\)\) = 'GLOBAL'/);
   });
 
-  it('audits the refusal as a HIGH denial before throwing', () => {
-    expect(SERVICE).toMatch(/result: 'DENIED'/);
-    expect(SERVICE).toMatch(/severity: 'HIGH'/);
-    expect(SERVICE).toMatch(/reason: 'PROTECTED_ROLE_TARGET'/);
+  it('takes the actor from the verified session, never from a setting (0072)', () => {
+    expect(DEFINER).toMatch(/from authz\.verified_session_actor\(p_actor_session_token\) a/);
+    expect(DEFINER).not.toMatch(/current_setting\(/);
+  });
+
+  it('audits the refusal as a HIGH denial that commits (returned, not raised)', () => {
+    expect(DEFINER).toMatch(/p_result := 'DENIED'::public\.audit_result/);
+    expect(DEFINER).toMatch(/p_severity := 'HIGH'/);
+    expect(DEFINER).toMatch(/'reason', 'PROTECTED_ROLE_TARGET'/);
+    expect(DEFINER).toMatch(/return query select 'DENIED'::text/);
   });
 
   it('throws a clear error naming protected roles', () => {
@@ -75,8 +89,8 @@ describe('adminResetCredential refuses protected-role targets for unprivileged c
   });
 
   it('keeps the existing target errors and the HIGH success audit', () => {
-    expect(SERVICE).toMatch(/Person not found\./);
-    expect(SERVICE).toMatch(/This person has no login\./);
+    expect(AUTH_LAYER).toMatch(/Person not found\./);
+    expect(AUTH_LAYER).toMatch(/This person has no login\./);
     expect(SERVICE).toMatch(/result: 'SUCCESS'/);
     // The success audit stays HIGH severity.
     const successAudit = SERVICE.match(
