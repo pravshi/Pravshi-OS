@@ -25,14 +25,28 @@ export default defineConfig({
     // on deals, a permission rename probe, audit partition DDL) waited out the whole seed
     // and timed out. Run after everything else, the seed overlaps nothing; the perf suites
     // also measure on a quiet database. `pnpm test` still runs every file.
+    //
+    // A third group runs FIRST, alone (tests/serial): suites that must create and drop
+    // audit_logs partitions or run the once-per-database bootstrap, which no other suite may
+    // see happen — they assert exact partition windows and an unbootstrapped database. These
+    // suites leave the database as they found it. (groupOrder indexes an array in vitest, so it
+    // must not be negative: the existing groups moved up by one, in the same relative order.)
     projects: [
+      {
+        extends: true,
+        test: {
+          name: 'serial',
+          include: ['tests/serial/**/*.test.ts'],
+          sequence: { groupOrder: 0 },
+        },
+      },
       {
         extends: true,
         test: {
           name: 'default',
           include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-          exclude: ['tests/perf/**', '**/node_modules/**'],
-          sequence: { groupOrder: 0 },
+          exclude: ['tests/perf/**', 'tests/serial/**', '**/node_modules/**'],
+          sequence: { groupOrder: 1 },
         },
       },
       {
@@ -40,7 +54,7 @@ export default defineConfig({
         test: {
           name: 'perf',
           include: ['tests/perf/**/*.test.ts'],
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 2 },
         },
       },
     ],

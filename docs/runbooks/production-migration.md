@@ -58,7 +58,7 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 74 73 0074_admin_target_visibility
+      # expected at the current release: 75 74 0075_audit_partition_lock_order
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -95,10 +95,10 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
 ## The chain as of writing
 
-The repo journal holds 74 entries (idx 0–73). Per project records, production
+The repo journal holds 75 entries (idx 0–74). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-29 migrations **idx 45–73 (0045–0074)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4573). Step 0 verifies this;
+30 migrations **idx 45–74 (0045–0075)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4574). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the runner selects what to
@@ -201,18 +201,18 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 74, last applied created_at: 1791111413392
+   journal entries: 75, last applied created_at: 1791111413392
    applying idx 45 0045_automation_jobs (… statements)
    …
-   applying idx 73 0074_admin_target_visibility (… statements)
-   done: applied 29, total 74
+   applying idx 74 0075_audit_partition_lock_order (… statements)
+   done: applied 30, total 75
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `74`, max_created_at `1791589728057`, and the
-     ordered hash list equal to the file-byte hashes of idx 0…73.
+     full repo state: count `75`, max_created_at `1791590728057`, and the
+     ordered hash list equal to the file-byte hashes of idx 0…74.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit) run green against the branch, or in CI's equivalent
@@ -269,8 +269,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `74`, max_created_at `1791589728057`, ordered hash list equal to the
-   file-byte hashes of idx 0…73 (same comparison method as Step 0).
+   count `75`, max_created_at `1791590728057`, ordered hash list equal to the
+   file-byte hashes of idx 0…74 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -362,10 +362,16 @@ and none are invented at incident time.
   build, or `DATABASE_URL_AUTH` missing or naming `app_user`) is refused with 42501 on every
   sign-in and session check — it fails closed; nothing is exposed. Deploy the build that uses
   `DATABASE_URL_AUTH`, or fix the variable (`/health/db` says which login it reaches).
-  **The one prepared exception to forward-fix:** `scripts/db/rollback/0073_auth_role_contract.down.sql`
+  **The prepared exceptions to forward-fix:** `scripts/db/rollback/0073_auth_role_contract.down.sql`
   gives `app_user` back the credential store so an old build can sign people in again. It
   RE-OPENS the gap 0073 closes; it is run only with Nani's explicit approval for that step,
   recorded in the run record, and the contract is re-applied as soon as the new build is live.
+  `scripts/db/rollback/0075_audit_partition_lock_order.down.sql` restores the 0062
+  audit-partition maintenance body, for the case where 0075's NOWAIT acquisition keeps
+  exhausting its retries under sustained load (worker log: `audit partition maintenance failed`,
+  sqlstate 55P03, then `audit partition window ends soon`). It brings back the 0062 lock order —
+  maintenance waiting while holding `audit_logs`, deadlocking or stalling audited writes while a
+  partition is created — so it too needs Nani's explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -375,7 +381,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–73)
+## Appendix A — The pending chain (idx 45–74)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -416,13 +422,14 @@ after any repo change.
 | 71  | `0072_auth_role_expand` | 1791587728057 | `8e43f37fc0dd3399ab713d4877d6f7d047264e0803fd5857555c38802e99efb0` |
 | 72  | `0073_auth_role_contract` | 1791588728057 | `a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d` |
 | 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
+| 74  | `0075_audit_partition_lock_order` | 1791590728057 | `b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `74`,
-max_created_at `1791589728057`.
+Final expected state after a complete run: count `75`,
+max_created_at `1791590728057`.
 
 ## Appendix B — Run record template
 
@@ -453,7 +460,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 74 / max 1791589728057 / hashes): yes/no
+  - journal == repo (count 75 / max 1791590728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

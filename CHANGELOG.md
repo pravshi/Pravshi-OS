@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0074 (production still pending — see the
+Database migrations: 0063–0075 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -44,6 +44,13 @@ Database migrations: 0063–0074 (production still pending — see the
 
 ### Fixed
 
+- Audit-log partition maintenance no longer deadlocks or stalls ordinary writes (migration
+  0075). Creating a partition locks the audit log and then the organizations and people tables;
+  any change to a person or an organization that is audited takes them the other way round. When
+  the worker created a partition at that moment, the person or organization change could fail,
+  and every audited write in the system waited up to five seconds. Maintenance now takes the locks
+  it needs without waiting and retries a moment later on a conflict, so it never waits while
+  holding one. It also takes no lock at all when there is nothing to create.
 - Administrative actions that left no audit trail now record exactly one audit
   entry each, committed with the change (migration 0067): creating and
   archiving departments, creating, renaming, archiving and changing the

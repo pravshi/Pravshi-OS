@@ -74,16 +74,17 @@ const bootstrapOn = async (c: PoolClient, a: Args) =>
   (await c.query<Bootstrapped>(BOOTSTRAP, paramsFor(a))).rows[0]!;
 
 /**
- * Partition maintenance — public.ensure_audit_log_partitions (0062/0065), run by other suites —
- * creates audit_logs partitions under an exclusive advisory lock, and creating one locks
- * audit_logs and THEN the tables it references (organizations, people). A bootstrap transaction
- * takes them the other way round: its organization and person rows first, an audit entry later.
- * When maintenance ran inside that window the two deadlocked (reproduced: 5 runs of 5 with
- * partitions recreated alongside this file). So every bootstrap transaction here first takes the
- * same advisory key SHARED: maintenance waits for it, or it for maintenance, instead of
- * interleaving. Shared, so this file's own concurrent cases still run side by side. Take it ONCE
- * per test, before anything else: a second shared request queues behind a waiting maintenance
- * call, which itself waits on the first.
+ * Partition maintenance — public.ensure_audit_log_partitions, run by other suites — creates
+ * audit_logs partitions under an exclusive advisory lock. Before 0075 it locked audit_logs and
+ * THEN the tables it references (organizations, people) and could deadlock with a bootstrap
+ * transaction, which takes them the other way round (reproduced: 5 runs of 5 with partitions
+ * recreated alongside this file). 0075 fixed the order in the function itself (it never waits
+ * while holding a lock; tests/serial/audit-partition-lock-order.test.ts pins that, the bootstrap
+ * shape included). This guard is kept as test isolation only: every bootstrap transaction here
+ * first takes the same advisory key SHARED, so a rehearsal never overlaps partition DDL at all.
+ * Shared, so this file's own concurrent cases still run side by side. Take it ONCE per test,
+ * before anything else: a second shared request queues behind a waiting maintenance call, which
+ * itself waits on the first.
  */
 const holdPartitionDdl = (c: PoolClient) =>
   c.query(`select pg_advisory_xact_lock_shared(hashtext('ensure-audit-log-partitions'))`);

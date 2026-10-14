@@ -561,6 +561,14 @@
       "tag": "0074_admin_target_visibility",
       "breakpoints": true,
       "hash": "3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53"
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1791590728057,
+      "tag": "0075_audit_partition_lock_order",
+      "breakpoints": true,
+      "hash": "b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0"
     }
   ]
 }
