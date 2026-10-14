@@ -58,7 +58,7 @@ const TEXT_RULES: [RegExp, string | ((match: string) => string)][] = [
     /\b((?:__Secure-|__Host-)?[A-Za-z0-9_-]*(?:session_token|session_data|dont_remember|two_factor)[A-Za-z0-9_-]*)=([^;\s"',]+)/gi,
     `$1=${REDACTED}`,
   ],
-  // postgres://user:password@host — the password.
+  // A connection URL's password: scheme://user:PASSWORD@host (any scheme).
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^:/\s@]+:)[^@\s]+@/gi, `$1${REDACTED}@`],
   // Long opaque token-shaped runs (letters AND digits, 32+ chars) — but not a UUID, which is an
   // identifier (request, person, record) the diagnostics need for correlation.
