@@ -13,7 +13,7 @@ As of the V1 release:
 - **No Vercel project exists.** The application has never been deployed.
 - **`os.pravshi.com` does not resolve.** No DNS record has been created.
 - **The production database is behind the code.** The repository journal runs to migration
-  0070; project records indicate the `production` Neon branch stopped at 0044 (October
+  0075; project records indicate the `production` Neon branch stopped at 0044 (October
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
@@ -158,9 +158,10 @@ Applying the pending chain to production is its own gated procedure — **do not
 it from this page.** Follow
 [docs/runbooks/production-migration.md](docs/runbooks/production-migration.md): verify the
 current production journal state read-only, freeze and snapshot, rehearse the full chain
-on the snapshot branch, then apply and verify. Migrations are forward-fix only — no
-down-migrations exist in this repository. Executing the runbook requires founder approval
-(gate HG-2).
+on the snapshot branch, then apply and verify. Migrations are forward-fix only. The two
+exceptions are prepared rollback scripts in `scripts/db/rollback/` (for 0073 and 0075); the
+runbook says when each may be used, and each needs the founder's explicit approval for that
+step. Executing the runbook requires founder approval (gate HG-2).
 
 ### 7. Bootstrap the first SUPER_ADMIN — once
 

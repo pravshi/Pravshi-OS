@@ -185,20 +185,27 @@ has no system actor. The origin is `bootstrap_state`; the first audit entry is t
 completing setup, and it carries the origin — `granted_by: null` — in its metadata. See
 [scripts/bootstrap/README.md](scripts/bootstrap/README.md).
 
-## What GitHub Free does not give us
+## GitHub-side protections: available, not relied on
 
-This repository is private on **GitHub Free**, which means the following do **not** exist:
+This repository is **public** on **GitHub Free** (it was private when these controls were
+designed). On a public repository GitHub offers every item below; on GitHub Free a private
+repository gets none of them. Their state is a repository setting, not something this
+repository records:
 
-- branch protection and repository rulesets
-- required status checks — CI is green on every PR, but GitHub will not block a merge
-- enforced CODEOWNERS review — `.github/CODEOWNERS` **auto-requests** reviewers, nothing more
-- secret scanning and push protection
-- CodeQL
-- `production` environment required reviewers
+- **Not configured** (`main` reported no branch protection on 2026-10-15):
+  - branch protection and repository rulesets
+  - required status checks: CI is green on every PR, but GitHub will not block a merge
+  - enforced CODEOWNERS review: `.github/CODEOWNERS` **auto-requests** reviewers, nothing more
+- **Available, state not verified** (check Settings → Code security and Settings →
+  Environments; do not assume any of them is on):
+  - secret scanning and push protection
+  - CodeQL code scanning (no CodeQL workflow exists in `.github/workflows/`)
+  - `production` environment required reviewers
 
 Two compensating controls exist, and both are **detection, not prevention**:
 
-- `scripts/guards/secret-scan.mjs` stands in for push protection, running on every PR.
+- `scripts/guards/secret-scan.mjs` runs on every PR whatever GitHub's own secret scanning is
+  set to.
 - `.github/workflows/direct-push-audit.yml` fails a run when a commit reaches `main` without
   arriving through a merged pull request. It decides from GitHub's PR-association data, never
   from a commit subject such as `(#123)`, which anyone can forge. It cannot stop the push.

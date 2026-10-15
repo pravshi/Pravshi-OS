@@ -3,7 +3,7 @@
 -- ═════════════════════════════════════════════════════════════════════════════
 --
 -- Restores public.ensure_audit_log_partitions() exactly as migration 0062 defined it
--- (the body below is 0062's, verbatim). Use only if 0075's maintenance itself
+-- (the body and comment below are 0062's, verbatim). Use only if 0075's maintenance itself
 -- misbehaves — for example, if under sustained load its NOWAIT acquisition keeps
 -- exhausting its retries and the partition window shrinks (the worker logs
 -- "audit partition maintenance failed" with sqlstate 55P03 and, later, "audit
@@ -88,6 +88,20 @@ begin
   return v_created;
 end;
 $$;
+
+--> statement-breakpoint
+
+-- 0062's comment, verbatim. CREATE OR REPLACE keeps a function's existing comment, so
+-- without this the restored 0062 body would still be described by 0075's comment.
+comment on function public.ensure_audit_log_partitions(integer) is
+  'Creates any missing monthly partitions from the current month forward, each with RLS '
+  'enabled and forced, an owner policy, and no privileges for the runtime roles. Idempotent. '
+  'Returns how many it created. There is deliberately no DEFAULT partition. Hardened in '
+  '0062: an advisory lock serializing maintenance runs (acquired with lock waits '
+  'unbounded — queueing for a peer run is not contention), a transaction-local '
+  'lock_timeout bounding only the DDL phase, and a bounded retry on '
+  'deadlock/lock-timeout so concurrent audit writers cannot fail the call '
+  '(Phase 10 PR #68 round-5 deadlock; ordering fixed after PR #70 CI round 1).';
 
 --> statement-breakpoint
 

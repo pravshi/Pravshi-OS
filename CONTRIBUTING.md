@@ -2,8 +2,10 @@
 
 ## The one thing to understand first
 
-This repository runs on **GitHub Free**, on which private repositories get no branch
-protection, no required status checks, and no enforced CODEOWNERS review.
+This repository runs on **GitHub Free** and is **public**. A public repository can have
+branch protection, required status checks and enforced CODEOWNERS review, but none of
+them was configured on `main` when this was last checked (2026-10-15). (On GitHub Free a
+private repository cannot have them at all.)
 
 Every rule below is therefore **enforced by people, not by GitHub**. The platform will
 not stop you from pushing to `main`, and it will not stop you from merging a pull
@@ -35,14 +37,14 @@ grows, reintroducing `develop` is a deliberate decision, not a default.
    pull request fails the `direct-push-audit` workflow, which exists to make the
    violation visible after the fact — it cannot prevent it.
 2. **All normal work branches from `main`** and returns through a pull request.
-3. **CI must be green before merge.** GitHub cannot mark the `ci` check required on this
-   plan, so a red run blocks a merge only because a human refuses to merge it. Merging
-   over red CI requires a written justification in the pull request.
+3. **CI must be green before merge.** The `ci` check is not marked required on `main`, so
+   a red run blocks a merge only because a human refuses to merge it. Merging over red CI
+   requires a written justification in the pull request.
 4. **The founder or an authorised maintainer performs the merge to `main`.**
 5. **CODEOWNERS requests review; it does not require it.** `.github/CODEOWNERS` causes
-   GitHub to auto-request the right reviewers. On GitHub Free that request can be
-   dismissed or ignored, and merging without it is not blocked. Treat the request as
-   binding anyway.
+   GitHub to auto-request the right reviewers. With no branch protection requiring code
+   owner review, that request can be dismissed or ignored, and merging without it is not
+   blocked. Treat the request as binding anyway.
 6. **`hotfix/*` may branch from `main`** only for a genuine production incident, and
    returns through a pull request like anything else.
 
