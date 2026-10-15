@@ -350,8 +350,8 @@ All checks must pass before the freeze is lifted.
    first use, and `/health/db` (with the health token) answers 503 if it does not. Like the
    worker's, this pooler check has **not yet been run against Neon** (only through CI's local
    proxy): it is a required operator step on the first non-production branch that receives
-   0072/0073 (`scripts/ops/auth-pool-probe.mjs`, record template
-   `docs/runbooks/auth-pool-probe-record.md`). A test sign-in then succeeds.
+   0072/0073 (`scripts/ops/auth-pool-probe.mjs`, procedure `docs/runbooks/auth-pool-probe.md`,
+   record template `docs/runbooks/auth-pool-probe-record.md`). A test sign-in then succeeds.
 4. Record every result in the run record.
 5. Announce completion and **lift the freeze explicitly** — the freeze ends
    by announcement, not by assumption.
