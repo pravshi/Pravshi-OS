@@ -77,24 +77,80 @@ export class AuthFailureAlert extends Error {
 }
 
 /**
+ * ALERT VOLUME IS BOUNDED. A database outage makes every change-password attempt fail the same
+ * way, and nothing upstream throttles attempts then (the rate limiter itself is a query). Sentry
+ * offers no per-event-type limit in the SDK — `sampleRate` thins every error, and a fingerprint
+ * only groups events after they are ingested — so the limit is here: at most ALERT_LIMIT alerts
+ * per event name per ALERT_WINDOW_MS, per process. Past it, failures are still LOGGED in full
+ * (with their login and request ids — the record to reconcile from) but not sent; the next alert
+ * after the window reopens carries how many were suppressed, so a burst is never invisible.
+ *
+ * Bounded state, no timers: one small record per event name (the names are fixed strings in the
+ * code; at most ALERT_MAX_KEYS are tracked, and an unknown name past that is suppressed and
+ * counted under a shared key), and windows are computed lazily from the clock on each call.
+ *
+ * Per process: N serverless instances may each send up to ALERT_LIMIT per window — the bound is
+ * N × ALERT_LIMIT, still finite and proportional to scale, not to failure count. Sentry's own
+ * project rate limits and quotas apply on top.
+ */
+export const ALERT_LIMIT = 5;
+export const ALERT_WINDOW_MS = 10 * 60_000;
+const ALERT_MAX_KEYS = 32;
+const OVERFLOW_KEY = '(other)';
+
+type AlertWindow = { start: number; sent: number; suppressed: number };
+const alertWindows = new Map<string, AlertWindow>();
+
+/** Whether to send this alert now, and how many were suppressed since the last one sent. */
+function admitAlert(event: string, now: number): { send: boolean; suppressed: number } {
+  const key = alertWindows.has(event) || alertWindows.size < ALERT_MAX_KEYS ? event : OVERFLOW_KEY;
+  let w = alertWindows.get(key);
+  if (!w || now - w.start >= ALERT_WINDOW_MS) {
+    // A new window: carry over what the last one suppressed, to report it with the next alert.
+    w = { start: now, sent: 0, suppressed: w?.suppressed ?? 0 };
+    alertWindows.set(key, w);
+  }
+  if (key === OVERFLOW_KEY || w.sent >= ALERT_LIMIT) {
+    w.suppressed += 1;
+    return { send: false, suppressed: 0 };
+  }
+  w.sent += 1;
+  const suppressed = w.suppressed;
+  w.suppressed = 0;
+  return { send: true, suppressed };
+}
+
+/** Tests only: forget every alert window. */
+export function resetAuthAlertLimiter(): void {
+  alertWindows.clear();
+}
+
+/**
  * A handled failure that must not go unnoticed (a credential change that could not complete, or
- * one that completed but could not be audited): the safe log line above, plus a Sentry alert
- * built only from the event name, the error's class and codes, and the correlation context. The
- * original error is never passed: its message can carry the query's bound parameters.
+ * one that completed but could not be audited): the safe log line above, plus — within the volume
+ * bound above — a Sentry alert built only from the event name, the error's class and codes, and
+ * the correlation context. The original error is never passed: its message can carry the query's
+ * bound parameters.
  */
 export function reportAuthFailure(
   event: string,
   error: unknown,
   context?: AuthFailureContext,
 ): void {
+  const { send, suppressed } = admitAlert(event, Date.now());
   logAuthFailure(event, error, context);
+  if (!send) return;
   const summary = errorSummary(error);
   const code = firstCode(summary);
   Sentry.captureException(
     new AuthFailureAlert(`${event} ${summary.error}${code ? ` ${code}` : ''}`),
     {
       tags: { auth_event: event, ...(code ? { error_code: code } : {}) },
-      extra: { error: summary, ...safeContext(context) },
+      extra: {
+        error: summary,
+        ...safeContext(context),
+        ...(suppressed > 0 ? { suppressed_since_last_alert: suppressed } : {}),
+      },
     },
   );
 }

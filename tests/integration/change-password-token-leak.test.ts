@@ -155,6 +155,8 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
   const { resolveAuthContext } = await import('@/lib/auth/session');
   const { requestMetadata } = await import('@/lib/audit/log');
   const Sentry = await import('@sentry/nextjs');
+  const { resetAuthAlertLimiter, ALERT_LIMIT, ALERT_WINDOW_MS } =
+    await import('@/lib/auth/safe-log');
   const { auth } = await import('@/lib/auth/server');
 
   const owner = fx.ownerPool();
@@ -246,6 +248,7 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
     fault.mode = 'none';
     auditFault.fail = false;
     vi.mocked(Sentry.captureException).mockClear();
+    resetAuthAlertLimiter();
     // The new-password policy asks HIBP: answer locally with a non-matching range.
     vi.stubGlobal(
       'fetch',
@@ -465,4 +468,64 @@ describe.skipIf(!READY)('changing a password never leaks the session token (live
     expectAbsent(line!, canary, 'the log line');
     expect(line).toContain(id);
   });
+
+  // ── alert volume is bounded ─────────────────────────────────────────────────────────
+  it('repeated failures are bounded: ALERT_LIMIT alerts per window, every failure still logged; the window reopens and reports what it suppressed', async () => {
+    const a = await account('cplthr');
+    // An outage of the rate-limit query: every attempt fails the same way, and the per-login
+    // limiter (itself that query) cannot slow the attempts down.
+    fault.canary = a.canary;
+    fault.pattern = /check_rate_limit/;
+    fault.mode = 'connection';
+    const attempts = ALERT_LIMIT + 3;
+    const UNAVAILABLE = {
+      ok: false,
+      error: 'Your password could not be changed right now. Please try again.',
+    };
+    for (let i = 0; i < attempts; i += 1) {
+      const { result, thrown } = await act(fx.PASSWORD, NEW_PASSWORD);
+      expect(thrown === null, 'the action threw').toBe(true);
+      expect(result).toEqual(UNAVAILABLE);
+    }
+    const capture = vi.mocked(Sentry.captureException);
+    expect(capture).toHaveBeenCalledTimes(ALERT_LIMIT);
+    // Every failure is still logged, each with its own request id: the record to reconcile from.
+    const lines = sink.filter((l) => l.includes('[auth] auth.password_change.rate_limit_failed'));
+    expect(lines).toHaveLength(attempts);
+    for (const l of lines) expect(l).toContain(a.authUserId);
+    const requestIds = new Set(lines.map((l) => /"requestId":"([0-9a-f-]{36})"/.exec(l)?.[1]));
+    expect(requestIds.size).toBe(attempts);
+
+    // The window reopens (only Date is faked: timers and the database stay real): the next
+    // failure is alerted again and says how many were held back.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(Date.now() + ALERT_WINDOW_MS + 1_000));
+      const { result } = await act(fx.PASSWORD, NEW_PASSWORD);
+      expect(result).toEqual(UNAVAILABLE);
+    } finally {
+      vi.useRealTimers();
+    }
+    fault.mode = 'none';
+    expect(capture).toHaveBeenCalledTimes(ALERT_LIMIT + 1);
+    const [last, lastHint] = capture.mock.calls.at(-1)! as unknown as [
+      Error,
+      { extra?: Record<string, unknown> },
+    ];
+    expect(last.name).toBe('AuthFailureAlert');
+    expect(lastHint.extra?.suppressed_since_last_alert).toBe(attempts - ALERT_LIMIT);
+    // No alert, sent or reported, carries anything sensitive.
+    for (const call of capture.mock.calls) {
+      const payload = deep(call);
+      expectAbsent(payload, a.canary, 'an alert');
+      expectAbsent(payload, NEW_PASSWORD, 'an alert (new password)');
+      expect(payload).not.toMatch(/Failed query|params:|check_rate_limit/);
+    }
+
+    // A successful change afterwards raises nothing.
+    capture.mockClear();
+    const ok = await act(fx.PASSWORD, NEW_PASSWORD);
+    expect(ok.result).toEqual({ ok: true });
+    expect(capture).not.toHaveBeenCalled();
+  }, 60_000);
 });
