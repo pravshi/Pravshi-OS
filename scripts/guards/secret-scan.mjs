@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // PRAVSHI OS — secret-shape guard (Task 11).
 //
-// GitHub Free gives this repository no secret scanning and no push protection, so a
+// GitHub's own secret scanning and push protection are available to this repository
+// while it is public (on GitHub Free a private repository has neither), but whether they
+// are switched on is a repository setting that has not been verified. Without them, a
 // credential committed by accident would reach the default branch unchallenged. This
-// guard is the compensating control.
+// guard is the compensating control, and it runs whatever those settings are.
 //
 // WHAT THIS GUARANTEES, EXACTLY:
 //

@@ -192,15 +192,17 @@ designed). On a public repository GitHub offers every item below; on GitHub Free
 repository gets none of them. Their state is a repository setting, not something this
 repository records:
 
-- **Not configured** (`main` reported no branch protection on 2026-10-15):
+- **Not configured** (as checked on 2026-10-15: `main` had no branch protection, no active
+  branch rules and no rulesets; the `production` and `staging` environments existed with no
+  protection rules):
   - branch protection and repository rulesets
-  - required status checks: CI is green on every PR, but GitHub will not block a merge
+  - required status checks: GitHub does not block a merge whose CI is red or missing
   - enforced CODEOWNERS review: `.github/CODEOWNERS` **auto-requests** reviewers, nothing more
-- **Available, state not verified** (check Settings → Code security and Settings →
-  Environments; do not assume any of them is on):
+  - required reviewers on the `production` and `staging` environments
+- **Available, state not verified** (check Settings → Code security; do not assume either is
+  on):
   - secret scanning and push protection
   - CodeQL code scanning (no CodeQL workflow exists in `.github/workflows/`)
-  - `production` environment required reviewers
 
 Two compensating controls exist, and both are **detection, not prevention**:
 
