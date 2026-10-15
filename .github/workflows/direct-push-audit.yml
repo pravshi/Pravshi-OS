@@ -1,7 +1,9 @@
 name: direct-push-audit
 
-# DETECTION, NOT PREVENTION. GitHub Free cannot block a direct push to main, so this
-# records one loudly after the fact. It opens no issue, tags nobody, changes no
+# DETECTION, NOT PREVENTION. Nothing blocks a direct push to main: branch protection is
+# available while the repository is public, but none was configured when this was last
+# checked (2026-10-15), and on GitHub Free a private repository cannot have it. So this
+# records a direct push loudly after the fact. It opens no issue, tags nobody, changes no
 # repository state, and requests no write permission — a failed run on main is the signal.
 #
 # The verdict comes from GitHub's commit/PR association data, never from the commit

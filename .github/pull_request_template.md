@@ -15,6 +15,6 @@
 ## Verification
 
 - [ ] `pnpm typecheck && pnpm lint && pnpm test` pass locally
-- [ ] CI is green (required by engineering policy — GitHub Free cannot enforce this)
+- [ ] CI is green (required by engineering policy — GitHub does not enforce it: no required check is configured on `main`)
 - [ ] Branch name matches the convention (`feature/` `fix/` `chore/` `docs/` `hotfix/`)
 - [ ] No secret, connection string or credential appears in the diff

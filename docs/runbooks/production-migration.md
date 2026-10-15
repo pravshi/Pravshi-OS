@@ -33,9 +33,11 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** No down-migrations exist in this repo and none are
-   invented at incident time. Every failure is fixed by a new PR and a new or
-   corrective migration, rehearsed again from Step 2.
+2. **Forward-fix only.** The only down-migrations in this repo are the two
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073 and 0075), each
+   run only with Nani's explicit approval as Failure doctrine (d) describes;
+   none are invented at incident time. Every other failure is fixed by a new PR
+   and a new or corrective migration, rehearsed again from Step 2.
 3. **Production is touched only in Step 3**, only under a recorded HG-2
    approval, and only after a green rehearsal (Step 2) against a snapshot of
    production itself.
@@ -338,8 +340,10 @@ All checks must pass before the freeze is lifted.
 
 ## Failure doctrine (binding)
 
-Migrations are **forward-fix only**. No down-migrations exist in this repo
-and none are invented at incident time.
+Migrations are **forward-fix only**. The only down-migrations in this repo are
+the two prepared rollback scripts described under (d) below (for 0073 and 0075),
+each run only with Nani's explicit approval and a run-record entry; none are
+invented at incident time.
 
 - **(a) The failure is in a migration itself.** Fix via a new PR carrying a
   new or corrective migration; re-enter this runbook at Step 2 with a fresh

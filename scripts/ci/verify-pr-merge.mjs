@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // PRAVSHI OS — direct-push audit decision logic (Task 11, finding #3).
 //
-// COMPENSATING CONTROL, DETECTION ONLY. GitHub Free cannot prevent a direct push to
-// main. This determines, after the fact, whether a pushed commit genuinely arrived
-// through a merged pull request, and fails the workflow run if it did not. It changes
-// no repository state, opens no issue, and needs only read permissions.
+// COMPENSATING CONTROL, DETECTION ONLY. Nothing prevents a direct push to main: when last
+// checked (2026-10-15) no branch protection or ruleset was configured on it, and on GitHub
+// Free a private repository cannot have one. This determines, after the fact, whether a
+// pushed commit genuinely arrived through a merged pull request, and fails the workflow
+// run if it did not. It changes no repository state, opens no issue, and needs only read
+// permissions.
 //
 // Finding #3: the previous version trusted a commit subject ending "(#123)", which
 // anyone can type. Nothing here reads the commit message at all — the decision comes
