@@ -126,6 +126,44 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
     }
   }
 
+  /**
+   * Observe the maintenance backend until its call settles. Every observation in back-off
+   * (PgSleep) records the contended locks it holds; every observation WAITING on a lock records
+   * what it holds while waiting. Both lists must stay empty for a correct implementation.
+   */
+  async function watchUntilSettled(pid: number, done: Promise<unknown>) {
+    let settled = false;
+    void done.finally(() => {
+      settled = true;
+    });
+    const out = {
+      backoffs: 0,
+      heldDuringBackoff: [] as string[],
+      waitsWhileHolding: [] as string[],
+    };
+    while (!settled) {
+      const a = (
+        await owner.query<{ wait_event_type: string | null; wait_event: string | null }>(
+          `select wait_event_type, wait_event from pg_stat_activity where pid = $1`,
+          [pid],
+        )
+      ).rows[0];
+      if (a?.wait_event === 'PgSleep') {
+        out.backoffs += 1;
+        out.heldDuringBackoff.push(...(await heldBy(pid)));
+      } else if (a?.wait_event_type === 'Lock') {
+        const held = await heldBy(pid);
+        out.waitsWhileHolding.push(
+          held.length ? held.join(', ') : '(waiting, holding none listed)',
+        );
+        // One record per distinct wait is enough to fail; keep the list small.
+        if (out.waitsWhileHolding.length >= 3) break;
+      }
+      await sleep(10);
+    }
+    return out;
+  }
+
   /** Start maintenance creating month `m` on its own session. */
   const startMaintenance = async (m: number) => {
     const s = await session();
@@ -372,6 +410,14 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       ]);
       // Held for longer than every attempt and back-off together (≈2.3 s).
       const first = await startMaintenance(m);
+      // Watched for its whole run, not just once: at every observed back-off it must hold none of
+      // the contended locks, and it must never be seen WAITING on a lock. The pre-0075 function
+      // also ends in 55P03 here — after waiting on people while holding audit_logs — so it is this
+      // watch, not the error code, that tells the two apart.
+      const watched = await watchUntilSettled(first.pid, first.done);
+      expect(watched.waitsWhileHolding, 'maintenance waited on a lock while holding').toEqual([]);
+      expect(watched.heldDuringBackoff, 'locks held during back-off').toEqual([]);
+      expect(watched.backoffs, 'back-offs observed').toBeGreaterThanOrEqual(1);
       const outcome = await first.done;
       expect(outcome.error?.code).toBe('55P03'); // lock_not_available, re-raised after 10 attempts
       expect((await partitions()).has(target), 'no partition was half-created').toBe(false);
