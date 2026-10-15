@@ -106,7 +106,7 @@ if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 One mechanical fact the operator should know: the runner selects what to
 apply by `when > max(created_at)`. In the pending segment, `when` values are
 strictly increasing and all greater than idx 44's `when` (1791111413392), so
-the runner will select exactly idx 45–72 — no more, no fewer.
+the runner will select exactly idx 45–74 — no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
 
@@ -143,7 +143,7 @@ hashes of idx 0…K−1 exactly. For the state project records describe, K = 45
 rows: count `45`, max_created_at `1791111413392`, last hash
 `44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4`
 (idx 44, `0044_workflow_engine`). Any other clean prefix (a different K) is
-also workable — the pending chain is then idx K…72 — but record the
+also workable — the pending chain is then idx K…74 — but record the
 difference prominently; it means the 2026-10-06 run (or another act) applied
 more than the records show.
 
@@ -285,14 +285,18 @@ All checks must pass before the freeze is lifted.
    `scripts/db/run.mjs --verify-roles` shape against production: `app_user`
    connects, role attributes match `scripts/db/roles.sql`, and RLS is live.
 3. **Worker role (0070).** As the owner, confirm `app_worker` is a plain login with no
-   membership, that `app_user` can no longer claim jobs, and that `app_worker` can:
+   membership (see the note below the queries), that `app_user` can no longer claim jobs, and
+   that `app_worker` can:
 
    ```sql
    select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
      from pg_roles where rolname = 'app_worker';            -- expect: t f f f f
    select count(*) from pg_auth_members am join pg_roles m on m.oid = am.member
      join pg_roles r on r.oid = am.roleid
-    where 'app_worker' in (m.rolname, r.rolname);           -- expect: 0
+    where m.rolname = 'app_worker'
+       or (r.rolname = 'app_worker'
+           and (am.member <> (select datdba from pg_database where datname = current_database())
+                or m.rolname like 'app\_%'));               -- expect: 0
    select has_function_privilege('app_user',   'public.jobs_claim_next(text,text[])', 'execute'),
           has_function_privilege('app_worker', 'public.jobs_claim_next(text,text[])', 'execute');
                                                             -- expect: f | t
@@ -300,6 +304,14 @@ All checks must pass before the freeze is lifted.
           has_function_privilege('app_worker', 'public.jobs_run_cleanup(uuid,text)', 'execute');
                                                             -- expect: f | t  (0071)
    ```
+
+   **Membership rule (0070, 0072, 0073).** The role is a member of no role (it inherits
+   nothing), and no role is a member of it (none can `SET ROLE` into it) except the database
+   owner, and only when the owner is not an application role. On PostgreSQL 16+ a
+   non-superuser that creates a role is automatically granted ADMIN on it, and Neon's branch
+   owner — which runs `roles.sql` — is not a superuser (`scripts/db/run.mjs` also adds SET and
+   INHERIT). The owner cannot revoke that grant and already administers the branch, so it
+   widens nothing; every other membership still fails the migration and this check.
 
    Then, from the worker host, through the **pooled** endpoint it will really use
    (`DATABASE_URL_WORKER`), `select session_user` must answer `app_worker` — the worker
@@ -314,6 +326,12 @@ All checks must pass before the freeze is lifted.
    ```sql
    select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
      from pg_roles where rolname = 'app_auth';              -- expect: t f f f f
+   select count(*) from pg_auth_members am join pg_roles m on m.oid = am.member
+     join pg_roles r on r.oid = am.roleid
+    where m.rolname = 'app_auth'
+       or (r.rolname = 'app_auth'
+           and (am.member <> (select datdba from pg_database where datname = current_database())
+                or m.rolname like 'app\_%'));               -- expect: 0 (membership rule above)
    select has_schema_privilege('app_user', 'auth', 'usage'),
           has_table_privilege('app_user', 'auth.auth_accounts', 'select'),
           has_table_privilege('app_auth', 'auth.auth_accounts', 'select');
@@ -395,6 +413,14 @@ runner records in `drizzle.__drizzle_migrations` when it applies each one.
 Regenerate them with the command in Step 0 rather than trusting this table
 after any repo change.
 
+**0070, 0072 and 0073 were corrected in place on 2026-10-15** (the role-membership rule — see
+Step 3, "Membership rule"), before any persistent database recorded them: CI has migrated its
+own throwaway Postgres since 2026-10-09 (0070 was first committed on 2026-10-12), production's
+records end at idx 44, and the development database's journal ended near idx 63 when it was
+checked read-only. A database that recorded the earlier bytes of those three files would show a
+hash mismatch on exactly those rows in Step 0: that is a STOP condition — escalate, do not
+re-apply.
+
 | idx | tag                                    | `when`        | sha256 (file bytes)                                                |
 | --- | -------------------------------------- | ------------- | ------------------------------------------------------------------ |
 | 45  | `0045_automation_jobs`                 | 1791248285590 | `925045e968732f0956abda1c263e92c598133f400c405be61be1dd119407baec` |
@@ -421,10 +447,10 @@ after any repo change.
 | 66  | `0067_admin_audit_completeness` | 1791582728057 | `9b26f90ece4a2ad2c362bf89b28e262b1fc63e616c5f6f7659360add8c16fc55` |
 | 67  | `0068_elevated_function_boundaries` | 1791583728057 | `ad13aa14ed4611a8b78e64640cef3ae9ce64a4adc5ee269431c311d9cf551209` |
 | 68  | `0069_password_reset_email_content` | 1791584728057 | `0931683cfc7b407b044967f7b8d6e9d14f3011674e25765fdcb9a0bf5c99284c` |
-| 69  | `0070_app_worker_role` | 1791585728057 | `11bcc7a3746775dd62c21035643f8065dccc94a12cb1a7efcbcec72062e54c55` |
+| 69  | `0070_app_worker_role` | 1791585728057 | `31eb0f0139a0c94edcfe1348a72170b44c59542c2b620bbd12b9d9f59f54e4ad` |
 | 70  | `0071_cleanup_job_worker_plane` | 1791586728057 | `593e317c1d66cfcd1ddec6dc85b0c92eff661805ee23baf262ef0de95626d51d` |
-| 71  | `0072_auth_role_expand` | 1791587728057 | `8e43f37fc0dd3399ab713d4877d6f7d047264e0803fd5857555c38802e99efb0` |
-| 72  | `0073_auth_role_contract` | 1791588728057 | `a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d` |
+| 71  | `0072_auth_role_expand` | 1791587728057 | `547c0cfb5eb11b3a4ddfed556a95449563834d732fbfd24b6827dba7bf3c7143` |
+| 72  | `0073_auth_role_contract` | 1791588728057 | `f1ab5b224b5051d9b278d46f915fbc87cc336a64b8a6bad68ac2f483beb3b9a4` |
 | 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
 | 74  | `0075_audit_partition_lock_order` | 1791590728057 | `b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0` |
 

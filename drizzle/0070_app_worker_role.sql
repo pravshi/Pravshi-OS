@@ -67,12 +67,20 @@ begin
     raise exception 'app_worker must be a plain login role (no SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB)';
   end if;
 
+  -- app_worker is a member of no role (it inherits nothing), and no role is a member of it
+  -- (none can SET ROLE app_worker) — except the database owner, which is not an application
+  -- role. On PostgreSQL 16+ a non-superuser that creates a role is granted ADMIN on it
+  -- automatically, and Neon's branch owner, which runs scripts/db/roles.sql, is such a role
+  -- (scripts/db/run.mjs adds SET and INHERIT); that grant cannot be revoked by the owner and
+  -- widens nothing, since the owner already administers the branch.
   select string_agg(m.rolname || ' -> ' || r.rolname, ', ') into v_bad
   from pg_auth_members am
   join pg_roles m on m.oid = am.member
   join pg_roles r on r.oid = am.roleid
-  where (m.rolname = 'app_worker' and r.rolname like 'app\_%')
-     or (r.rolname = 'app_worker');
+  where m.rolname = 'app_worker'
+     or (r.rolname = 'app_worker'
+         and (am.member <> (select datdba from pg_database where datname = current_database())
+              or m.rolname like 'app\_%'));
   if v_bad is not null then
     raise exception 'app_worker must share no role membership: %', v_bad;
   end if;

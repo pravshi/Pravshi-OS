@@ -44,6 +44,16 @@ Database migrations: 0063–0075 (production still pending — see the
 
 ### Fixed
 
+- Migrations 0070 and 0072 no longer abort on Neon, and 0073's verification no longer fails
+  there. On PostgreSQL 16+ a non-superuser that creates a role is automatically granted ADMIN
+  on it; Neon's branch owner, which runs `scripts/db/roles.sql`, is such a role, cannot revoke
+  that grant, and so was always a member of `app_worker` and `app_auth` — which those checks
+  rejected (`app_worker must share no role membership: neondb_owner -> app_worker`). CI never
+  showed it because a superuser creates the roles there. The rule is now: the role is a member
+  of no role at all (stricter than before, which only looked at application roles), and no role
+  is a member of it except the database owner, and only when the owner is not an application
+  role. The three files were corrected in place before any persistent database recorded them;
+  the runbook's step-3 checks and pinned hashes follow.
 - Audit-log partition maintenance no longer deadlocks or stalls ordinary writes (migration
   0075). Creating a partition locks the audit log and then the organizations and people tables;
   any change to a person or an organization that is audited takes them the other way round. When

@@ -291,10 +291,14 @@ describe.skipIf(!READY)(
           rolcreatedb: false,
           rolcanlogin: true,
         });
+        // 0072's rule: a member of no role, and no member but the database owner (see 0070).
         const members = await owner.query<{ n: number }>(
           `select count(*)::int n from pg_auth_members am
            join pg_roles m on m.oid = am.member join pg_roles r on r.oid = am.roleid
-          where 'app_auth' in (m.rolname, r.rolname)`,
+          where m.rolname = 'app_auth'
+             or (r.rolname = 'app_auth'
+                 and (am.member <> (select datdba from pg_database where datname = current_database())
+                      or m.rolname like 'app\\_%'))`,
         );
         expect(members.rows[0]!.n).toBe(0);
       });

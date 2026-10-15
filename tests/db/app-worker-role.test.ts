@@ -178,10 +178,16 @@ describe.skipIf(!READY)('app_worker — the worker plane’s own login (0070, li
     expect(await codeOf(rolledBack(appUser, {}, `set session authorization app_worker`))).toBe(
       '42501',
     );
+    // 0070's rule: app_worker is a member of no role, and no role but the database owner (not
+    // an application role) is a member of it — the owner's ADMIN grant is PostgreSQL 16+'s
+    // automatic grant to a non-superuser creator, which Neon's branch owner is.
     const members = await owner.query<{ n: number }>(
       `select count(*)::int n from pg_auth_members am
          join pg_roles m on m.oid = am.member join pg_roles r on r.oid = am.roleid
-        where m.rolname = 'app_worker' or r.rolname = 'app_worker'`,
+        where m.rolname = 'app_worker'
+           or (r.rolname = 'app_worker'
+               and (am.member <> (select datdba from pg_database where datname = current_database())
+                    or m.rolname like 'app\\_%'))`,
     );
     expect(members.rows[0]!.n).toBe(0);
   });
