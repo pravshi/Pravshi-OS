@@ -976,11 +976,15 @@ describe('the rest of the model is untouched', () => {
     );
     // The literal list is the census as of this suite's migration; 0063 later
     // added is_project_member and is_project_manager (the project_members
-    // policy fix), 0068 added next_identity_code_for_current_org and 0070 is_worker and worker_bound_scope, so those
+    // policy fix), 0068 added next_identity_code_for_current_org, 0070 is_worker and worker_bound_scope, and 0072
+    // verified_session_actor, admin_session_action and admin_issue_credential_reset, and 0074
+    // person_visible, so those
     // names are pinned here as well — the census this
     // test guards is "no helper appears without a migration accounting for it".
     expect(rows.map((r) => r.proname)).toEqual([
       'aal',
+      'admin_issue_credential_reset',
+      'admin_session_action',
       'audit_two_factor_change',
       'check_login_lockout',
       'check_rate_limit',
@@ -1002,6 +1006,7 @@ describe('the rest of the model is untouched', () => {
       'next_identity_code_for_current_org',
       'org_id',
       'person_id',
+      'person_visible',
       'record_login_failure',
       'record_password_reset_audit',
       'reports_to_me',
@@ -1009,6 +1014,7 @@ describe('the rest of the model is untouched', () => {
       'scope_for',
       'stamp_sessions_revoked',
       'update_credential_password',
+      'verified_session_actor',
       'worker_bound_scope',
     ]);
   });

@@ -15,6 +15,8 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 
 const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
+// The authentication plane's own login (0072/0073): the credential store and resolve_auth_identity.
+const asAuth = new Pool({ connectionString: process.env.DATABASE_URL_AUTH });
 
 const RUN = Math.random().toString(36).slice(2, 8);
 
@@ -95,6 +97,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await owner.end().catch(() => undefined);
   await asUser.end().catch(() => undefined);
+  await asAuth.end().catch(() => undefined);
 });
 
 describe('the auth schema', () => {
@@ -179,7 +182,7 @@ describe('the auth schema', () => {
 });
 
 describe('privilege posture', () => {
-  it('grants app_user only what each table needs, and app_admin nothing', async () => {
+  it('grants app_auth only what each table needs, and app_user, app_admin and app_worker nothing (0072/0073)', async () => {
     const { rows } = await owner.query<{ table_name: string; grantee: string; privs: string }>(
       `select table_name, grantee, string_agg(privilege_type, ',' order by privilege_type) privs
        from information_schema.table_privileges
@@ -189,7 +192,7 @@ describe('privilege posture', () => {
     const byTable = new Map(rows.map((r) => [`${r.table_name}:${r.grantee}`, r.privs]));
 
     // A login is disabled, never deleted — the audit trail and people row both point at it.
-    expect(byTable.get('auth_users:app_user')).toBe('INSERT,SELECT,UPDATE');
+    expect(byTable.get('auth_users:app_auth')).toBe('INSERT,SELECT,UPDATE');
     // Sessions, tokens and counters are consumed or revoked in normal operation.
     for (const t of [
       'auth_sessions',
@@ -198,11 +201,12 @@ describe('privilege posture', () => {
       'auth_rate_limits',
       'auth_two_factors',
     ]) {
-      expect(byTable.get(`${t}:app_user`), t).toBe('DELETE,INSERT,SELECT,UPDATE');
+      expect(byTable.get(`${t}:app_auth`), t).toBe('DELETE,INSERT,SELECT,UPDATE');
     }
-    // app_admin is for bootstrap, provisioning and the audit writer. Authentication is none.
-    expect(rows.filter((r) => r.grantee === 'app_admin')).toEqual([]);
-    expect(rows.filter((r) => r.grantee === 'PUBLIC')).toEqual([]);
+    // Only the authentication plane's own login holds the credential store. The business role
+    // (app_user) holds nothing in it since 0073; app_admin (bootstrap, provisioning, audit
+    // writer) and app_worker never did.
+    expect(rows.filter((r) => r.grantee !== 'app_auth')).toEqual([]);
   });
 
   it('gives app_admin no way into the schema at all', async () => {
@@ -212,16 +216,27 @@ describe('privilege posture', () => {
     expect(rows[0]!.has).toBe(false);
   });
 
-  it('lets app_user reach the credential store only through these grants', async () => {
-    // It can read its own tables...
-    const ok = await asUser.query(`select count(*) from auth.auth_sessions`);
+  it('lets app_auth reach the credential store only through these grants, and app_user not at all', async () => {
+    // app_auth can read its own tables...
+    const ok = await asAuth.query(`select count(*) from auth.auth_sessions`);
     expect(ok.rows.length).toBe(1);
-    // ...and cannot create anything new in the schema.
-    await expect(asUser.query(`create table auth.sneaky (id uuid primary key)`)).rejects.toThrow(
+    // ...and cannot create anything new in the schema...
+    await expect(asAuth.query(`create table auth.sneaky (id uuid primary key)`)).rejects.toThrow(
       /permission denied/i,
     );
     // ...nor delete a login.
-    await expect(asUser.query(`delete from auth.auth_users`)).rejects.toThrow(/permission denied/i);
+    await expect(asAuth.query(`delete from auth.auth_users`)).rejects.toThrow(/permission denied/i);
+    // The business role reaches none of it (0073): no schema usage, no table.
+    expect(
+      (
+        await owner.query<{ has: boolean }>(
+          `select has_schema_privilege('app_user','auth','USAGE') has`,
+        )
+      ).rows[0]!.has,
+    ).toBe(false);
+    await expect(asUser.query(`select count(*) from auth.auth_sessions`)).rejects.toThrow(
+      /permission denied/i,
+    );
   });
 
   it('does not enable RLS on Better Auth tables, and says so rather than leaving it ambiguous', async () => {
@@ -293,7 +308,7 @@ describe('the link to people', () => {
 });
 
 describe('resolve_auth_identity()', () => {
-  it('is SECURITY DEFINER, STABLE, search_path pinned, granted only to app_user', async () => {
+  it('is SECURITY DEFINER, STABLE, search_path pinned, granted only to app_auth (0073)', async () => {
     const { rows } = await owner.query<{
       prosecdef: boolean;
       provolatile: string;
@@ -316,7 +331,10 @@ describe('resolve_auth_identity()', () => {
     expect(rows[0]!.proconfig ?? []).toContain('search_path=""');
     expect(rows[0]!.owner).toBe('app_owner');
     expect(rows[0]!.grantees).not.toContain('PUBLIC');
-    expect(rows[0]!.grantees).toContain('app_user');
+    expect(rows[0]!.grantees).toContain('app_auth');
+    expect(rows[0]!.grantees, 'authentication is not a business-role path').not.toContain(
+      'app_user',
+    );
     expect(rows[0]!.grantees, 'authentication is not an app_admin path').not.toContain('app_admin');
   });
 
@@ -417,14 +435,18 @@ describe('resolve_auth_identity()', () => {
     }
   });
 
-  it('is callable by app_user, which is the whole point of it existing', async () => {
+  it('is callable by app_auth, which is the whole point of it existing — and not by app_user', async () => {
     const login = await mkAuthUser(`byuser.${RUN}@example.test`);
-    const person = await mkPerson(orgA, 'By App User', login);
-    const { rows } = await asUser.query<{ person_id: string; org_id: string }>(
+    const person = await mkPerson(orgA, 'By App Auth', login);
+    const { rows } = await asAuth.query<{ person_id: string; org_id: string }>(
       `select person_id, org_id from public.resolve_auth_identity($1::uuid, now())`,
       [login],
     );
     expect(rows[0]).toEqual({ person_id: person, org_id: orgA });
+    // The business role cannot turn a login id into a person (0073).
+    await expect(
+      asUser.query(`select * from public.resolve_auth_identity($1::uuid, now())`, [login]),
+    ).rejects.toMatchObject({ code: '42501' });
   });
 
   it('does not let app_user read public.people directly instead', async () => {

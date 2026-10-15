@@ -27,6 +27,20 @@ const runtimeSchema = z.object({
       message: 'DATABASE_URL_WORKER must use the pooled Neon endpoint (host contains "-pooler")',
     })
     .optional(),
+  /**
+   * The authentication plane's own connection (role app_auth, migrations 0072/0073): Better
+   * Auth and the pre-login functions. The web app only — never the worker host (runner.ts
+   * refuses it there). Required on Vercel (parseRuntimeEnv); anywhere else the auth module
+   * refuses to load without it (src/lib/db/auth-pool.ts). There is no fallback to
+   * DATABASE_URL: app_user holds no privilege in the auth schema.
+   */
+  DATABASE_URL_AUTH: z
+    .string()
+    .url()
+    .refine((u) => u.includes('-pooler.'), {
+      message: 'DATABASE_URL_AUTH must use the pooled Neon endpoint (host contains "-pooler")',
+    })
+    .optional(),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
@@ -188,6 +202,23 @@ export function parseRuntimeEnv(raw: Record<string, unknown>): RuntimeEnv {
     throw new Error(
       'DATABASE_URL_WORKER must never be present on Vercel. It uses app_worker, the role ' +
         'that can claim every organization’s jobs. Set it on the worker host only.',
+    );
+  }
+  // The authentication credential is the web app's. On Vercel it is required — every
+  // sign-in and session check runs on it — so a deployment without it is refused rather
+  // than left to fail request by request. And it must name a different login than the
+  // business connection: the same URL would put authentication back on app_user.
+  const present = (v: unknown) => typeof v === 'string' && v.length > 0;
+  if (raw.VERCEL && !present(raw.DATABASE_URL_AUTH)) {
+    throw new Error(
+      'DATABASE_URL_AUTH must be set on Vercel. It is the authentication plane’s own login ' +
+        '(app_auth); app_user holds no privilege in the auth schema.',
+    );
+  }
+  if (present(raw.DATABASE_URL_AUTH) && raw.DATABASE_URL_AUTH === raw.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL_AUTH must not be the same connection string as DATABASE_URL: authentication ' +
+        'runs on its own login, app_auth.',
     );
   }
   const r = runtimeSchema.safeParse(withoutBlanks(raw));

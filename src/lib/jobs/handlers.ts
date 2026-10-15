@@ -39,9 +39,7 @@ import { z } from 'zod';
 import { env, webhookSigningSecret } from '@/env';
 import { sendViaResend } from '../integrations/providers/email/send';
 import { decryptSecret, IntegrationsVaultError } from '../integrations/secrets';
-import { withAuthorizedDb } from '../db/authorized';
 import { withWorkerContext, type WorkItem } from '../db/worker-pool';
-import type { Authorization } from '../authz/require-permission';
 import {
   CleanupPayloadSchema,
   EmailPayloadSchema,
@@ -1213,6 +1211,13 @@ export type CleanupTarget = (typeof CLEANUP_TARGETS)[number];
 export const DEFAULT_RETENTION_DAYS = 90;
 /** Default staleness threshold for claimed/running leases without heartbeat. */
 export const DEFAULT_LEASE_STALE_MS = 5 * 60 * 1000;
+/**
+ * Lease threshold bounds, enforced again by public.jobs_run_cleanup (0071). The
+ * floor is the worker reaper's own threshold: a live worker heartbeats every 15 s,
+ * so a shorter threshold would hand a healthy running job to a second worker.
+ */
+export const MIN_LEASE_STALE_MS = 60 * 1000;
+export const MAX_LEASE_STALE_MS = 30 * 86_400_000;
 
 export interface NormalizedCleanup {
   target: CleanupTarget;
@@ -1234,12 +1239,21 @@ export function normalizeCleanupPayload(raw: unknown): NormalizedCleanup {
     );
   }
   const params = p.params ?? {};
-  const staleThresholdMs =
-    typeof params.staleThresholdMs === 'number' &&
-    Number.isFinite(params.staleThresholdMs) &&
-    params.staleThresholdMs >= 1000
-      ? Math.floor(params.staleThresholdMs)
-      : DEFAULT_LEASE_STALE_MS;
+  let staleThresholdMs = DEFAULT_LEASE_STALE_MS;
+  if (params.staleThresholdMs !== undefined) {
+    const ms = params.staleThresholdMs;
+    if (
+      typeof ms !== 'number' ||
+      !Number.isFinite(ms) ||
+      ms < MIN_LEASE_STALE_MS ||
+      ms > MAX_LEASE_STALE_MS
+    ) {
+      failValidation(
+        `params.staleThresholdMs must be between ${MIN_LEASE_STALE_MS} and ${MAX_LEASE_STALE_MS} ms`,
+      );
+    }
+    staleThresholdMs = Math.floor(ms);
+  }
   return {
     target: p.target as CleanupTarget,
     olderThanDays: p.olderThanDays ?? DEFAULT_RETENTION_DAYS,
@@ -1248,107 +1262,36 @@ export function normalizeCleanupPayload(raw: unknown): NormalizedCleanup {
   };
 }
 
-async function cleanupStaleJobs(
-  auth: Authorization,
-  orgId: string,
-  c: NormalizedCleanup,
-): Promise<number> {
-  const cutoff = new Date(Date.now() - c.olderThanDays * 86_400_000).toISOString();
-  if (c.dryRun) {
-    const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-      tx.execute<{ n: string }>(
-        sql`select count(*)::text as n from public.jobs
-            where org_id = ${orgId}::uuid
-              and status in ('succeeded', 'cancelled')
-              and created_at < ${cutoff}::timestamptz`,
-      ),
-    );
-    return Number(rows.rows[0]?.n ?? 0);
-  }
-  // ONLY terminal states — the status list is a literal, never from payload.
-  const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-    tx.execute<{ n: string }>(
-      sql`with deleted as (
-             delete from public.jobs
-             where org_id = ${orgId}::uuid
-               and status in ('succeeded', 'cancelled')
-               and created_at < ${cutoff}::timestamptz
-             returning id
-           )
-           select count(*)::text as n from deleted`,
-    ),
-  );
-  return Number(rows.rows[0]?.n ?? 0);
-}
-
-/**
- * Reset stale claimed/running leases: heartbeat (or claim time when no
- * heartbeat yet) older than the threshold → back to pending with attempts+1.
- * Both claimed→pending and running→pending are legal §3.1 transitions.
- * This mirrors the worker-plane reapStaleJobs() (worker.ts, contract §3.4);
- * the worker's reaper covers crash recovery at startup, this job covers
- * steady-state lease expiry per org.
- */
-async function cleanupExpiredLeases(
-  auth: Authorization,
-  orgId: string,
-  c: NormalizedCleanup,
-): Promise<number> {
-  const cutoff = new Date(Date.now() - c.staleThresholdMs).toISOString();
-  if (c.dryRun) {
-    const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-      tx.execute<{ n: string }>(
-        sql`select count(*)::text as n from public.jobs
-            where org_id = ${orgId}::uuid
-              and status in ('claimed', 'running')
-              and coalesce(heartbeat_at, claimed_at) < ${cutoff}::timestamptz`,
-      ),
-    );
-    return Number(rows.rows[0]?.n ?? 0);
-  }
-  const rows = await withAuthorizedDb(auth.ctx, (tx) =>
-    tx.execute<{ n: string }>(
-      sql`with reset as (
-             update public.jobs
-             set status = 'pending',
-                 attempts = attempts + 1,
-                 claimed_by = null,
-                 claimed_at = null,
-                 heartbeat_at = null,
-                 error_code = 'LEASE_EXPIRED',
-                 error_message = 'lease expired: no heartbeat; reset to pending by cleanup job',
-                 updated_at = now()
-             where org_id = ${orgId}::uuid
-               and status in ('claimed', 'running')
-               and coalesce(heartbeat_at, claimed_at) < ${cutoff}::timestamptz
-             returning id
-           )
-           select count(*)::text as n from reset`,
-    ),
-  );
-  return Number(rows.rows[0]?.n ?? 0);
-}
-
 /**
  * `cleanup` job → retention / lease housekeeping, scoped to the job's org.
  * - target 'stale_jobs': delete terminal (succeeded/cancelled) jobs older
- *   than olderThanDays (default 90). NEVER touches non-terminal jobs.
+ *   than olderThanDays (default 90). NEVER touches non-terminal jobs, nor a
+ *   job that still has webhook delivery evidence.
  * - target 'expired_leases': reset claimed/running jobs whose heartbeat is
- *   older than staleThresholdMs (default 5 min) back to pending.
+ *   older than staleThresholdMs (default 5 min, never under 60 s) back to
+ *   pending.
  * - dryRun: count only, change nothing.
+ *
+ * The work runs in public.jobs_run_cleanup (0071) on the app_worker connection:
+ * the function reads the organization and the parameters from the job row this
+ * worker holds — not from this process — so app_user keeps no purge or
+ * lease-reset power, and nothing here can widen what the enqueued job asked for.
+ * The validation above only refuses a bad payload early, with a clear error.
  */
 export const handleCleanup: JobHandler = async (ctx: JobExecutionContext) => {
-  const orgId = ctx.job.orgId;
   const c = normalizeCleanupPayload(ctx.job.payload);
 
-  const count =
-    c.target === 'stale_jobs'
-      ? await cleanupStaleJobs(ctx.auth, orgId, c)
-      : await cleanupExpiredLeases(ctx.auth, orgId, c);
+  const rows = await withWorkerContext(ctx.auth.ctx, heldJob(ctx), (tx) =>
+    tx.execute<{ target: string; dry_run: boolean; affected: number }>(
+      sql`select target, dry_run, affected
+          from public.jobs_run_cleanup(${ctx.job.id}::uuid, ${ctx.workerId})`,
+    ),
+  );
+  const result = rows.rows[0];
 
   console.info(
-    `[jobs] cleanup job=${ctx.job.id} org=${orgId} target=${c.target} ` +
-      `affected=${count} dry_run=${c.dryRun}`,
+    `[jobs] cleanup job=${ctx.job.id} org=${ctx.job.orgId} target=${result?.target ?? c.target} ` +
+      `affected=${result?.affected ?? 0} dry_run=${result?.dry_run ?? c.dryRun}`,
   );
 };
 

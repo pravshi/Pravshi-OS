@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0070 (production still pending — see the
+Database migrations: 0063–0075 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -44,6 +44,13 @@ Database migrations: 0063–0070 (production still pending — see the
 
 ### Fixed
 
+- Audit-log partition maintenance no longer deadlocks or stalls ordinary writes (migration
+  0075). Creating a partition locks the audit log and then the organizations and people tables;
+  any change to a person or an organization that is audited takes them the other way round. When
+  the worker created a partition at that moment, the person or organization change could fail,
+  and every audited write in the system waited up to five seconds. Maintenance now takes the locks
+  it needs without waiting and retries a moment later on a conflict, so it never waits while
+  holding one. It also takes no lock at all when there is nothing to create.
 - Administrative actions that left no audit trail now record exactly one audit
   entry each, committed with the change (migration 0067): creating and
   archiving departments, creating, renaming, archiving and changing the
@@ -77,6 +84,31 @@ Database migrations: 0063–0070 (production still pending — see the
 
 ### Security
 
+- A database failure during sign-in or a session check no longer writes the session token to
+  the server log. Database errors carry every query parameter, and the authentication library
+  printed them whole; the session's token was one of them. Authentication now logs errors as
+  their type and code only, and Sentry events, breadcrumbs and traces (server, edge and browser)
+  are scrubbed of tokens, passwords, cookies and credential-bearing URLs before they leave.
+- Sign-in, sessions and passwords now run on their own database login, `app_auth`
+  (migrations 0072 and 0073). Before, the web app's everyday login could read and change the
+  whole credential store — password hashes, sessions, second-factor secrets — so a flaw that let
+  someone run database queries as the web app could have taken over any account. Now only the
+  authentication part of the app can reach it, through `DATABASE_URL_AUTH` (required on Vercel;
+  never on the worker host). Administrators ending another person's sessions or resetting their
+  password are checked by the database against their own signed-in session, rather than trusted
+  from the application; ending sessions and its audit record happen together. They reach only
+  people they are allowed to see (`people.view` at its scope — migration 0074), as before the
+  move: a department-scoped administrator cannot reset the password of, or list or end the
+  sessions of, someone in another department.
+- The `cleanup` job type (deleting an organization's old finished jobs, or handing
+  stuck jobs back to the queue) now runs on the worker's own login (migration 0071).
+  It was the last worker path that ran its queries as the web app, and it could only
+  have worked by giving the web app the power to purge and reset any job — so it
+  failed or did nothing. The database now does the work only for a cleanup job the
+  calling worker holds, inside that job's organization, with the job's own settings
+  checked there; it never deletes a job that still has webhook delivery records, and
+  never resets a job whose last heartbeat is under a minute old (`staleThresholdMs`
+  below 60000 is now refused rather than accepted).
 - The background worker has its own database login, `app_worker` (migration 0070),
   and the work only it should do — claiming and finishing jobs, retries, reminders,
   scheduled runs, maintenance, reading a reset email's protected body, and resolving

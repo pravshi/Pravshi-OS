@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/authz/require-permission';
+import { currentSessionToken } from '@/lib/auth/session';
 import { requestMetadata } from '@/lib/audit/log';
 import { listUsers, listPendingInvitations, suspendUser, unsuspendUser } from '@/lib/admin/users';
 import { listUserSessions, revokeUserSession, revokeAllUserSessions } from '@/lib/admin/sessions';
@@ -87,15 +88,25 @@ export async function setPersonRolesAction(personId: string, roleIds: string[]) 
   return { ok: true };
 }
 
+/**
+ * The administrator's own session token: the proof the database verifies for session and
+ * credential actions on other people (migration 0072). Server-side only; never returned.
+ */
+async function actorSessionToken(): Promise<string> {
+  const token = await currentSessionToken(new Headers(await headers()));
+  if (!token) throw new Error('Not signed in.');
+  return token;
+}
+
 export async function getUserSessionsAction(personId: string) {
   // minScope GLOBAL: session rows carry no department to scope them to, so a
   // narrower holder of sessions.revoke could otherwise list any org user's
-  // sessions — including a SUPER_ADMIN's.
+  // sessions — including a SUPER_ADMIN's. The database checks it again (0072).
   const auth = await requirePermission(await headers(), {
     permission: 'sessions.revoke',
     minScope: 'GLOBAL',
   });
-  return listUserSessions(auth, personId);
+  return listUserSessions(auth, await actorSessionToken(), personId);
 }
 
 export async function revokeUserSessionAction(personId: string, sessionId: string) {
@@ -105,7 +116,7 @@ export async function revokeUserSessionAction(personId: string, sessionId: strin
     permission: 'sessions.revoke',
     minScope: 'GLOBAL',
   });
-  await revokeUserSession(auth, personId, sessionId);
+  await revokeUserSession(auth, await actorSessionToken(), personId, sessionId);
   revalidatePath('/admin/users');
   return { ok: true };
 }
@@ -117,7 +128,7 @@ export async function revokeAllUserSessionsAction(personId: string) {
     permission: 'sessions.revoke',
     minScope: 'GLOBAL',
   });
-  await revokeAllUserSessions(auth, personId);
+  await revokeAllUserSessions(auth, await actorSessionToken(), personId);
   revalidatePath('/admin/users');
   return { ok: true };
 }
@@ -125,7 +136,7 @@ export async function revokeAllUserSessionsAction(personId: string) {
 export async function adminResetCredentialAction(personId: string) {
   const auth = await requirePermission(await headers(), { permission: 'users.edit' });
   const meta = requestMetadata(new Headers(await headers()), randomUUID());
-  const result = await adminResetCredential(auth, personId, meta);
+  const result = await adminResetCredential(auth, await actorSessionToken(), personId, meta);
   revalidatePath('/admin/users');
   return result;
 }

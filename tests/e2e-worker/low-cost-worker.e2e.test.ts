@@ -43,31 +43,41 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
   let taskId = '';
   let workflowId = '';
 
+  /**
+   * The worker host's environment: the test environment without DATABASE_URL_AUTH, the web app's
+   * authentication login (0072/0073), which a worker host never holds — runner.ts refuses to start
+   * when it is present (see the last case below).
+   */
+  function workerEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      WORKER_ACTIVE_WINDOW_MS: String(ACTIVE_WINDOW_MS),
+      WORKER_MAX_SLEEP_MS: String(MAX_SLEEP_MS),
+      WORKER_WAKE_TOKEN: TOKEN,
+      PORT: String(PORT),
+      SCHEDULER_TICK_MS: '60000',
+    };
+    delete env.DATABASE_URL_AUTH;
+    return { ...env, ...extra };
+  }
+
+  const WORKER_ARGS = [
+    '--experimental-transform-types',
+    '--import',
+    './scripts/ci/neon-local.mjs',
+    '--import',
+    './scripts/worker-loader.mjs',
+    'src/lib/jobs/runner.ts',
+  ];
+
   function startWorker(): void {
     logs = '';
     worker = spawn(
       // The worker needs Node 22 (--experimental-transform-types; .nvmrc pins 22). WPW_NODE
       // points at a Node 22 binary when the test runner itself runs on another version.
       process.env.WPW_NODE ?? process.execPath,
-      [
-        '--experimental-transform-types',
-        '--import',
-        './scripts/ci/neon-local.mjs',
-        '--import',
-        './scripts/worker-loader.mjs',
-        'src/lib/jobs/runner.ts',
-      ],
-      {
-        env: {
-          ...process.env,
-          WORKER_ACTIVE_WINDOW_MS: String(ACTIVE_WINDOW_MS),
-          WORKER_MAX_SLEEP_MS: String(MAX_SLEEP_MS),
-          WORKER_WAKE_TOKEN: TOKEN,
-          PORT: String(PORT),
-          SCHEDULER_TICK_MS: '60000',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
+      WORKER_ARGS,
+      { env: workerEnv(), stdio: ['ignore', 'pipe', 'pipe'] },
     );
     worker.stdout!.on('data', (d: Buffer) => (logs += d.toString()));
     worker.stderr!.on('data', (d: Buffer) => (logs += d.toString()));
@@ -259,5 +269,34 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     console.log(`[wpw-e2e] restart: overdue job + reminder drained ${afterMs} ms after start`);
     expect(afterMs).toBeLessThan(15_000);
     expect(logs).toContain('[jobs] db maintenance');
+  }, 60_000);
+
+  it('7. refuses to start on a host that holds the web app’s authentication login (0072/0073)', async () => {
+    await stopWorker();
+    const authUrl =
+      process.env.DATABASE_URL_AUTH ?? 'postgresql://u:p@ep-x-auth-pooler.example.test/db';
+    const refused = spawn(process.env.WPW_NODE ?? process.execPath, WORKER_ARGS, {
+      env: workerEnv({ DATABASE_URL_AUTH: authUrl, PORT: String(PORT + 1) }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    refused.stdout!.on('data', (d: Buffer) => (out += d.toString()));
+    refused.stderr!.on('data', (d: Buffer) => (out += d.toString()));
+    // A worker that does NOT refuse would run until stopped: stop it after 30 s and fail, so a
+    // regression never leaves a worker process behind.
+    const code = await new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => {
+        refused.kill('SIGKILL');
+        resolve(-1);
+      }, 30_000);
+      refused.once('exit', (c) => {
+        clearTimeout(timer);
+        resolve(c);
+      });
+    });
+    expect(code).toBe(1);
+    expect(out).toContain('DATABASE_URL_AUTH is set on the worker host');
+    // The message names the variable, never its value.
+    expect(out).not.toContain(authUrl);
   }, 60_000);
 });

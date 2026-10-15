@@ -22,6 +22,15 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'app_worker') then
     create role app_worker login nobypassrls;
   end if;
+  -- The authentication plane's own login (migrations 0072/0073). Better Auth and the
+  -- pre-login functions run on it; it holds the credential store (the auth schema's
+  -- tables) and EXECUTE on the pre-login and administrator-session functions, and
+  -- nothing in the business schema: no table privileges, no RLS policy, no membership
+  -- in or of any other role. Its connection string (DATABASE_URL_AUTH) belongs on the
+  -- web app only — never on the worker host.
+  if not exists (select 1 from pg_roles where rolname = 'app_auth') then
+    create role app_auth login nobypassrls;
+  end if;
 end $$;
 
 -- Defensive: assert, rather than correct. BYPASSRLS and SUPERUSER defeat RLS directly:
@@ -57,7 +66,7 @@ begin
     ', '
   ) into bad
   from pg_roles
-  where rolname in ('app_owner','app_user','app_admin','app_worker')
+  where rolname in ('app_owner','app_user','app_admin','app_worker','app_auth')
     and (rolbypassrls or rolsuper or rolcreaterole or rolcreatedb);
   if bad is not null then
     raise exception 'FAIL: role(s) % hold an attribute this script asserts against. BYPASSRLS and SUPERUSER defeat RLS directly. CREATEROLE and CREATEDB are asserted as defense-in-depth, not as known RLS bypasses: they are privilege-escalation surface these roles have no legitimate reason to hold. Fix the role attributes rather than deleting this check.', bad;
@@ -109,4 +118,4 @@ alter default privileges for role app_owner in schema public
 
 -- Nobody creates objects in public except the owner, and nobody rewrites history.
 -- audit_logs arrives in Phase 1; this is the standing rule it will inherit.
-revoke create on schema public from app_user, app_admin, app_worker, public;
+revoke create on schema public from app_user, app_admin, app_worker, app_auth, public;

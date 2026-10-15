@@ -43,6 +43,19 @@ import type { AuthContext } from '@/lib/db/context';
  * A person whose engagement ended therefore still resolves here and then reaches nothing.
  * That is step 2 working, not step 1 failing.
  */
+/**
+ * The bearer token of the request's own session — the proof the administrator definers of
+ * migration 0072 verify in the database (authz.admin_session_action,
+ * authz.admin_issue_credential_reset). Server-side only: it is passed to those functions as a
+ * bind parameter and nowhere else — never logged, returned to a client or stored. null when the
+ * request carries no live session.
+ */
+export async function currentSessionToken(headers: Headers): Promise<string | null> {
+  const session = await auth.api.getSession({ headers });
+  const token = session?.session?.token;
+  return typeof token === 'string' && token.length > 0 ? token : null;
+}
+
 export async function resolveAuthContext(headers: Headers): Promise<AuthContext | null> {
   const session = await auth.api.getSession({ headers });
   if (!session?.user?.id) return null;

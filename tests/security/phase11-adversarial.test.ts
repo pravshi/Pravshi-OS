@@ -112,7 +112,9 @@ vi.hoisted(() => {
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 
 const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE }) : null;
-const asUser = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_TEST }) : null;
+// The authentication plane's own login (0072/0073): the reset-email enqueue definer is a pre-login
+// function, called by the auth module on app_auth — the business role holds no EXECUTE on it.
+const asAuth = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_AUTH }) : null;
 
 const RUN = randomBytes(4).toString('hex');
 const STRONG_PW = 'correct horse battery staple 001';
@@ -194,7 +196,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await owner?.end();
-  await asUser?.end();
+  await asAuth?.end();
 });
 
 /** Plant an invitation row exactly as the app would issue it. */
@@ -394,7 +396,11 @@ describe.runIf(HAS_DB)(
       });
     }, 60_000);
 
-    const pwresetJobs = async () =>
+    // Reset jobs THIS request could have produced: one in this file's own org, or one
+    // addressed to the probed email. Other suites enqueue reset jobs for their own orgs
+    // while this one runs (the reset-content confidentiality suite, the auth journeys),
+    // so a database-wide id diff counted their jobs as this request's.
+    const pwresetJobs = async (email: string) =>
       owner!.query<{
         id: string;
         org_id: string;
@@ -404,11 +410,14 @@ describe.runIf(HAS_DB)(
         payload: { to?: string };
       }>(
         `select id, org_id, type, dedup_key, enqueued_by, payload
-         from public.jobs where dedup_key like 'pwreset:%'`,
+         from public.jobs
+        where dedup_key like 'pwreset:%'
+          and (org_id = $1::uuid or lower(payload->>'to') = lower($2))`,
+        [orgId, email],
       );
 
     it('the exists case: exactly one email job, dedup-keyed on the reset row, recipient + org derived', async () => {
-      const before = await pwresetJobs();
+      const before = await pwresetJobs(acct.email);
       const answer = await requestPasswordReset(acct.email, `198.51.100.${(ipSeq += 1)}`);
       expect(answer).toEqual({ ok: true });
 
@@ -423,7 +432,7 @@ describe.runIf(HAS_DB)(
       ).rows[0]!;
       expect(reset).toBeDefined();
 
-      const jobs = (await pwresetJobs()).rows.filter(
+      const jobs = (await pwresetJobs(acct.email)).rows.filter(
         (j) => !before.rows.some((b) => b.id === j.id),
       );
       expect(jobs).toHaveLength(1);
@@ -438,17 +447,63 @@ describe.runIf(HAS_DB)(
 
     it('the not-exists case: the same uniform answer, and nothing is created', async () => {
       const ghost = `ghost-${RUN}@example.test`;
-      const jobsBefore = await pwresetJobs();
+      const jobsBefore = await pwresetJobs(ghost);
       const answer = await requestPasswordReset(ghost, `198.51.100.${(ipSeq += 1)}`);
       expect(answer).toEqual({ ok: true });
-      // No new email job (id-set diff, immune to other suites' traffic), no
-      // reset row hangs off the ghost (it has no login to hang one on), and
-      // no reset-requested event leaks the probe server-side either.
-      const jobsAfter = await pwresetJobs();
+      // No new email job (id-set diff over the jobs this request could have
+      // produced — see pwresetJobs), no reset row hangs off the ghost (it has
+      // no login to hang one on), and no reset-requested event leaks the
+      // probe server-side either.
+      const jobsAfter = await pwresetJobs(ghost);
       expect(jobsAfter.rows.map((j) => j.id).sort()).toEqual(
         jobsBefore.rows.map((j) => j.id).sort(),
       );
       expect(await countEvents(ghost, 'PASSWORD_RESET_REQUESTED')).toBe(0);
+    });
+
+    it('the not-exists case at the definer: an unknown address mints no reset token for any login, so no job can follow', async () => {
+      // The case above can only diff the jobs this request could have produced,
+      // because other suites enqueue reset jobs concurrently. This closes the
+      // rest deterministically at the source: a reset job is keyed on a reset
+      // row, and the only way a request mints one is request_password_reset
+      // (app_auth's since 0073). Each probe carries a digest unique to this call,
+      // so "no row with this digest, for ANY login" is exact whatever else the
+      // database is doing.
+      const mint = async (email: string) => {
+        const digest = digestOf(newToken());
+        const resetId = (
+          await asAuth!.query<{ reset_id: string | null }>(
+            `select authz.request_password_reset($1, $2) as reset_id`,
+            [email, digest],
+          )
+        ).rows[0]!.reset_id;
+        const minted = await owner!.query<{ auth_user_id: string; job_id: string | null }>(
+          `select r.auth_user_id, j.id as job_id
+             from auth.password_resets r
+             left join public.jobs j on j.dedup_key = 'pwreset:' || r.id::text
+            where r.token_hash = $1`,
+          [digest],
+        );
+        return { resetId, minted: minted.rows };
+      };
+
+      // Unknown addresses — including near misses of a real login — mint nothing.
+      for (const probe of [
+        `ghost-definer-${RUN}@example.test`,
+        `x${acct.email}`,
+        `${acct.email}.example`,
+        acct.email.replace('@', '@x.'),
+      ]) {
+        const { resetId, minted } = await mint(probe);
+        expect(resetId, probe).toBeNull();
+        expect(minted, probe).toEqual([]);
+      }
+
+      // Control: the same probe sees a token when the address does hold a login,
+      // so the empty results above are not vacuous.
+      const { resetId, minted } = await mint(acct.email);
+      expect(resetId).toBeTruthy();
+      expect(minted).toEqual([{ auth_user_id: acct.authUserId, job_id: null }]);
     });
 
     it('the enqueue definer: live row enqueues idempotently; consumed / expired / unknown rows enqueue nothing', async () => {
@@ -469,7 +524,7 @@ describe.runIf(HAS_DB)(
         return row.id;
       };
       const callDefiner = async (resetId: string, subject = 'Reset', html = '<p>reset</p>') => {
-        const r = await asUser!.query<{ job_id: string | null }>(
+        const r = await asAuth!.query<{ job_id: string | null }>(
           `select public.enqueue_password_reset_email($1::uuid, $2, $3) as job_id`,
           [resetId, subject, html],
         );
@@ -511,7 +566,7 @@ describe.runIf(HAS_DB)(
         )
       ).rows[0]!.id;
       const jobId = (
-        await asUser!.query<{ job_id: string | null }>(
+        await asAuth!.query<{ job_id: string | null }>(
           `select public.enqueue_password_reset_email($1::uuid, $2, $3) as job_id`,
           [resetId, 'Send it to victim@other.test', '<p>deliver to victim@other.test</p>'],
         )

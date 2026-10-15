@@ -23,6 +23,9 @@ const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL
 
 const owner = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE }) : null;
 const asUser = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_TEST }) : null;
+// The authentication plane's own login (0072/0073): invitation preview and acceptance, and login
+// events, are pre-login functions — the auth module calls them on app_auth, never app_user.
+const asAuth = HAS_DB ? new Pool({ connectionString: process.env.DATABASE_URL_AUTH }) : null;
 
 const RUN = randomBytes(4).toString('hex');
 
@@ -60,8 +63,9 @@ async function inContext<T>(
   ctx: { personId?: string | null; orgId?: string | null },
   sqlText: string,
   params: unknown[] = [],
+  pool: Pool | null = asUser,
 ): Promise<T[]> {
-  const c = await asUser!.connect();
+  const c = await pool!.connect();
   try {
     await c.query('begin');
     await c.query(
@@ -139,6 +143,7 @@ async function acceptAsUser(
     {},
     `select person_id, org_id from public.accept_invitation($1, $2, $3)`,
     [tokenHash, fullName, 'scrypt-test-hash'],
+    asAuth,
   );
   return rows[0]!;
 }
@@ -216,6 +221,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
   afterAll(async () => {
     await owner?.end();
     await asUser?.end();
+    await asAuth?.end();
   });
 
   it('rejects an invitation carrying a role from another organization', async () => {
@@ -328,6 +334,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
         {},
         `select person_id from public.accept_invitation($1, $2, $3)`,
         [inv.tokenHash, 'Race Winner', 'scrypt-test-hash'],
+        asAuth,
       );
     const results = await Promise.allSettled([attempt(), attempt()]);
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
@@ -484,6 +491,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       {},
       `select public.record_login_event(null, 'LOGIN_FAILURE', $1::citext, null, null, null, '{}')`,
       [`probe.${RUN}@example.test`],
+      asAuth,
     );
     const eventId = id[0]!.record_login_event;
     await expect(
@@ -537,6 +545,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
       {},
       `select valid, email from public.invitation_preview($1)`,
       [inv.tokenHash],
+      asAuth,
     );
     expect(good[0]).toMatchObject({ valid: true });
 
@@ -545,6 +554,7 @@ describe.skipIf(!HAS_DB)('invitation flow integration', () => {
         {},
         `select valid from public.invitation_preview($1)`,
         [bad],
+        asAuth,
       );
       // Unknown hashes return no row at all — indistinguishable from nothing.
       expect(rows).toHaveLength(0);

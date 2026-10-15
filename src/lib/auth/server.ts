@@ -9,6 +9,7 @@ import { loginPersonActive } from './login-person-check';
 import { recordLoginEvent, resolveLoginOrg } from './login-events';
 import { isLockedOut, noteLoginFailure, noteLoginSuccess } from './login-lockout';
 import { env } from '@/env';
+import { authLoggerOptions } from './safe-log';
 
 /** Blueprint section 25: "minimum 12 characters". */
 export const MIN_PASSWORD_LENGTH = 12;
@@ -182,6 +183,23 @@ export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
 
   database: drizzleAdapter(authDb, { provider: 'pg', schema: authDbSchema }),
+
+  /**
+   * Every line the library logs goes through src/lib/auth/safe-log.ts: an error is written as its
+   * class and code, never its message — a failed query's message carries its bound parameters,
+   * and the session lookup's parameter is the session's bearer token.
+   */
+  logger: authLoggerOptions,
+
+  /**
+   * And nothing raw is printed after it. The HTTP router (better-call) prints any non-API error an
+   * endpoint throws as `# SERVER_ERROR: <error>` straight to the console, past the logger above —
+   * a failed session insert during sign-in printed the new session's token that way. With `throw`
+   * set, such an error leaves the handler instead and the auth route (app/api/auth/[...all]/
+   * route.ts) logs it safely, raises the alert and answers a fixed 500. API errors (the 4xx
+   * answers) are still turned into responses by the router, exactly as before.
+   */
+  onAPIError: { throw: true },
 
   /**
    * THERE IS NO SIGNUP ROUTE — blueprint section 25, and threat T-01 turns on it: "Not

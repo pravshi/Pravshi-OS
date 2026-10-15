@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const grep = (args: string) => execSync(`git grep ${args} || true`, { encoding: 'utf8' }).trim();
@@ -40,8 +42,56 @@ describe('there is exactly one path to Postgres', () => {
 
   it('no feature code queries the credential tables by hand', () => {
     const hits = grep(
-      `-lE "auth[.]auth_(users|sessions|accounts|verifications)" -- src ":!src/lib/auth/*"`,
+      `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src ":!src/lib/auth/*"`,
     );
     expect(hits, `Direct auth-table access outside the auth layer, in:\n${hits}`).toBe('');
+  });
+
+  // ── the authentication plane's own login (app_auth, migrations 0072/0073) ──────────────────
+
+  it('only the auth client (and the health check of its login) imports the app_auth pool', () => {
+    const hits = grep(
+      `-lE "db/auth-pool'" -- src ":!src/lib/db/auth-client.ts" ":!src/app/health/db/route.ts"`,
+    );
+    expect(hits, `app_auth pool imported outside the auth client, in:\n${hits}`).toBe('');
+  });
+
+  it('the auth client runs on the app_auth pool, never the business pool', () => {
+    const client = readFileSync(join(process.cwd(), 'src/lib/db/auth-client.ts'), 'utf8');
+    expect(client).toMatch(/import \{ authPool \} from '\.\/auth-pool';/);
+    expect(client).toMatch(/drizzle\(authPool, /);
+    expect(client).not.toMatch(/from '\.\/pool'/);
+  });
+
+  it('the app_auth pool has no fallback to DATABASE_URL or the business pool', () => {
+    const src = readFileSync(join(process.cwd(), 'src/lib/db/auth-pool.ts'), 'utf8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n');
+    // The connection string is DATABASE_URL_AUTH and nothing else.
+    expect(src).toMatch(/connectionString: env\.DATABASE_URL_AUTH,/);
+    expect(src).not.toMatch(/env\.DATABASE_URL\b(?!_AUTH)/);
+    // No "url ?? fallback" / "url || fallback" anywhere the URL is named.
+    for (const line of src.split('\n').filter((l) => l.includes('DATABASE_URL'))) {
+      expect(line).not.toMatch(/\?\?|\|\|/);
+    }
+    // From the business pool module it borrows only the retry classifier, never the pool.
+    expect(src).toMatch(/import \{ isRetryableConnectError \} from '\.\/pool';/);
+    // It refuses to load without the variable, and proves the login on every new connection.
+    expect(src).toMatch(/if \(!env\.DATABASE_URL_AUTH\) \{\s*throw new Error/);
+    expect(src).toMatch(/verify: verifyAuthLogin/);
+  });
+
+  it('the worker plane imports nothing from the authentication plane directly', () => {
+    // The worker host must not hold DATABASE_URL_AUTH (runner.ts refuses it); no worker-plane
+    // file may import the auth module, the auth client or the auth pool. This is a DIRECT-import
+    // check only: shared code the worker loads (the workflow engine's integrations fan-out uses
+    // the authorization helpers) does reach the auth client transitively. That is safe only
+    // because the auth pool is created on first use and needs no configuration to load — pinned
+    // by tests/db/auth-pool-config.test.ts and by the worker E2E starting without the variable.
+    const hits = grep(
+      `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs src/lib/workflows`,
+    );
+    expect(hits, `worker-plane code imports the authentication plane, in:\n${hits}`).toBe('');
   });
 });

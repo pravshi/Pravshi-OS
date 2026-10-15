@@ -22,6 +22,7 @@ import { Pool } from '@neondatabase/serverless';
 import type { Authorization } from '@/lib/authz/require-permission';
 
 import { DB_READY, mkOrg, mkPerson, mkRoleFor, RUN, sqlstateOf } from '../workflows/helpers';
+import { seedSession } from '../auth-role';
 
 type AuditRow = {
   action: string;
@@ -268,6 +269,9 @@ describe.skipIf(!DB_READY)('admin audit completeness (live DB)', () => {
   describe('session revocation', () => {
     let target = '';
     let loginId = '';
+    // Since 0072 the database proves the administrator from their own session token
+    // (authz.admin_session_action): the actor holds a live session and sessions.revoke at GLOBAL.
+    let actorToken = '';
 
     const authFor = (requestId: string): Authorization =>
       ({
@@ -314,6 +318,8 @@ describe.skipIf(!DB_READY)('admin audit completeness (live DB)', () => {
         loginId,
         target,
       ]);
+      await mkRoleFor(owner, orgId, actor, `t1_sessions_${RUN}`, ['sessions.revoke']);
+      actorToken = (await seedSession(owner, actor)).token;
     }, 60_000);
 
     it('revoke one session → one session.revoked entry, and the session is gone', async () => {
@@ -321,7 +327,7 @@ describe.skipIf(!DB_READY)('admin audit completeness (live DB)', () => {
       const [keep, revoke] = await seedSessions(2);
       const requestId = randomUUID();
       const row = await exactlyOneEntry(() =>
-        revokeUserSession(authFor(requestId), target, revoke!),
+        revokeUserSession(authFor(requestId), actorToken, target, revoke!),
       );
       expectAttribution(row, requestId);
       expect(row).toMatchObject({
@@ -340,9 +346,9 @@ describe.skipIf(!DB_READY)('admin audit completeness (live DB)', () => {
     it('revoking a session that does not exist fails and writes no entry', async () => {
       const { revokeUserSession } = await import('@/lib/admin/sessions');
       const before = await orgAuditCount();
-      await expect(revokeUserSession(authFor(randomUUID()), target, randomUUID())).rejects.toThrow(
-        /Session not found/,
-      );
+      await expect(
+        revokeUserSession(authFor(randomUUID()), actorToken, target, randomUUID()),
+      ).rejects.toThrow(/Session not found/);
       expect(await orgAuditCount()).toBe(before);
     });
 
@@ -352,7 +358,9 @@ describe.skipIf(!DB_READY)('admin audit completeness (live DB)', () => {
       const live = await liveSessions();
       expect(live).toBeGreaterThanOrEqual(2);
       const requestId = randomUUID();
-      const row = await exactlyOneEntry(() => revokeAllUserSessions(authFor(requestId), target));
+      const row = await exactlyOneEntry(() =>
+        revokeAllUserSessions(authFor(requestId), actorToken, target),
+      );
       expectAttribution(row, requestId);
       expect(row).toMatchObject({ action: 'session.revoked_all', entity_id: target });
       expect(row.metadata).toMatchObject({ scope: 'all', sessions_revoked: live });

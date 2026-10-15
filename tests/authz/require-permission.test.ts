@@ -600,13 +600,15 @@ describe('pooled connection isolation', () => {
 // ── 10. nothing else moved ───────────────────────────────────────────────────────
 
 describe('the rest of the authorization model is unchanged', () => {
-  it('has thirty authz helpers, and one app_user policy per table (two on login_events)', async () => {
+  it('has thirty-four authz helpers, and one app_user policy per table (two on login_events)', async () => {
     const helpers = await owner.query<{ proname: string }>(
       `select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'authz' order by proname`,
     );
     expect(helpers.rows.map((r) => r.proname)).toEqual([
       'aal',
+      'admin_issue_credential_reset',
+      'admin_session_action',
       'audit_two_factor_change',
       'check_login_lockout',
       'check_rate_limit',
@@ -628,6 +630,7 @@ describe('the rest of the authorization model is unchanged', () => {
       'next_identity_code_for_current_org',
       'org_id',
       'person_id',
+      'person_visible',
       'record_login_failure',
       'record_password_reset_audit',
       'reports_to_me',
@@ -635,6 +638,7 @@ describe('the rest of the authorization model is unchanged', () => {
       'scope_for',
       'stamp_sessions_revoked',
       'update_credential_password',
+      'verified_session_actor',
       'worker_bound_scope',
     ]);
     // The pin above must agree with the migration SQL (0027 added the five
@@ -643,7 +647,10 @@ describe('the rest of the authorization model is unchanged', () => {
     // is_project_manager for the project_members policy fix; 0068 added
     // next_identity_code_for_current_org, the runtime role's own-org door to
     // the identity-code generator; 0070 added is_worker, the app_worker session
-    // test, and worker_bound_scope, the work-item binding); if this fails the literal list is stale.
+    // test, and worker_bound_scope, the work-item binding; 0072 added verified_session_actor and
+    // the two administrator definers it serves, admin_session_action and
+    // admin_issue_credential_reset; 0074 added person_visible, people_select for one person,
+    // which those definers apply to their target); if this fails the literal list is stale.
     const migrationSql = readdirSync(join(process.cwd(), 'drizzle'))
       .filter((f) => f.endsWith('.sql'))
       .sort()

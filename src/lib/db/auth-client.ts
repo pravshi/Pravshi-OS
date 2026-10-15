@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/neon-serverless';
-import { pool } from './pool';
+import { authPool } from './auth-pool';
 import { authDbSchema } from '@/lib/auth/schema';
 
 /**
@@ -21,14 +21,14 @@ import { authDbSchema } from '@/lib/auth/schema';
  *
  * The exception is bounded by the database, not by good intentions:
  *
- *   * the schema — every table reachable through this client lives in `auth`, which holds
- *     no business data;
- *   * the grants — app_user's rights in `auth` are enumerated table by table in
- *     0013_auth_tables.sql, and roles.sql's default privileges do not reach that schema;
- *   * the role — this is the same app_user as everywhere else. No BYPASSRLS, no ownership,
- *     and no additional privilege anywhere in `public`.
+ *   * the role — this client runs on app_auth (src/lib/db/auth-pool.ts, migrations 0072/0073),
+ *     a login of its own, never on app_user. No BYPASSRLS, no ownership, no membership;
+ *   * the grants — app_auth's rights are the auth schema's tables (enumerated in 0072) and the
+ *     pre-login functions, and nothing in `public`: it cannot read a single business row;
+ *   * the other direction — app_user, the business role, holds nothing in `auth` at all
+ *     (0073), so business code cannot reach a password hash, session or second factor.
  *
  * So the worst this client can do is read and write the credential store. Every question
  * about business data still goes through withAuthorizedDb() and still meets RLS.
  */
-export const authDb = drizzle(pool, { schema: authDbSchema });
+export const authDb = drizzle(authPool, { schema: authDbSchema });

@@ -940,6 +940,8 @@ describe('the rest of the authorization model is untouched', () => {
     const names = rows.map((r) => r.proname);
     expect(names).toEqual([
       'aal',
+      'admin_issue_credential_reset',
+      'admin_session_action',
       'audit_two_factor_change',
       'check_login_lockout',
       'check_rate_limit',
@@ -961,6 +963,7 @@ describe('the rest of the authorization model is untouched', () => {
       'next_identity_code_for_current_org',
       'org_id',
       'person_id',
+      'person_visible',
       'record_login_failure',
       'record_password_reset_audit',
       'reports_to_me',
@@ -968,13 +971,15 @@ describe('the rest of the authorization model is untouched', () => {
       'scope_for',
       'stamp_sessions_revoked',
       'update_credential_password',
+      'verified_session_actor',
       'worker_bound_scope',
     ]);
     // The pin above must agree with the migration SQL (0027 added the five
     // lockout/MFA helpers; 0033 added crm_owner_reachable; 0063 added
     // is_project_member and is_project_manager; 0068 added
-    // next_identity_code_for_current_org; 0070 added is_worker and worker_bound_scope); if this fails the literal
-    // list is stale.
+    // next_identity_code_for_current_org; 0070 added is_worker and worker_bound_scope; 0072 added
+    // verified_session_actor, admin_session_action and admin_issue_credential_reset; 0074 added
+    // person_visible); if this fails the literal list is stale.
     expect(authzHelperNamesFromSql()).toEqual(names);
     // is_project_member was the last deferred-as-stub name; it arrived for
     // real in 0063, so the not-a-stub list is now empty by design.

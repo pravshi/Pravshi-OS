@@ -83,6 +83,7 @@ table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is th
 | Variable                                                                                   | Required in prod                                                                                               | Secret   | If unset/mis-set in production                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                                                                             | **Yes** (`production` branch, `app_user`, pooled)                                                              | Yes      | Boot failure (schema/refine)                                                                                                                                                                                                      |
+| `DATABASE_URL_AUTH`                                                                        | **Yes** (`app_auth`, pooled, migrations 0072/0073 — a different URL from `DATABASE_URL`)                       | Yes      | Boot refused on Vercel; every sign-in and session check fails closed. A URL naming another login is refused by the auth pool on first use                                                                                         |
 | `APP_URL`                                                                                  | **Yes** (`https://os.pravshi.com`)                                                                             | No       | Boot failure; links/inbound URLs wrong                                                                                                                                                                                            |
 | `NODE_ENV`                                                                                 | **Yes** (`production`, platform-set)                                                                           | No       | Boot refusal logic disarmed                                                                                                                                                                                                       |
 | `BETTER_AUTH_SECRET`                                                                       | **Yes** (≥32 chars, fresh for prod)                                                                            | Yes      | Boot failure — sessions impossible                                                                                                                                                                                                |
@@ -103,8 +104,9 @@ table and `src/env.ts` ever disagree, `src/env.ts` is right and this table is th
 | `WORKFLOWS_USE_QUEUE`                                                                      | **Must stay unset** until the worker is live                                                                   | No       | If set without a worker: workflow dispatches queue unexecuted                                                                                                                                                                     |
 | `R2_*`                                                                                     | **Must not be provisioned for V1**                                                                             | —        | No R2 buckets exist; the variables are placeholders for deferred storage work                                                                                                                                                     |
 
-**Preview** holds the same runtime set, with `DATABASE_URL` naming the `staging` branch
-(`app_user`, pooled) and a `HEALTH_CHECK_TOKEN` distinct from production's.
+**Preview** holds the same runtime set, with `DATABASE_URL` and `DATABASE_URL_AUTH` naming the
+`staging` branch (`app_user` and `app_auth`, pooled) and a `HEALTH_CHECK_TOKEN` distinct from
+production's.
 
 **Must be absent from every Vercel environment:** `DATABASE_URL_MIGRATE`,
 `DATABASE_URL_BOOTSTRAP`, every `BOOTSTRAP_*` setting, `NEON_API_KEY`, `NEON_OWNER_URL`,
@@ -205,6 +207,9 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
   (claims, retries, reaping, reminders, scheduler ticks, maintenance, protected email content,
   webhook signing secrets) is executable by `app_worker` only, and `src/env.ts` refuses it on
   Vercel. Workflow actions still run as their real person over `DATABASE_URL`.
+  **The worker must NOT hold `DATABASE_URL_AUTH`** (the web app's authentication login,
+  `app_auth`, migrations 0072/0073): it never authenticates anyone, and it refuses to start when
+  that variable is present.
   **Order with migration 0070:** create the role first (`scripts/db/roles.sql`, then its
   password), then deploy the worker and apply 0070 in either order — whichever lands first,
   claims are refused until both are in place and queued work waits; nothing is lost. (`HEALTH_CHECK_TOKEN`
@@ -373,6 +378,8 @@ Before any deployment, confirm:
       Actions
 - [ ] No Neon owner or admin credential in Vercel
 - [ ] Production `DATABASE_URL` uses `app_user` on the **pooled** endpoint
+- [ ] Production and Preview `DATABASE_URL_AUTH` use `app_auth` on the **pooled** endpoint, and
+      `DATABASE_URL_AUTH` is absent from the worker host
 - [ ] Preview points at `staging`, not `production`
 - [ ] `vercel.json` still declares `sin1` and no `crons`
 - [ ] CI green on the commit being deployed

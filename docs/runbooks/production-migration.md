@@ -58,7 +58,7 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 70 69 0070_app_worker_role
+      # expected at the current release: 75 74 0075_audit_partition_lock_order
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -77,22 +77,34 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
       branch first. The `DATABASE_URL_WORKER` built from that password goes to the worker
       host only (never Vercel), and the worker is deployed with or before the migration —
       see DEPLOYMENT.md, "The worker plane".
+- [ ] **The `app_auth` role exists on the target branch** (needed by 0072/0073): the same
+      `scripts/db/roles.sql` run creates it; set the `app_auth` password in the Neon console.
+      Without the role, 0072 stops before changing anything and names this step. The
+      `DATABASE_URL_AUTH` built from that password (the **pooled** host) goes to Vercel only —
+      Production and Preview, never the worker host — and must differ from `DATABASE_URL`.
+      **Order:** 0073 takes the credential store away from `app_user`, so the web app that
+      authenticates through `DATABASE_URL_AUTH` must be deployed before 0073 is applied (0072
+      is additive and safe under either app). On the first production rollout — the web app
+      has never served production — apply 0072 and 0073 together and deploy the new app with
+      `DATABASE_URL_AUTH` set. 0074 only narrows the two administrator definers 0072 adds (the
+      target must be visible to the administrator under `people.view`); it is safe under either
+      app and is applied in the same run — never stop the chain between 0072 and 0074.
 - [ ] **Calendar gate:** any step that touches Neon (Steps 0–4) consumes the
       Neon allowance. Before **2026-11-01** these steps are written but not
       executed, unless Nani directs otherwise.
 
 ## The chain as of writing
 
-The repo journal holds 70 entries (idx 0–69). Per project records, production
+The repo journal holds 75 entries (idx 0–74). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-25 migrations **idx 45–69 (0045–0070)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4569). Step 0 verifies this;
+30 migrations **idx 45–74 (0045–0075)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4574). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the runner selects what to
 apply by `when > max(created_at)`. In the pending segment, `when` values are
 strictly increasing and all greater than idx 44's `when` (1791111413392), so
-the runner will select exactly idx 45–69 — no more, no fewer.
+the runner will select exactly idx 45–72 — no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
 
@@ -129,7 +141,7 @@ hashes of idx 0…K−1 exactly. For the state project records describe, K = 45
 rows: count `45`, max_created_at `1791111413392`, last hash
 `44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4`
 (idx 44, `0044_workflow_engine`). Any other clean prefix (a different K) is
-also workable — the pending chain is then idx K…69 — but record the
+also workable — the pending chain is then idx K…72 — but record the
 difference prominently; it means the 2026-10-06 run (or another act) applied
 more than the records show.
 
@@ -161,7 +173,7 @@ Record the full query output in the run record.
    pre-migration-<YYYY-MM-DD>-<target-idx>
    ```
 
-   For the V1 run the target idx is 69, e.g. `pre-migration-2026-11-03-69`.
+   For the V1 run the target idx is 72, e.g. `pre-migration-2026-11-03-72`.
 3. Record the new branch's **branch id** (`br-…`) in the run record.
 
 This branch — not the timestamp — is the rollback asset. Neon's point-in-time
@@ -189,18 +201,18 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 70, last applied created_at: 1791111413392
+   journal entries: 75, last applied created_at: 1791111413392
    applying idx 45 0045_automation_jobs (… statements)
    …
-   applying idx 69 0070_app_worker_role (… statements)
-   done: applied 25, total 70
+   applying idx 74 0075_audit_partition_lock_order (… statements)
+   done: applied 30, total 75
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `70`, max_created_at `1791585728057`, and the
-     ordered hash list equal to the file-byte hashes of idx 0…69.
+     full repo state: count `75`, max_created_at `1791590728057`, and the
+     ordered hash list equal to the file-byte hashes of idx 0…74.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit) run green against the branch, or in CI's equivalent
@@ -257,8 +269,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `70`, max_created_at `1791585728057`, ordered hash list equal to the
-   file-byte hashes of idx 0…69 (same comparison method as Step 0).
+   count `75`, max_created_at `1791590728057`, ordered hash list equal to the
+   file-byte hashes of idx 0…74 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -282,6 +294,9 @@ All checks must pass before the freeze is lifted.
    select has_function_privilege('app_user',   'public.jobs_claim_next(text,text[])', 'execute'),
           has_function_privilege('app_worker', 'public.jobs_claim_next(text,text[])', 'execute');
                                                             -- expect: f | t
+   select has_function_privilege('app_user',   'public.jobs_run_cleanup(uuid,text)', 'execute'),
+          has_function_privilege('app_worker', 'public.jobs_run_cleanup(uuid,text)', 'execute');
+                                                            -- expect: f | t  (0071)
    ```
 
    Then, from the worker host, through the **pooled** endpoint it will really use
@@ -290,6 +305,33 @@ All checks must pass before the freeze is lifted.
    pooler check has **not yet been run against Neon by the package author** (only through
    CI's local proxy): it is a required operator step on the first branch that receives 0070.
    Finally, the worker's log shows `[worker] starting …` and queued work drains.
+   **Authentication role (0072/0073).** As the owner, confirm `app_auth` is a plain login with
+   no membership, that `app_user` holds nothing in the `auth` schema, and that the pre-login
+   functions are `app_auth`'s alone:
+
+   ```sql
+   select rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+     from pg_roles where rolname = 'app_auth';              -- expect: t f f f f
+   select has_schema_privilege('app_user', 'auth', 'usage'),
+          has_table_privilege('app_user', 'auth.auth_accounts', 'select'),
+          has_table_privilege('app_auth', 'auth.auth_accounts', 'select');
+                                                            -- expect: f | f | t
+   select has_function_privilege('app_user', 'authz.update_credential_password(uuid,text)', 'execute'),
+          has_function_privilege('app_auth', 'authz.update_credential_password(uuid,text)', 'execute');
+                                                            -- expect: f | t
+   select count(*) from pg_proc
+    where proname in ('admin_session_action', 'admin_issue_credential_reset')
+      and position('authz.person_visible(p.id)' in prosrc) > 0;
+                                                            -- expect: 2 (0074)
+   ```
+
+   Then through the **pooled** endpoint Vercel really uses (`DATABASE_URL_AUTH`),
+   `select session_user` must answer `app_auth` — the auth pool refuses any other login on
+   first use, and `/health/db` (with the health token) answers 503 if it does not. Like the
+   worker's, this pooler check has **not yet been run against Neon** (only through CI's local
+   proxy): it is a required operator step on the first non-production branch that receives
+   0072/0073 (`scripts/ops/auth-pool-probe.mjs`, record template
+   `docs/runbooks/auth-pool-probe-record.md`). A test sign-in then succeeds.
 4. Record every result in the run record.
 5. Announce completion and **lift the freeze explicitly** — the freeze ends
    by announcement, not by assumption.
@@ -316,6 +358,20 @@ and none are invented at incident time.
   variable, and that the URL uses the pooled host. Fix the configuration and restart the
   worker. **Never re-grant the worker functions to `app_user` to get going** — that
   re-opens the gap 0070 closes. A defect in 0070 itself is case (a).
+- **(d) After 0073 nobody can sign in.** The web app still authenticating as `app_user` (an old
+  build, or `DATABASE_URL_AUTH` missing or naming `app_user`) is refused with 42501 on every
+  sign-in and session check — it fails closed; nothing is exposed. Deploy the build that uses
+  `DATABASE_URL_AUTH`, or fix the variable (`/health/db` says which login it reaches).
+  **The prepared exceptions to forward-fix:** `scripts/db/rollback/0073_auth_role_contract.down.sql`
+  gives `app_user` back the credential store so an old build can sign people in again. It
+  RE-OPENS the gap 0073 closes; it is run only with Nani's explicit approval for that step,
+  recorded in the run record, and the contract is re-applied as soon as the new build is live.
+  `scripts/db/rollback/0075_audit_partition_lock_order.down.sql` restores the 0062
+  audit-partition maintenance body, for the case where 0075's NOWAIT acquisition keeps
+  exhausting its retries under sustained load (worker log: `audit partition maintenance failed`,
+  sqlstate 55P03, then `audit partition window ends soon`). It brings back the 0062 lock order —
+  maintenance waiting while holding `audit_logs`, deadlocking or stalling audited writes while a
+  partition is created — so it too needs Nani's explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -325,7 +381,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–69)
+## Appendix A — The pending chain (idx 45–74)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -362,13 +418,18 @@ after any repo change.
 | 67  | `0068_elevated_function_boundaries` | 1791583728057 | `ad13aa14ed4611a8b78e64640cef3ae9ce64a4adc5ee269431c311d9cf551209` |
 | 68  | `0069_password_reset_email_content` | 1791584728057 | `0931683cfc7b407b044967f7b8d6e9d14f3011674e25765fdcb9a0bf5c99284c` |
 | 69  | `0070_app_worker_role` | 1791585728057 | `11bcc7a3746775dd62c21035643f8065dccc94a12cb1a7efcbcec72062e54c55` |
+| 70  | `0071_cleanup_job_worker_plane` | 1791586728057 | `593e317c1d66cfcd1ddec6dc85b0c92eff661805ee23baf262ef0de95626d51d` |
+| 71  | `0072_auth_role_expand` | 1791587728057 | `8e43f37fc0dd3399ab713d4877d6f7d047264e0803fd5857555c38802e99efb0` |
+| 72  | `0073_auth_role_contract` | 1791588728057 | `a511d80fd17c98849b0b8054fddd2391667bcd648bbe364f463d16bbc93bbd8d` |
+| 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
+| 74  | `0075_audit_partition_lock_order` | 1791590728057 | `b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `70`,
-max_created_at `1791585728057`.
+Final expected state after a complete run: count `75`,
+max_created_at `1791590728057`.
 
 ## Appendix B — Run record template
 
@@ -399,7 +460,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 70 / max 1791585728057 / hashes): yes/no
+  - journal == repo (count 75 / max 1791590728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint
