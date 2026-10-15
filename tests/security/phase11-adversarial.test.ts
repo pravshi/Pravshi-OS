@@ -263,9 +263,28 @@ const sessionCountFor = async (email: string): Promise<number> => {
 };
 
 /* A distinct source IP per HTTP call, so neither the library's per-IP
- * limiter nor the flows' own limiters couple the cases. */
+ * limiter nor the flows' own limiters couple the cases — nor this run with
+ * an earlier one. Both limiters keep their windows in the database, so a
+ * fixed sequence collides with earlier runs of this file on the same
+ * database: the library allows three /request-password-reset calls and ten
+ * sign-ins a minute per address, and the fourth run inside a minute got 429
+ * where the refusal under test was asserted. Each run takes its own
+ * 64-address block of 198.19.0.0/16 — half of the RFC 2544 benchmarking
+ * range; the other suites that randomise addresses draw from 198.18.x —
+ * picked from RUN. Blocks are 64-aligned, so a block never spills into
+ * another, and running out of addresses fails loudly instead. */
+const IP_BLOCK_SIZE = 64;
+const IP_BLOCK_BASE =
+  (Number.parseInt(RUN.slice(0, 4), 16) % (65_536 / IP_BLOCK_SIZE)) * IP_BLOCK_SIZE;
 let ipSeq = 0;
-const nextIp = () => `203.0.113.${(ipSeq += 1)}`;
+const nextIp = () => {
+  if (ipSeq >= IP_BLOCK_SIZE) {
+    throw new Error(`phase11: this run's ${IP_BLOCK_SIZE}-address block is used up`);
+  }
+  const n = IP_BLOCK_BASE + ipSeq;
+  ipSeq += 1;
+  return `198.19.${n >> 8}.${n & 255}`;
+};
 
 /** Every cookie a response sets (fixtures.cookieFrom's tolerant pattern). */
 const cookiesOf = (res: Response): string => {
@@ -418,7 +437,7 @@ describe.runIf(HAS_DB)(
 
     it('the exists case: exactly one email job, dedup-keyed on the reset row, recipient + org derived', async () => {
       const before = await pwresetJobs(acct.email);
-      const answer = await requestPasswordReset(acct.email, `198.51.100.${(ipSeq += 1)}`);
+      const answer = await requestPasswordReset(acct.email, nextIp());
       expect(answer).toEqual({ ok: true });
 
       // The live reset row is the source of truth the job keys on.
@@ -448,7 +467,7 @@ describe.runIf(HAS_DB)(
     it('the not-exists case: the same uniform answer, and nothing is created', async () => {
       const ghost = `ghost-${RUN}@example.test`;
       const jobsBefore = await pwresetJobs(ghost);
-      const answer = await requestPasswordReset(ghost, `198.51.100.${(ipSeq += 1)}`);
+      const answer = await requestPasswordReset(ghost, nextIp());
       expect(answer).toEqual({ ok: true });
       // No new email job (id-set diff over the jobs this request could have
       // produced — see pwresetJobs), no reset row hangs off the ghost (it has
