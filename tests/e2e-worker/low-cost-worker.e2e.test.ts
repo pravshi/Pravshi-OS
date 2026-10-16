@@ -21,10 +21,11 @@
  *      and the start-up maintenance pass runs.
  *
  * Start-up diagnostics (worker-launch.ts): every launch records when it first wrote anything,
- * when it wrote its first worker log line, when each awaited line appeared, and its exit code or
- * signal. A failed wait says whether the worker EXITED first or was still RUNNING at the
- * deadline, with that record and the (redacted) tail of its output. WPW_E2E_REPORT=<file> also
- * writes the launches and every test's outcome as JSON — a test that never ran is "not run".
+ * when it wrote its first worker log line, when each start-up milestone and awaited line
+ * appeared, and its exit code or signal. A failed wait says whether the worker EXITED first or
+ * was still RUNNING at the deadline, with that record and the (redacted) tail of its output.
+ * WPW_E2E_REPORT=<file> also writes the launches and every test's outcome as JSON — a test
+ * that never ran is "not run".
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -104,7 +105,7 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     const capture = (d: Buffer) => {
       const text = d.toString();
       logs += text;
-      recordOutput(current, text);
+      recordOutput(current, text, Date.now(), logs);
     };
     worker.stdout!.on('data', capture);
     worker.stderr!.on('data', capture);

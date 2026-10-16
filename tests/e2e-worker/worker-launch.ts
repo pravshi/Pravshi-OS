@@ -2,7 +2,8 @@
  * Start-up diagnostics for the worker E2E (low-cost-worker.e2e.test.ts).
  *
  * One record per launched worker process: when it was launched, when it first wrote anything,
- * when it wrote its first worker log line, when each awaited line appeared, and how it ended.
+ * when it wrote its first worker log line, when each start-up milestone and awaited line
+ * appeared, and how it ended.
  * When a wait fails, the error says which of two different things happened:
  *
  *   - the process EXITED before the line appeared (with its exit code or signal), or
@@ -35,10 +36,23 @@ export function newLaunch(now = Date.now()): WorkerLaunch {
   return { launchedAt: now, firstOutputMs: null, firstWorkerLogMs: null, seen: {}, exit: null };
 }
 
-export function recordOutput(launch: WorkerLaunch, chunk: string, now = Date.now()): void {
+/** Start-up milestones recorded for every launch, whether or not a test waits for them. */
+export const MILESTONES = ['[worker] starting', '[jobs] db maintenance', '[worker] deep sleep'];
+
+/**
+ * Records a chunk of output. `output` is everything this launch has written so far (so a
+ * milestone split across two chunks is still found); it defaults to the chunk itself.
+ */
+export function recordOutput(
+  launch: WorkerLaunch,
+  chunk: string,
+  now = Date.now(),
+  output = chunk,
+): void {
   const at = now - launch.launchedAt;
   if (launch.firstOutputMs === null) launch.firstOutputMs = at;
   if (launch.firstWorkerLogMs === null && WORKER_LOG.test(chunk)) launch.firstWorkerLogMs = at;
+  for (const milestone of MILESTONES) markSeen(launch, milestone, output, now);
 }
 
 export function recordExit(

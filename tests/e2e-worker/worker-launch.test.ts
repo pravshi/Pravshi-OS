@@ -42,6 +42,24 @@ describe('worker E2E start-up diagnostics', () => {
     expect(launch.seen['[jobs] db maintenance']).toBe(8_300);
   });
 
+  it('records the start-up milestones of every launch, even ones no test waits for', () => {
+    const launch = newLaunch(T0);
+    let output = '';
+    const write = (chunk: string, at: number) => {
+      output += chunk;
+      recordOutput(launch, chunk, T0 + at, output);
+    };
+    write('[worker] starting workerId=w-1\n', 6_000);
+    write('[jobs] db main', 6_400); // a milestone split across two chunks
+    write('tenance {}\n', 6_500);
+    write('[worker] deep sleep { sleepMs: 40000 }\n', 9_000);
+    expect(launch.seen).toEqual({
+      '[worker] starting': 6_000,
+      '[jobs] db maintenance': 6_500,
+      '[worker] deep sleep': 9_000,
+    });
+  });
+
   it('a wait that ran out while the worker was still running is a timeout, with its progress', () => {
     const launch = newLaunch(T0);
     recordOutput(launch, NODE_WARNING, T0 + 700);
@@ -103,7 +121,7 @@ describe('worker E2E start-up diagnostics', () => {
         launch: 1,
         firstOutputMs: 8_000,
         firstWorkerLogMs: 8_000,
-        seenMs: { '[jobs] db maintenance': 8_300 },
+        seenMs: { '[worker] starting': 8_000, '[jobs] db maintenance': 8_300 },
         exit: { code: null, signal: 'SIGTERM', atMs: 90_000 },
       },
       { launch: 2, firstOutputMs: null, firstWorkerLogMs: null, seenMs: {}, exit: null },
