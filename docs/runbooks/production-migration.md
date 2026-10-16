@@ -18,13 +18,20 @@ artefact, which is closed as superseded as part of HG-2 (Step 3 closeout).
 node scripts/migrate-ws.mjs
 ```
 
-It reads `drizzle/meta/_journal.json`, compares `max(created_at)` in
-`drizzle.__drizzle_migrations`, and applies each pending migration in its own
-real transaction on one connection, recording `sha256(file)` per migration. A
-failed migration rolls back whole — production can only ever be left at a
-whole-migration boundary, never with partial DDL. Exit codes: `0` = success,
-`2` = a migration failed and was rolled back, `1` = the runner itself errored.
-Do not use any other tool, workflow, or hand-written SQL to apply migrations.
+It reads `drizzle/meta/_journal.json` and the recorded history in
+`drizzle.__drizzle_migrations` (in insertion order, `id`), verifies that the
+history is exactly the journal's prefix idx 0…K−1 — the same file-byte hash and
+the same `when`, row for row — and only then applies idx K…n−1 in journal
+order, each in its own real transaction on one connection, recording
+`sha256(file)` per migration. A failed migration rolls back whole — production
+can only ever be left at a whole-migration boundary, never with partial DDL.
+Exit codes: `0` = success, `2` = a migration failed and was rolled back,
+`1` = the runner itself errored, `3` = **refused**: the recorded history is not a
+clean prefix of the journal (a missing, duplicated, reordered, unknown or
+checksum-mismatched row, or more rows than the journal has), or another run
+holds the migration lock — nothing was applied by this run.
+Do not use any other tool, workflow, or hand-written SQL to apply migrations;
+in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
 ## Ground rules (binding)
 
@@ -103,10 +110,15 @@ last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
 [Appendix A](#appendix-a--the-pending-chain-idx-4575). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
-One mechanical fact the operator should know: the runner selects what to
-apply by `when > max(created_at)`. In the pending segment, `when` values are
-strictly increasing and all greater than idx 44's `when` (1791111413392), so
-the runner will select exactly idx 45–75 — no more, no fewer.
+One mechanical fact the operator should know: the journal's **order is its
+`idx`, never time**. Its historical `when` values are not monotonic — idx 28,
+29 and 30 carry earlier values than idx 27, and idx 35 ties idx 34 — so
+ordering the history by `created_at` is not journal order, and drizzle-kit's
+rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
+skip pending entries from a database stopped inside those ranges. The runner
+does not use that rule: it verifies the history as an exact prefix and applies
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–75 —
+no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
 
@@ -119,8 +131,12 @@ from drizzle.__drizzle_migrations;
 
 select id, hash, created_at
 from drizzle.__drizzle_migrations
-order by created_at, id;
+order by id;
 ```
+
+Order by `id` — the runner's insertion order, which follows the journal. Not by
+`created_at`: the historical `when` values are not monotonic (above), so time
+order would put idx 28–30 before idx 26–27 and fail a correct database.
 
 Compute the repository's expected hash list — the hashes the runner records
 are `sha256` of each migration **file's bytes**, computed exactly as the
@@ -137,9 +153,13 @@ node -e "const fs=require('fs'),c=require('crypto');const j=JSON.parse(fs.readFi
 > hashes printed by the command above.
 
 **Pass criteria — the production state is an exact journal prefix.** There
-exists a K such that: `applied_count` = K, `max_created_at` = the `when` of
-journal idx K−1, and the ordered database hash list equals the file-byte
-hashes of idx 0…K−1 exactly. For the state project records describe, K = 45
+exists a K such that: `applied_count` = K; the database rows, in `id` order,
+carry exactly the file-byte hashes of idx 0…K−1 **and** each row's
+`created_at` equals that entry's `when`; and `max_created_at` is the largest
+`when` among idx 0…K−1 (not necessarily idx K−1's own, for the reason above).
+The runner performs the same verification and refuses (exit `3`) anything
+else; Step 0 is the operator's independent check before any write. For the
+state project records describe, K = 45
 rows: count `45`, max_created_at `1791111413392`, last hash
 `44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4`
 (idx 44, `0044_workflow_engine`). Any other clean prefix (a different K) is
@@ -204,6 +224,7 @@ Production is **not touched** in this step.
 
    ```
    journal entries: 76, last applied created_at: 1791111413392
+   verified history: 45 of 76 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
    applying idx 75 0076_job_schedule_principal_binding (… statements)
@@ -214,7 +235,7 @@ Production is **not touched** in this step.
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
      full repo state: count `76`, max_created_at `1791591728057`, and the
-     ordered hash list equal to the file-byte hashes of idx 0…75.
+     hash list in `id` order equal to the file-byte hashes of idx 0…75.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity)) run green against the branch, or in CI's equivalent
@@ -260,7 +281,10 @@ Capture the runner's **complete output verbatim** into the run record,
 including the applied idx list and the final `done:` line. Exit `0` →
 proceed to Step 4. Exit `2` or `1` → production is at a whole-migration
 boundary; do not retry, do not improvise — go to
-[Failure doctrine](#failure-doctrine-binding) and record the failure.
+[Failure doctrine](#failure-doctrine-binding) and record the failure. Exit `3`
+→ the runner refused before applying anything (its `REFUSED:` line says why):
+the history is not the clean prefix Step 0 recorded, or another run holds the
+lock. STOP — nothing changed; return to Step 0 and escalate to Nani.
 
 **Closeout (after a successful Step 4):** close PR #60 as superseded by this
 runbook, referencing the run record. This is a human act under HG-2; it is
@@ -271,8 +295,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `76`, max_created_at `1791591728057`, ordered hash list equal to the
-   file-byte hashes of idx 0…75 (same comparison method as Step 0).
+   count `76`, max_created_at `1791591728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…75 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash

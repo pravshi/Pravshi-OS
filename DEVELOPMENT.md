@@ -115,8 +115,14 @@ so running it against a shared branch will disturb other people.
 Migrations run as `app_owner` against the **direct** (non-pooled) endpoint:
 
 ```bash
-DATABASE_URL_MIGRATE=<your branch, app_owner, direct> pnpm exec drizzle-kit migrate
+DATABASE_URL_MIGRATE=<your branch, app_owner, direct> node scripts/migrate-ws.mjs
 ```
+
+Use this runner, not `drizzle-kit migrate`. It applies migrations in the journal's order and
+refuses (exit 3, nothing applied) a database whose recorded history is not an exact prefix of the
+journal; drizzle-kit selects by timestamp and would skip migrations whose historical `when` is
+out of order. If it refuses your branch, the message says which row differs — reset the branch
+rather than editing its history.
 
 The ownership boundary matters:
 
