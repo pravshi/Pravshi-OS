@@ -201,21 +201,22 @@ export async function createSchedule(auth: Authorization, input: unknown): Promi
       `);
       const row = rows.rows[0];
       if (!row) throw new Error('INTERNAL: schedule insert returned no row');
-      return mapScheduleRow(row);
-    });
-    // Audited after the insert commits (own transaction, fail-open).
-    await auditJobsMutation(auth, {
-      action: 'schedule.created',
-      entityType: 'schedule',
-      entityId: schedule.id,
-      severity: 'LOW',
-      metadata: {
-        name: schedule.name,
-        workflowId: schedule.workflowId,
-        cron: schedule.cron,
-        timezone: schedule.timezone,
-        isActive: schedule.isActive,
-      },
+      const created = mapScheduleRow(row);
+      // Audited in the insert's transaction: no schedule without its entry.
+      await auditJobsMutation(tx, auth, {
+        action: 'schedule.created',
+        entityType: 'schedule',
+        entityId: created.id,
+        severity: 'LOW',
+        metadata: {
+          name: created.name,
+          workflowId: created.workflowId,
+          cron: created.cron,
+          timezone: created.timezone,
+          isActive: created.isActive,
+        },
+      });
+      return created;
     });
     // A sleeping worker (WP-W) must re-read when the next run falls due. Never throws.
     await requestWorkerWake();
@@ -353,22 +354,23 @@ export async function updateSchedule(
     `);
     const updatedRow = rows.rows[0];
     if (!updatedRow) throw notFound(); // RLS fail-closed: treat as invisible
-    return { schedule: mapScheduleRow(updatedRow), beforeIsActive };
-  });
-  // Audited after the update commits (own transaction, fail-open).
-  await auditJobsMutation(auth, {
-    action: 'schedule.updated',
-    entityType: 'schedule',
-    entityId: scheduleId,
-    severity: 'LOW',
-    metadata: {
-      fields: Object.keys(parsed).join(','),
-      isActive: `${updated.beforeIsActive}->${updated.schedule.isActive}`,
-    },
+    const after = mapScheduleRow(updatedRow);
+    // Audited in the update's transaction: no change without its entry.
+    await auditJobsMutation(tx, auth, {
+      action: 'schedule.updated',
+      entityType: 'schedule',
+      entityId: scheduleId,
+      severity: 'LOW',
+      metadata: {
+        fields: Object.keys(parsed).join(','),
+        isActive: `${beforeIsActive}->${after.isActive}`,
+      },
+    });
+    return after;
   });
   // The firing plan may have moved earlier or been re-activated; wake a sleeping worker.
   await requestWorkerWake();
-  return updated.schedule;
+  return updated;
 }
 
 /**
@@ -385,13 +387,13 @@ export async function deleteSchedule(auth: Authorization, scheduleId: string): P
       where id = ${scheduleId} and org_id = ${auth.ctx.orgId}
     `);
     if ((rows.rowCount ?? 0) === 0) throw notFound();
-  });
-  // Audited after the deactivation commits (own transaction, fail-open).
-  await auditJobsMutation(auth, {
-    action: 'schedule.deleted',
-    entityType: 'schedule',
-    entityId: scheduleId,
-    severity: 'MEDIUM',
-    metadata: { deactivated: true },
+    // Audited in the deactivation's transaction: no change without its entry.
+    await auditJobsMutation(tx, auth, {
+      action: 'schedule.deleted',
+      entityType: 'schedule',
+      entityId: scheduleId,
+      severity: 'MEDIUM',
+      metadata: { deactivated: true },
+    });
   });
 }

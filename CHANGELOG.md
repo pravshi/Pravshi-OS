@@ -107,6 +107,10 @@ Database migrations: 0063–0076 (production still pending — see the
   schedule at a workflow of their own, or queue a scheduled run directly — each running a
   workflow with another person's permissions. The application never did any of these. The
   database now refuses all four.
+- Changes to jobs and schedules (schedule create, edit and delete; job cancel and retry) write
+  their audit entry in the same transaction as the change. Before, the entry was written after
+  the change had been saved, and a failure only produced a log line, leaving the change
+  unaudited. Now a failed audit write cancels the change.
 - A database failure during sign-in or a session check no longer writes the session token to
   the server log. Database errors carry every query parameter, and the authentication library
   printed them whole; the session's token was one of them. Authentication now logs errors as

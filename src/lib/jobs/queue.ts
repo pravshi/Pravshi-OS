@@ -514,31 +514,27 @@ export async function heartbeatJob(workerId: string, jobId: string): Promise<voi
 /** Any non-terminal job → cancelled. Terminal (succeeded/cancelled) → throw. */
 export async function cancelJob(auth: Authorization, jobId: string): Promise<void> {
   await requireJobPermission(auth, PERM_CANCEL);
-  let fromStatus: JobStatus | null = null;
-  let jobType: JobType | null = null;
   await withAuthorizedDb(auth.ctx, async (tx) => {
     const job = mapJobRow(await loadJobForUpdate(tx, auth.ctx.orgId, jobId));
-    fromStatus = job.status;
-    jobType = job.type;
     assertTransition(job, 'cancelled');
     await tx.execute(sql`
       update jobs
       set status = 'cancelled', updated_at = now()
       where id = ${jobId} and org_id = ${auth.ctx.orgId}
     `);
-  });
-  // Audited after the mutation commits (own transaction, fail-open): the
-  // actor/org are derived from auth.ctx by write_audit_log().
-  await auditJobsMutation(auth, {
-    action: 'job.cancelled',
-    entityType: 'job',
-    entityId: jobId,
-    severity: 'MEDIUM',
-    metadata: {
-      jobType,
-      fromStatus,
-      toStatus: 'cancelled',
-    },
+    // Audited in the mutation's transaction (the entry commits with it or not at
+    // all); the actor/org are derived from auth.ctx by write_audit_log().
+    await auditJobsMutation(tx, auth, {
+      action: 'job.cancelled',
+      entityType: 'job',
+      entityId: jobId,
+      severity: 'MEDIUM',
+      metadata: {
+        jobType: job.type,
+        fromStatus: job.status,
+        toStatus: 'cancelled',
+      },
+    });
   });
 }
 
@@ -572,22 +568,23 @@ export async function retryJob(auth: Authorization, jobId: string): Promise<Job>
     `);
     const row = result.rows[0];
     if (!row) throw new Error('INTERNAL: job retry update returned no row');
-    return { replayed: mapJobRow(row), fromStatus, jobType };
-  });
-  // Audited after the mutation commits (own transaction, fail-open): the
-  // actor/org are derived from auth.ctx by write_audit_log().
-  await auditJobsMutation(auth, {
-    action: 'job.retried',
-    entityType: 'job',
-    entityId: jobId,
-    severity: 'MEDIUM',
-    metadata: {
-      jobType: replayed.jobType,
-      fromStatus: replayed.fromStatus,
-      toStatus: replayed.replayed.status,
-    },
+    const replayed = mapJobRow(row);
+    // Audited in the mutation's transaction (the entry commits with it or not at
+    // all); the actor/org are derived from auth.ctx by write_audit_log().
+    await auditJobsMutation(tx, auth, {
+      action: 'job.retried',
+      entityType: 'job',
+      entityId: jobId,
+      severity: 'MEDIUM',
+      metadata: {
+        jobType,
+        fromStatus,
+        toStatus: replayed.status,
+      },
+    });
+    return replayed;
   });
   // The replay is due now; wake a sleeping worker (WP-W). Never throws.
   await requestWorkerWake();
-  return replayed.replayed;
+  return replayed;
 }
