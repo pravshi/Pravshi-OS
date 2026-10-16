@@ -19,12 +19,28 @@
  *   5. a scheduled automation fires at its due time while the worker was asleep;
  *   6. after a restart, work that fell due while the worker was down is drained at once,
  *      and the start-up maintenance pass runs.
+ *
+ * Start-up diagnostics (worker-launch.ts): every launch records when it first wrote anything,
+ * when it wrote its first worker log line, when each awaited line appeared, and its exit code or
+ * signal. A failed wait says whether the worker EXITED first or was still RUNNING at the
+ * deadline, with that record and the (redacted) tail of its output. WPW_E2E_REPORT=<file> also
+ * writes the launches and every test's outcome as JSON — a test that never ran is "not run".
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
 import { mkOrg, mkPerson, mkTask, mkWorkflow, RUN } from '../workflows/helpers';
+import {
+  launchReport,
+  markSeen,
+  newLaunch,
+  recordExit,
+  recordOutput,
+  waitFailure,
+  type WorkerLaunch,
+} from './worker-launch';
 
 const ENABLED = process.env.WPW_E2E === '1' && !!process.env.DATABASE_URL_MIGRATE;
 const TOKEN = `wpw-e2e-${RUN}-token-0123456789abcdefghij`;
@@ -38,6 +54,9 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
   const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
   let worker: ChildProcess | null = null;
   let logs = '';
+  let launch: WorkerLaunch | null = null; // the current worker process
+  const launches: WorkerLaunch[] = [];
+  let setupCompleted = false; // beforeAll reached the end: the tests could run
   let orgId = '';
   let personId = '';
   let taskId = '';
@@ -72,6 +91,9 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
 
   function startWorker(): void {
     logs = '';
+    const current = newLaunch();
+    launch = current;
+    launches.push(current);
     worker = spawn(
       // The worker needs Node 22 (--experimental-transform-types; .nvmrc pins 22). WPW_NODE
       // points at a Node 22 binary when the test runner itself runs on another version.
@@ -79,14 +101,22 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
       WORKER_ARGS,
       { env: workerEnv(), stdio: ['ignore', 'pipe', 'pipe'] },
     );
-    worker.stdout!.on('data', (d: Buffer) => (logs += d.toString()));
-    worker.stderr!.on('data', (d: Buffer) => (logs += d.toString()));
+    const capture = (d: Buffer) => {
+      const text = d.toString();
+      logs += text;
+      recordOutput(current, text);
+    };
+    worker.stdout!.on('data', capture);
+    worker.stderr!.on('data', capture);
+    worker.once('exit', (code, signal) => recordExit(current, code, signal));
   }
 
   async function stopWorker(): Promise<void> {
     if (!worker) return;
     const w = worker;
     worker = null;
+    // Already gone (it crashed, or was refused): 'exit' will not fire again.
+    if (w.exitCode !== null || w.signalCode !== null) return;
     await new Promise<void>((resolve) => {
       w.once('exit', () => resolve());
       w.kill('SIGTERM');
@@ -98,14 +128,26 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     for (;;) {
       const value = await probe();
       if (value !== null) return { value, afterMs: Date.now() - started };
-      if (Date.now() - started > timeoutMs)
-        throw new Error(`timed out waiting for ${what}\n${logs}`);
+      if (Date.now() - started > timeoutMs) {
+        if (launch) throw waitFailure(what, launch, timeoutMs, logs);
+        throw new Error(`timed out waiting for ${what}`);
+      }
       await sleep(250);
     }
   }
 
+  /** Waits for a line from the CURRENT worker; fails at once, as an exit, if it has exited. */
   const waitForLog = (needle: string, timeoutMs = 20_000) =>
-    waitFor(`log "${needle}"`, async () => (logs.includes(needle) ? true : null), timeoutMs);
+    waitFor(
+      `log "${needle}"`,
+      async () => {
+        if (!launch) throw new Error('no worker has been started');
+        if (markSeen(launch, needle, logs)) return true;
+        if (launch.exit) throw waitFailure(`log "${needle}"`, launch, timeoutMs, logs);
+        return null;
+      },
+      timeoutMs,
+    );
 
   const ring = () =>
     fetch(`http://127.0.0.1:${PORT}/wake`, {
@@ -167,12 +209,30 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     startWorker();
     await waitForLog('[jobs] db maintenance'); // start-up pass ran
     await waitForLog('[worker] deep sleep');
+    setupCompleted = true;
   }, 60_000);
 
-  afterAll(async () => {
+  // Vitest passes the suite second and requires the first argument to be destructured.
+  // eslint-disable-next-line no-empty-pattern
+  afterAll(async ({}, suite) => {
     if (!ENABLED) return;
     await stopWorker();
     await owner.end();
+    const report = process.env.WPW_E2E_REPORT;
+    if (report) {
+      // When start-up fails Vitest marks every test 'skip'; say what happened instead.
+      const tests = suite.tasks.map((t) => ({
+        name: t.name,
+        state: setupCompleted ? (t.result?.state ?? 'not run') : 'not run: start-up failed',
+      }));
+      const verdict = tests.every((t) => t.state === 'pass')
+        ? 'passed'
+        : setupCompleted
+          ? 'failed'
+          : 'not run: start-up failed';
+      const body = { verdict, setupCompleted, tests, launches: launchReport(launches) };
+      writeFileSync(report, JSON.stringify(body, null, 2));
+    }
   });
 
   it('1. holds no database connection while asleep', async () => {
