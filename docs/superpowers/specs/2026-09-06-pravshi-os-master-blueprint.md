@@ -3,6 +3,11 @@
 **Status:** Revision 2 — architecture ratified by the founder. **NO APPLICATION CODE WRITTEN YET.**
 **Date:** 2026-09-06
 
+> **V1 scope note (2026-10-16, [ADR-006](../../architecture/adr/006-v1-scope-business-os.md)):** V1
+> is the multi-tenant Business OS that was built, not the §32 MVP scope below. The HR and
+> operations modules are deferred as a separate future product scope. This document's architecture
+> and locked decisions remain binding; it is otherwise preserved unchanged.
+
 **Companion docs:**
 - [Database Architecture & ERD](../../architecture/database.md)
 - [Security Architecture, Permission Matrices & Threat Model](../../architecture/security.md)
