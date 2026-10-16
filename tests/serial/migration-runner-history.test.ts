@@ -213,8 +213,13 @@ describe.skipIf(!ISOLATED)(
     }, 300_000);
 
     describe('A: every other history is refused with exit 3, and the run changes nothing', () => {
-      const refusedCase = async (corrupt: () => Promise<unknown>, reason: RegExp) => {
-        await resetHistory(dbA, entries.length);
+      /** `k`: the history length the corruption starts from (entries.length: nothing pending). */
+      const refusedCase = async (
+        corrupt: () => Promise<unknown>,
+        reason: RegExp,
+        k = entries.length,
+      ) => {
+        await resetHistory(dbA, k);
         await corrupt();
         const historyBefore = await historyDigest(dbA);
         const schemaBefore = await schemaDigest(dbA);
@@ -236,6 +241,21 @@ describe.skipIf(!ISOLATED)(
               ['f'.repeat(64)],
             ),
           /REFUSED: recorded row 31 .* different checksum/,
+        );
+      }, 300_000);
+
+      // With nothing pending, "nothing applied" would hold even for a runner that applied before
+      // verifying. Here idx 35…n-1 are pending: the refusal must come before any of them runs.
+      it('a checksum mismatch while migrations are pending', async () => {
+        await refusedCase(
+          () =>
+            dbA.query(
+              `update drizzle.__drizzle_migrations set hash = $1
+              where id = (select id from drizzle.__drizzle_migrations order by id offset 30 limit 1)`,
+              ['f'.repeat(64)],
+            ),
+          /REFUSED: recorded row 31 .* different checksum/,
+          35,
         );
       }, 300_000);
 

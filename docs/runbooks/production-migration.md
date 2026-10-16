@@ -29,7 +29,9 @@ Exit codes: `0` = success, `2` = a migration failed and was rolled back,
 `1` = the runner itself errored, `3` = **refused**: the recorded history is not a
 clean prefix of the journal (a missing, duplicated, reordered, unknown or
 checksum-mismatched row, or more rows than the journal has), or another run
-holds the migration lock — nothing was applied by this run.
+holds the migration lock — refused before anything was applied; or the history
+changed while the run was applying — it stops there, and whole migrations it
+committed earlier stay applied (its second error line says how many).
 Do not use any other tool, workflow, or hand-written SQL to apply migrations;
 in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
@@ -136,7 +138,8 @@ order by id;
 
 Order by `id` — the runner's insertion order, which follows the journal. Not by
 `created_at`: the historical `when` values are not monotonic (above), so time
-order would put idx 28–30 before idx 26–27 and fail a correct database.
+order would put idx 28–29 before idx 26, and idx 30 before idx 27, and fail a
+correct database.
 
 Compute the repository's expected hash list — the hashes the runner records
 are `sha256` of each migration **file's bytes**, computed exactly as the
@@ -282,9 +285,14 @@ including the applied idx list and the final `done:` line. Exit `0` →
 proceed to Step 4. Exit `2` or `1` → production is at a whole-migration
 boundary; do not retry, do not improvise — go to
 [Failure doctrine](#failure-doctrine-binding) and record the failure. Exit `3`
-→ the runner refused before applying anything (its `REFUSED:` line says why):
-the history is not the clean prefix Step 0 recorded, or another run holds the
-lock. STOP — nothing changed; return to Step 0 and escalate to Nani.
+→ the runner refused (its `REFUSED:` line says why). Read the next line before
+anything else: `Nothing was applied.` means it refused before applying — the
+history is not the clean prefix Step 0 recorded, or another run holds the lock.
+`N migration(s) committed earlier in this run; nothing after them.` means the
+history changed while it was applying: those N whole migrations (the first N
+`applying idx` lines of the captured output) are on production — record them as
+applied in the run record. STOP either way; return to Step 0 and escalate to
+Nani.
 
 **Closeout (after a successful Step 4):** close PR #60 as superseded by this
 runbook, referencing the run record. This is a human act under HG-2; it is

@@ -27,11 +27,14 @@
  * One runner at a time: a session advisory lock is taken without waiting; if
  * another run holds it, this one exits 3 having done nothing. Each migration's
  * transaction re-checks the history length, so a concurrent writer to the
- * history table also stops the run.
+ * history table also stops the run — with exit 3, but after the migrations this
+ * run had already committed, which stay applied (the message says how many).
  *
  * Exit codes: 0 success · 1 the runner itself errored · 2 a migration failed
  * and was rolled back · 3 refused: the recorded history is not a clean prefix of
- * the journal, or another run is in progress (nothing applied by this run).
+ * the journal, or another run is in progress (refused before applying anything),
+ * or the history changed during the run (whole migrations committed earlier in
+ * this run stay applied; the message says how many).
  *
  * ONE CONNECTION, REAL TRANSACTIONS. Every statement runs on a single pooled
  * WebSocket connection, so BEGIN … COMMIT genuinely wraps each migration and a
