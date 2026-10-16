@@ -1,8 +1,13 @@
 # PRAVSHI OS
 
-Internal operations platform for PRAVSHI. It exists to run the company's own HR, projects
-and corporate records behind a single authorization model that the database enforces, not
-the application layer.
+A multi-tenant business operating system — CRM, sales pipelines, work management, workflows,
+background jobs, analytics, search, notifications, AI assistance and integrations — behind a
+single authorization model that the database enforces, not the application layer.
+
+**V1 scope** is this Business OS, as decided on 2026-10-16 in
+[ADR-006](docs/architecture/adr/006-v1-scope-business-os.md). The original HR and operations
+blueprint (people, HR documents, policies, recruitment, onboarding and offboarding) is preserved
+as a deferred, separate future product scope; it is not part of V1.
 
 **Internal use only. No public signup exists.**
 
@@ -22,9 +27,9 @@ security hardening, and performance/reliability hardening.
 | Performance & reliability (Phase 12)  | Done — migration 0062                              |
 | Production readiness (Phase 13)       | Docs, runbooks and release identity in this change |
 | **Vercel deployment and DNS**         | **Not performed — founder gates HG-1, HG-5**       |
-| **Production migrations (0045–0073)** | **Not applied — founder gate HG-2**                |
+| **Production migrations (0045–0075)** | **Not applied — founder gate HG-2**                |
 | **First SUPER_ADMIN bootstrap**       | **Not performed — founder gate HG-9**              |
-| **Cloudflare R2 buckets**             | **Deferred — no buckets exist; out of V1 scope**   |
+| **Cloudflare R2 buckets**             | **Deferred — no file storage in V1 (ADR-006)**     |
 | **Sentry**                            | **Not configured — no DSN issued (gate HG-6)**     |
 
 Nothing is deployed. `os.pravshi.com` does not resolve and no Vercel project exists.
@@ -66,7 +71,9 @@ Architecture and planning documents live in [`docs/`](docs/): the
 [master blueprint](docs/superpowers/specs/2026-09-06-pravshi-os-master-blueprint.md), the
 [Phase 0 plan](docs/superpowers/plans/2026-09-06-phase-0-foundation.md),
 [database.md](docs/architecture/database.md), [security.md](docs/architecture/security.md)
-and [build-plan.md](docs/architecture/build-plan.md).
+and [build-plan.md](docs/architecture/build-plan.md). The blueprint's architecture is binding;
+its §32 scope and the build plan's phase list are superseded for V1 by
+[ADR-006](docs/architecture/adr/006-v1-scope-business-os.md).
 
 ## Verification
 

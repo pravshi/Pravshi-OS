@@ -1,5 +1,10 @@
 # PRAVSHI OS — V1 BUILD PLAN
 
+> **Superseded as the V1 scope on 2026-10-16 — see
+> [ADR-006](adr/006-v1-scope-business-os.md).** V1 is the multi-tenant Business OS that was built.
+> The HR and operations phases below are preserved as a deferred, separate future product scope and
+> are not V1 acceptance criteria. The rest of this document is kept unchanged as the historical plan.
+
 Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-master-blueprint.md).
 **Phase order confirmed by the founder on 2026-09-06 and fixed. No application code has been written.**
 
