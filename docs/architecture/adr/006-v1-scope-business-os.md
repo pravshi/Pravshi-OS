@@ -48,6 +48,10 @@ No recorded decision reconciled the two, so whether V1 was complete could not be
 
 ## Not decided here (open founder decisions)
 
+> **Update 2026-10-16:** GOV-02, GOV-03, GOV-04 and the Sales Sheet import were decided in
+> [ADR-007](007-v1-founder-product-decisions.md). DB-14 remains open. The list below is kept as
+> it was recorded.
+
 This record deliberately leaves these open; no design that depends on them may be implemented until
 each is decided and recorded:
 

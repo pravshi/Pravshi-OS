@@ -170,6 +170,14 @@ Database migrations: 0063–0075 (production still pending — see the
   architecture remains binding. Organization membership, provisioning, tenant tiers, the
   environment topology and the Sales Sheet import remain open decisions. Documentation only — no
   behaviour changes.
+- V1 product decisions recorded
+  ([ADR-007](docs/architecture/adr/007-v1-founder-product-decisions.md)): one login belongs to
+  exactly one organization; V1 includes an audited platform Super Admin organization-provisioning
+  system; free-trial and paid organizations share the same capabilities and the same isolation and
+  security guarantees, with plans, entitlements, billing and usage limits deferred; the Sales Sheet
+  import is in the V1 launch scope. The provisioning architecture and the import requirements are
+  proposals pending founder review (`docs/architecture/proposals/`). The environment topology
+  remains open. Documentation only — no behaviour changes.
 - The production migration runbook targets the current journal (0064), and a
   guard test fails CI whenever a migration lands without the runbook following.
 - Deployment, environment and development documentation describe the current
