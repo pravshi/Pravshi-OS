@@ -22,7 +22,11 @@ on the branch it targets and keeps that compute awake while it runs.
 
 1. Open the **non-production** Neon project (development runs against a separate project from
    production — [DEPLOYMENT.md](../../DEPLOYMENT.md)). Check the project name before anything else.
-2. Pick the branch to probe (a dedicated dev branch is best) and note its **name**.
+2. Pick the branch to probe (a dedicated dev branch is best) and note its **name**. The probe
+   refuses a `--non-production-branch` label that contains `prod` anywhere, or is exactly `main`
+   — Neon's default branch name, refused even in a non-production project. A branch named
+   `production` is never a development target. The label is only a speed bump; the real check is
+   the endpoint ID below.
 3. Open that branch's compute and note its **endpoint ID** (it starts `ep-`). The pooled and the
    direct hostnames of this one compute differ only by `-pooler` after the endpoint ID; all four
    connection strings below must use this endpoint.

@@ -68,7 +68,10 @@ export const TARGETS = [
 
 const KNOWN_ROLES = new Set(TARGETS.map((t) => t.role));
 const POOLER_SUFFIX = '-pooler';
-const PRODUCTION_LIKE = /^(main|prod|production)$/i;
+// A speed bump, not the safeguard (that is --expect-endpoint): the label is the operator's own.
+// Any label containing "prod" (production, prod-snapshot, staging-prod, ...) and Neon's default
+// branch name "main" are refused; a dedicated development branch is never named either way.
+const PRODUCTION_LIKE = /^main$|prod/i;
 const ENDPOINT_ID = /^ep-[a-z0-9-]+$/;
 
 // src/lib/db/pool.ts (max 5 per instance) and src/lib/db/auth-pool.ts (AUTH_POOL_MAX = 3).

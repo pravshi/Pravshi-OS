@@ -340,12 +340,28 @@ describe('URL type and login expectations', () => {
     expect(
       validateEnvironment(neonEnv(), opts(['--expect-endpoint', EP])).reasons.join(' '),
     ).toContain('refusing to run without --non-production-branch');
-    for (const b of ['main', 'Production', 'prod']) {
+    for (const b of [
+      'main',
+      'MAIN',
+      'Production',
+      'prod',
+      'production-copy',
+      'prod-snapshot',
+      'staging-prod',
+      'my-PRODUCTION-test',
+    ]) {
       const c = validateEnvironment(
         neonEnv(),
         opts(['--non-production-branch', b, '--expect-endpoint', EP]),
       );
-      expect(c.reasons.join(' ')).toContain('looks like production');
+      expect(c.reasons.join(' '), b).toContain('looks like production');
+    }
+    for (const b of ['dev-probe', 'auth-probe-2026-10', 'mainline-dev']) {
+      const c = validateEnvironment(
+        neonEnv(),
+        opts(['--non-production-branch', b, '--expect-endpoint', EP]),
+      );
+      expect(c.ok, b).toBe(true);
     }
   });
 
