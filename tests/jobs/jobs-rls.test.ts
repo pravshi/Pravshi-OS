@@ -349,12 +349,13 @@ describe.skipIf(!ready)('jobs RLS: schedules table matrix', () => {
   });
 
   it('insert: own-org schedule on own workflow succeeds', async () => {
+    // created_by names the caller — required since 0076 (see the principal matrix below).
     const rows = await inContext<{ id: string }>(
       asUser,
       ctxFor(alice, orgA),
-      `insert into public.schedules (org_id, workflow_id, name, cron, timezone)
-       values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC') returning id`,
-      [orgA, wfA, `own-sched-${CODE}`],
+      `insert into public.schedules (org_id, workflow_id, name, cron, timezone, created_by)
+       values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC', $4::uuid) returning id`,
+      [orgA, wfA, `own-sched-${CODE}`, alice],
     );
     expect(rows).toHaveLength(1);
   });
@@ -512,5 +513,234 @@ describe.skipIf(!ready)('jobs RLS: dedup keys are org-scoped', () => {
     expect(a).toHaveLength(1);
     expect(b).toHaveLength(1);
     expect(a[0]!.id).not.toBe(b[0]!.id);
+  });
+});
+
+/**
+ * 0076 (V1 audit TI-09 / S-2): the person a job or schedule runs as is the caller.
+ * workflow_execute_as_job() runs a workflow_run job as jobs.enqueued_by and a
+ * scheduled_trigger job as its schedule's created_by, so naming anyone else would run a
+ * workflow with that person's permissions. Probed on app_user, the API's own role.
+ */
+describe.skipIf(!ready)('jobs RLS: the execution principal is the caller (0076)', () => {
+  let wfPm = ''; // org A workflow belonging to the project manager
+  let aliceSched = ''; // org A schedule created by alice
+  let adminSched = ''; // org A schedule created by the administrator
+
+  const scheduleBy = async (createdBy: string, workflowId: string, name: string) =>
+    (
+      await owner.query<{ id: string }>(
+        `insert into public.schedules (org_id, workflow_id, name, cron, timezone, created_by)
+         values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC', $4::uuid) returning id`,
+        [orgA, workflowId, name, createdBy],
+      )
+    ).rows[0]!.id;
+
+  const workflowOf = async (id: string) =>
+    (
+      await owner.query<{ workflow_id: string }>(
+        `select workflow_id from public.schedules where id = $1::uuid`,
+        [id],
+      )
+    ).rows[0]!.workflow_id;
+
+  beforeAll(async () => {
+    if (!ready) return;
+    wfPm = (await mkWorkflow(owner, orgA, { name: `wf-jobs-pm-${CODE}`, createdBy: pmP })).id;
+    aliceSched = await scheduleBy(alice, wfA, `alice-sched-${CODE}`);
+    adminSched = await scheduleBy(adminP, wfA, `admin-sched-${CODE}`);
+  });
+
+  it('jobs: an omitted enqueued_by is stamped with the caller', async () => {
+    const rows = await inContext<{ enqueued_by: string | null }>(
+      asUser,
+      ctxFor(alice, orgA),
+      `insert into public.jobs (org_id, type) values ($1::uuid, 'workflow_run')
+       returning enqueued_by`,
+      [orgA],
+    );
+    expect(rows[0]!.enqueued_by).toBe(alice);
+  });
+
+  it('jobs: an explicit enqueued_by naming the caller is accepted', async () => {
+    const rows = await inContext<{ enqueued_by: string | null }>(
+      asUser,
+      ctxFor(alice, orgA),
+      `insert into public.jobs (org_id, type, enqueued_by)
+       values ($1::uuid, 'workflow_run', $2::uuid) returning enqueued_by`,
+      [orgA, alice],
+    );
+    expect(rows[0]!.enqueued_by).toBe(alice);
+  });
+
+  it('jobs: enqueued_by naming another person of the org → 42501, nothing stored', async () => {
+    const key = `forged-admin-${CODE}`;
+    const code = await sqlstateOf(
+      inContext(
+        asUser,
+        ctxFor(alice, orgA),
+        `insert into public.jobs (org_id, type, enqueued_by, dedup_key)
+         values ($1::uuid, 'workflow_run', $2::uuid, $3)`,
+        [orgA, adminP, key],
+      ),
+    );
+    expect(code).toBe('42501');
+    const { rowCount } = await owner.query(`select 1 from public.jobs where dedup_key = $1`, [key]);
+    expect(rowCount).toBe(0);
+  });
+
+  it('jobs: a PROJECT_MANAGER cannot enqueue as the ADMIN → 42501', async () => {
+    const code = await sqlstateOf(
+      inContext(
+        asUser,
+        ctxFor(pmP, orgA),
+        `insert into public.jobs (org_id, type, enqueued_by)
+         values ($1::uuid, 'workflow_run', $2::uuid)`,
+        [orgA, adminP],
+      ),
+    );
+    expect(code).toBe('42501');
+  });
+
+  it('jobs: enqueued_by naming a person of another org → 42501', async () => {
+    const code = await sqlstateOf(
+      inContext(
+        asUser,
+        ctxFor(alice, orgA),
+        `insert into public.jobs (org_id, type, enqueued_by) values ($1::uuid, 'email', $2::uuid)`,
+        [orgA, bob],
+      ),
+    );
+    expect(code).toBe('42501');
+  });
+
+  it("jobs: no scheduled_trigger insert on app_user, even for the caller's own schedule", async () => {
+    for (const scheduleId of [aliceSched, adminSched]) {
+      const code = await sqlstateOf(
+        inContext(
+          asUser,
+          ctxFor(alice, orgA),
+          `insert into public.jobs (org_id, type, payload)
+           values ($1::uuid, 'scheduled_trigger',
+                   jsonb_build_object('scheduleId', $2::text, 'workflowId', $3::text))`,
+          [orgA, scheduleId, wfA],
+        ),
+      );
+      expect(code).toBe('42501');
+    }
+  });
+
+  it('jobs: app_owner (the scheduler-tick plane) still inserts a scheduled_trigger', async () => {
+    const id = await mkJob(owner, orgA, { type: 'scheduled_trigger', dedupKey: `tick-${CODE}` });
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('schedules: created_by naming the caller is accepted', async () => {
+    const rows = await inContext<{ created_by: string }>(
+      asUser,
+      ctxFor(alice, orgA),
+      `insert into public.schedules (org_id, workflow_id, name, cron, timezone, created_by)
+       values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC', $4::uuid) returning created_by`,
+      [orgA, wfA, `self-sched-${CODE}`, alice],
+    );
+    expect(rows[0]!.created_by).toBe(alice);
+  });
+
+  it('schedules: a NULL created_by → 42501 (a schedule with no principal can never run)', async () => {
+    const code = await sqlstateOf(
+      inContext(
+        asUser,
+        ctxFor(alice, orgA),
+        `insert into public.schedules (org_id, workflow_id, name, cron, timezone)
+         values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC')`,
+        [orgA, wfA, `null-creator-${CODE}`],
+      ),
+    );
+    expect(code).toBe('42501');
+  });
+
+  it('schedules: created_by naming another person → 42501, nothing stored', async () => {
+    const name = `forged-creator-${CODE}`;
+    const attempts: Array<[string, string]> = [
+      [alice, adminP],
+      [pmP, adminP],
+      [alice, bob],
+    ];
+    for (const [caller, forged] of attempts) {
+      const code = await sqlstateOf(
+        inContext(
+          asUser,
+          ctxFor(caller, orgA),
+          `insert into public.schedules (org_id, workflow_id, name, cron, timezone, created_by)
+           values ($1::uuid, $2::uuid, $3, '0 9 * * *', 'UTC', $4::uuid)`,
+          [orgA, wfA, name, forged],
+        ),
+      );
+      expect(code, `${caller} as ${forged}`).toBe('42501');
+    }
+    const { rowCount } = await owner.query(`select 1 from public.schedules where name = $1`, [
+      name,
+    ]);
+    expect(rowCount).toBe(0);
+  });
+
+  it("schedules: only the creator can repoint a schedule's workflow → 42501, unchanged", async () => {
+    // The PROJECT_MANAGER pointing the ADMIN's schedule at their own workflow is the
+    // escalation this closes; alice (jobs.create too) is refused the same way.
+    for (const caller of [pmP, alice]) {
+      const code = await sqlstateOf(
+        inContext(
+          asUser,
+          ctxFor(caller, orgA),
+          `update public.schedules set workflow_id = $1::uuid where id = $2::uuid`,
+          [wfPm, adminSched],
+        ),
+      );
+      expect(code).toBe('42501');
+    }
+    expect(await workflowOf(adminSched)).toBe(wfA);
+  });
+
+  it('schedules: a schedule with no creator cannot be repointed on app_user → 42501', async () => {
+    const code = await sqlstateOf(
+      inContext(
+        asUser,
+        ctxFor(alice, orgA),
+        `update public.schedules set workflow_id = $1::uuid where id = $2::uuid`,
+        [wfPm, schedA],
+      ),
+    );
+    expect(code).toBe('42501');
+    expect(await workflowOf(schedA)).toBe(wfA);
+  });
+
+  it('schedules: the creator can repoint their own schedule within the org', async () => {
+    const rows = await inContext<{ workflow_id: string }>(
+      asUser,
+      ctxFor(alice, orgA),
+      `update public.schedules set workflow_id = $1::uuid where id = $2::uuid
+       returning workflow_id`,
+      [wfPm, aliceSched],
+    );
+    expect(rows[0]!.workflow_id).toBe(wfPm);
+  });
+
+  it("schedules: other edits to someone else's schedule keep the 0045 rule (jobs.create)", async () => {
+    const rows = await inContext<{ id: string }>(
+      asUser,
+      ctxFor(pmP, orgA),
+      `update public.schedules set name = $1 where id = $2::uuid returning id`,
+      [`renamed-by-pm-${CODE}`, adminSched],
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('schedules: a session with no person identity (app_owner) can still repoint', async () => {
+    const { rows } = await owner.query<{ workflow_id: string }>(
+      `update public.schedules set workflow_id = $1::uuid where id = $2::uuid
+       returning workflow_id`,
+      [wfPm, adminSched],
+    );
+    expect(rows[0]!.workflow_id).toBe(wfPm);
   });
 });
