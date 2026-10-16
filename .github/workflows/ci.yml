@@ -180,6 +180,28 @@ jobs:
           alter role app_auth password :'auth_pw';
           SQL
 
+      # tests/serial/migration-runner-history.test.ts runs the real migration runner against
+      # databases of its own: it builds partial histories and corrupts them on purpose, so it
+      # must never touch neondb's. Two empty databases on this same throwaway server, each
+      # provisioned with the same roles.sql, owned like neondb and gone with the job. The test
+      # receives owner URLs for these two only, and refuses any database that is not empty.
+      - name: Provision the migration-runner test databases
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: neondb
+        run: |
+          for db in pravshi_runner_a pravshi_runner_b; do
+            psql -v ON_ERROR_STOP=1 -q -c "create database $db"
+            psql -v ON_ERROR_STOP=1 -q -d "$db" -f scripts/db/roles.sql
+          done
+          {
+            echo "DATABASE_URL_MIGRATION_TEST_A=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_runner_a"
+            echo "DATABASE_URL_MIGRATION_TEST_B=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_runner_b"
+          } >> "$GITHUB_ENV"
+
       # Proves the plumbing before anything depends on it: through the proxy, each URL
       # must log in as its own role, and the runtime role must be unable to bypass RLS.
       # If the proxy ever connected as a superuser instead, this stops the run here.
