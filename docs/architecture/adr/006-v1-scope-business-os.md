@@ -18,8 +18,7 @@ Two documents defined two different V1 releases:
   foundation and the integrations platform, on the same identity, permission and row-level
   security foundation. None of the HR modules was built.
 
-No recorded decision reconciled the two, so "V1 complete" could not be judged (V1 completion audit,
-2026-10-16, finding GOV-01).
+No recorded decision reconciled the two, so whether V1 was complete could not be judged.
 
 ## Decision
 
@@ -34,8 +33,10 @@ No recorded decision reconciled the two, so "V1 complete" could not be judged (V
    not part of V1's acceptance criteria. The blueprint and build plan are preserved unchanged
    apart from a pointer to this record; their HR modules (people directory and employment
    details, HR documents and private storage, policies and acknowledgement, recruitment,
-   onboarding and offboarding, the Sales-Sheet migration, and the other build-plan items not
-   built) will need their own specification and approval when that product is taken up.
+   onboarding and offboarding) will need their own specification and approval when that product
+   is taken up. Build-plan items outside the HR scope that were not built (for example the
+   role-specific dashboards and the task-view extras) are not V1 acceptance criteria either; they
+   may be prioritised as Business OS work.
 3. **The blueprint's architecture remains binding.** Its locked decisions (Neon PostgreSQL, Better
    Auth, Cloudflare R2 for any future file storage, `app_user` without `BYPASSRLS`, FORCE row-level
    security everywhere, transaction-local identity, a single authorized data path, fail-closed
@@ -43,8 +44,7 @@ No recorded decision reconciled the two, so "V1 complete" could not be judged (V
    security model, and its testing strategy apply to V1. Only §32's scope list and the build plan's
    phase list are superseded for V1.
 4. **Nothing already built is removed** because of this decision, and **V1 is not declared complete**
-   by it. Completion is judged requirement by requirement against the V1 completion matrix, with
-   evidence.
+   by it. Completion is judged requirement by requirement, with evidence.
 
 ## Not decided here (open founder decisions)
 
@@ -58,12 +58,15 @@ each is decided and recorded:
 - **GOV-04** — whether tenant tiers such as free trial and paid exist in V1, and how they differ.
 - **DB-14** — which Neon projects and branches are development, staging and production, and the
   plan for moving to the new database and retiring the old one.
+- **Sales Sheet import** — whether importing the existing sales spreadsheet into the CRM, and
+  setting the sheet read-only (the build plan's Phase 3 migration), is part of the V1 launch. It is
+  a CRM data import, not part of the deferred HR scope.
 
 ## Consequences
 
 - `README.md` describes V1 as the Business OS and points here; the blueprint and build plan carry a
   header note pointing here.
-- The V1 completion matrix treats every built feature as in scope and every HR-blueprint item as
-  deferred, not missing.
+- V1 completion treats every built feature as in scope and every HR-blueprint item as deferred,
+  not missing.
 - A future HR product starts from the preserved blueprint and build plan, re-specified against the
   system as it then exists.

@@ -167,8 +167,9 @@ Database migrations: 0063–0075 (production still pending — see the
 - V1 scope recorded ([ADR-006](docs/architecture/adr/006-v1-scope-business-os.md)): V1 is the
   multi-tenant Business OS that was built. The 2026-09-06 HR and operations blueprint is preserved
   as a deferred, separate future product scope and is no longer a V1 acceptance criterion; its
-  architecture remains binding. Organization membership, provisioning, tenant tiers and the
-  environment topology remain open decisions. Documentation only — no behaviour changes.
+  architecture remains binding. Organization membership, provisioning, tenant tiers, the
+  environment topology and the Sales Sheet import remain open decisions. Documentation only — no
+  behaviour changes.
 - The production migration runbook targets the current journal (0064), and a
   guard test fails CI whenever a migration lands without the runbook following.
 - Deployment, environment and development documentation describe the current
