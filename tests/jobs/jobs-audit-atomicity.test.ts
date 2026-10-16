@@ -85,13 +85,38 @@ describe.skipIf(!DB_READY)('job/schedule audit is in the mutation transaction (l
       )
     ).rows[0]!.id;
 
+  /**
+   * Jobs are seeded due a day from now. Other suites run the worker plane's live retry sweep
+   * (jobs_sweep_retryable: failed AND next_run_at <= now()) and live claims (jobs_claim_next:
+   * pending AND next_run_at <= now(), any type) on this shared database; a job due now could be
+   * moved by them between this test's own steps — a failed job swept to pending was observed.
+   * Not due, the job is outside both, and only this test changes it.
+   */
   const seedJob = async (status: 'pending' | 'failed') =>
     (
       await owner.query<{ id: string }>(
-        `insert into public.jobs (org_id, type, status) values ($1, 'email', $2) returning id`,
+        `insert into public.jobs (org_id, type, status, next_run_at)
+         values ($1, 'email', $2, now() + interval '1 day') returning id`,
         [orgId, status],
       )
     ).rows[0]!.id;
+
+  /** The job's mutable state, to prove a refused mutation changed none of it. */
+  const jobRow = async (id: string) =>
+    (
+      await owner.query<{
+        status: string;
+        attempts: number;
+        not_due: boolean;
+        next_run_at: string;
+        updated_at: string;
+      }>(
+        `select status, attempts, next_run_at > now() as not_due,
+                next_run_at::text, updated_at::text
+           from public.jobs where id = $1`,
+        [id],
+      )
+    ).rows[0]!;
 
   const jobStatus = async (id: string) =>
     (await owner.query<{ status: string }>(`select status from public.jobs where id = $1`, [id]))
@@ -143,9 +168,11 @@ describe.skipIf(!DB_READY)('job/schedule audit is in the mutation transaction (l
   it('cancelJob: a failed audit leaves the job pending', async () => {
     const { cancelJob } = await import('@/lib/jobs/queue');
     const id = await seedJob('pending');
+    const seeded = await jobRow(id);
+    expect(seeded.not_due).toBe(true); // outside live claims (see seedJob)
 
     await expect(cancelJob(broken, id)).rejects.toThrow();
-    expect(await jobStatus(id)).toBe('pending');
+    expect(await jobRow(id)).toEqual(seeded); // nothing about the job changed
     expect(await entries('job.cancelled', id)).toHaveLength(0);
 
     await cancelJob(auth, id);
@@ -158,13 +185,18 @@ describe.skipIf(!DB_READY)('job/schedule audit is in the mutation transaction (l
   it('retryJob: a failed audit leaves the job failed', async () => {
     const { retryJob } = await import('@/lib/jobs/queue');
     const id = await seedJob('failed');
+    const seeded = await jobRow(id);
+    expect(seeded.not_due).toBe(true); // outside the live retry sweep (see seedJob)
 
     await expect(retryJob(broken, id)).rejects.toThrow();
-    expect(await jobStatus(id)).toBe('failed');
+    expect(await jobRow(id)).toEqual(seeded); // still failed; nothing about the job changed
     expect(await entries('job.retried', id)).toHaveLength(0);
 
-    await retryJob(auth, id);
-    expect(await jobStatus(id)).toBe('pending');
+    // A successful retry makes the job pending AND due at once, so a live claim may take it
+    // immediately; the state the retry committed is read from its own result, not re-read.
+    const replayed = await retryJob(auth, id);
+    expect(replayed.status).toBe('pending');
+    expect(replayed.attempts).toBe(0);
     expect(await entries('job.retried', id)).toHaveLength(1);
   });
 });
