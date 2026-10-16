@@ -44,12 +44,15 @@ Database migrations: 0063–0075 (production still pending — see the
 
 ### Fixed
 
-- Migrations 0070 and 0072 no longer abort on Neon, and 0073's verification no longer fails
-  there. On PostgreSQL 16+ a non-superuser that creates a role is automatically granted ADMIN
-  on it; Neon's branch owner, which runs `scripts/db/roles.sql`, is such a role, cannot revoke
-  that grant, and so was always a member of `app_worker` and `app_auth` — which those checks
-  rejected (`app_worker must share no role membership: neondb_owner -> app_worker`). CI never
-  showed it because a superuser creates the roles there. The rule is now: the role is a member
+- Migrations 0070 and 0072, and 0073's verification, rejected the role membership that
+  Neon-style role creation produces. On PostgreSQL 16+ a non-superuser that creates a role is
+  automatically granted ADMIN on it and cannot revoke that grant itself; Neon's branch owner,
+  which runs `scripts/db/roles.sql`, is not a superuser, so it becomes a member of `app_worker`
+  and `app_auth`, and the previous checks stopped on that membership
+  (`app_worker must share no role membership: neondb_owner -> app_worker`). The failure and the
+  fix were reproduced on a local PostgreSQL 18.6 simulation of Neon's non-superuser branch owner
+  and have not yet been run on Neon. CI never showed it because a superuser creates the roles
+  there. The rule is now: the role is a member
   of no role at all (stricter than before, which only looked at application roles), and no role
   is a member of it except the database owner, and only when the owner is not an application
   role. The three files were corrected in place, and the production migration runbook's step-3

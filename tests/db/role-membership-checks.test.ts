@@ -15,8 +15,10 @@ import { Pool } from '@neondatabase/serverless';
  * The exception exists because PostgreSQL 16+ automatically grants a non-superuser that creates
  * a role ADMIN on it, and Neon's branch owner — which runs scripts/db/roles.sql — is not a
  * superuser. That grant cannot be revoked by the owner (its grantor is the platform superuser),
- * so a rule that counted every membership made 0070 abort on every Neon branch. CI could not
- * show it: there a superuser creates the roles, and no membership row exists at all.
+ * so wherever roles are created that way, a rule that counted every membership would make 0070
+ * abort — reproduced locally on a PostgreSQL 18.6 simulation of Neon's non-superuser branch
+ * owner; not yet run on Neon. CI could not show it: there a superuser creates the roles, and no
+ * membership row exists at all.
  *
  * CI still cannot create that grant (its roles are no superuser), so the live half below
  * evaluates the EXACT predicate text of each migration and runbook query against synthetic
