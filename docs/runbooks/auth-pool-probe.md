@@ -149,6 +149,17 @@ evidence for this gate.
   re-run `roles.sql` on that branch; never "fix" it on production.
 - `membership_ok: false` (runtime roles) — the role is a member of another role, so it would
   inherit privileges. Stop and investigate.
+- `members_ok: false` (runtime roles) — another role is a member of it (`unexpected_members` > 0),
+  so that role could `SET ROLE` into it. The only membership allowed is the database owner's,
+  and only while the owner is not an application role: on PostgreSQL 16+ the non-superuser
+  branch owner that ran `roles.sql` is automatically an ADMIN member of every role it created.
+  Stop and investigate.
+
+The two membership fields apply the rule of migrations 0070, 0072 and 0073 to `app_user`,
+`app_worker` and `app_auth`; the production migration runbook's step-3 queries check the same
+rule by hand for `app_worker` and `app_auth`, and a test keeps the probe's exemption identical
+to the migrations'. A run reports `identity_status: PASS` only when both directions hold for all
+three roles.
 - `error` — the login failed outright: `28P01` wrong password, `28000` no such role or no access,
   `3D000` no such database, `ENOTFOUND` / `ECONNREFUSED` / `TIMEOUT` network or endpoint
   suspended-and-unreachable.

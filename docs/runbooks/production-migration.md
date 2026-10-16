@@ -311,7 +311,10 @@ All checks must pass before the freeze is lifted.
    non-superuser that creates a role is automatically granted ADMIN on it, and Neon's branch
    owner — which runs `roles.sql` — is not a superuser (`scripts/db/run.mjs` also adds SET and
    INHERIT). The owner cannot revoke that grant and already administers the branch, so it
-   widens nothing; every other membership still fails the migration and this check.
+   widens nothing; every other membership still fails the migration and this check. The pooler
+   probe (`scripts/ops/auth-pool-probe.mjs`) applies the same rule, in both directions, to
+   `app_user`, `app_worker` and `app_auth` through their pooled logins (`identity.<VARIABLE>`
+   `membership_ok` and `members_ok`; procedure `docs/runbooks/auth-pool-probe.md`).
 
    Then, from the worker host, through the **pooled** endpoint it will really use
    (`DATABASE_URL_WORKER`), `select session_user` must answer `app_worker` — the worker

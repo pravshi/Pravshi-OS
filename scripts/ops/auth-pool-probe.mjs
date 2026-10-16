@@ -8,8 +8,10 @@
  * What it measures, for the run record (docs/runbooks/auth-pool-probe-record.md):
  *   1. identity — each URL logs in as its own role: through each POOLED URL `session_user` is
  *      app_user, app_auth and app_worker; through the DIRECT URL it is app_owner. Every role has
- *      no SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB, and the three runtime roles are members of
- *      no other role. Any mismatch fails the run and the load phases are skipped;
+ *      no SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB, and the three runtime roles satisfy the
+ *      membership rule of migrations 0070/0072/0073 in both directions: a member of no role, and no
+ *      member except the database owner (when the owner is not an application role). Any
+ *      mismatch fails the run and the load phases are skipped;
  *   2. the compute's ceiling — max_connections and superuser_reserved_connections, read on the
  *      DIRECT owner connection;
  *   3. load — for k simulated web instances (default 1, 3, 10), k × business-per-instance
@@ -21,8 +23,8 @@
  *   It does NOT measure compute hours or auto-suspend: observing the compute would keep it
  *   awake. Those are read in the Neon console afterwards.
  *
- * Every statement it sends is read-only: session_user / pg_roles / pg_auth_members /
- * current_setting / pg_stat_activity reads, and empty transactions around pg_sleep. It creates,
+ * Every statement it sends is read-only: session_user / pg_roles / pg_auth_members / pg_database
+ * / current_setting / pg_stat_activity reads, and empty transactions around pg_sleep. It creates,
  * changes and deletes nothing.
  *
  * Usage (environment only — nothing is read from files; credentials, usernames, query parameters
@@ -332,10 +334,25 @@ export function errorCode(e) {
 
 // ─────────────────────────────────────────────────────────────── probe
 
+/**
+ * The membership rule of migrations 0070, 0072 and 0073 (and the production runbook's step 3),
+ * applied here to every runtime login: it is a member of no role, and no role is a member of it
+ * EXCEPT the database owner, and only while the owner is not itself an application role. (On
+ * PostgreSQL 16+ a non-superuser that creates a role — Neon's branch owner running roles.sql — is
+ * granted ADMIN on it automatically.) This fragment is the "unexpected member" half, written over
+ * `m` (the pg_auth_members row) and `mr` (the member's pg_roles row); the tests check it against
+ * 0070's predicate and evaluate it in Postgres.
+ */
+export const UNEXPECTED_MEMBER = `(m.member <> (select datdba from pg_database where datname = current_database())
+              or mr.rolname like 'app\\_%')`;
+
 const IDENTITY_SQL = `select session_user::text as role,
        r.rolsuper as superuser, r.rolbypassrls as bypass_rls,
        r.rolcreaterole as create_role, r.rolcreatedb as create_db,
-       (select count(*)::int from pg_auth_members m where m.member = r.oid) as member_of
+       (select count(*)::int from pg_auth_members m where m.member = r.oid) as member_of,
+       (select count(*)::int from pg_auth_members m join pg_roles mr on mr.oid = m.member
+         where m.roleid = r.oid
+           and ${UNEXPECTED_MEMBER}) as unexpected_members
   from pg_roles r where r.rolname = session_user`;
 
 const CEILING_SQL = `select current_setting('max_connections')::int as max_connections,
@@ -383,11 +400,16 @@ async function identity(env, Pool) {
         };
         entry.attributes_ok = Object.values(entry.attributes).every((v) => v === false);
         if (t.runtime) {
+          // Both directions of the membership rule; a missing count is NaN and fails closed.
           entry.member_of_other_roles = Number(row.member_of);
           entry.membership_ok = entry.member_of_other_roles === 0;
+          entry.unexpected_members = Number(row.unexpected_members);
+          entry.members_ok = entry.unexpected_members === 0;
         }
         entry.ok =
-          entry.login_ok && entry.attributes_ok && (t.runtime ? entry.membership_ok : true);
+          entry.login_ok &&
+          entry.attributes_ok &&
+          (t.runtime ? entry.membership_ok && entry.members_ok : true);
       }
     } catch (e) {
       entry.error = errorCode(e);

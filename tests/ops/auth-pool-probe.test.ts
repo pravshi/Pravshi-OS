@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { Pool } from '@neondatabase/serverless';
 
 import {
   EXIT,
+  UNEXPECTED_MEMBER,
   describeUrl,
   errorCode,
   main,
@@ -58,6 +62,8 @@ type RoleRow = {
   create_role: boolean;
   create_db: boolean;
   member_of: number;
+  /** Members other than the (non-application) database owner — the second direction. */
+  unexpected_members?: number;
 };
 type Behaviour = {
   /** The role a connection string authenticates as (default: its username). */
@@ -91,6 +97,9 @@ function fakePool(b: Behaviour = {}) {
           create_role: false,
           create_db: false,
           member_of: 0,
+          // The Neon-style state: the database owner's membership is the only one, and it is
+          // not counted, so a correctly provisioned role reports 0.
+          unexpected_members: 0,
           ...b.roleRow?.(this.role),
         };
         return { rows: [row] };
@@ -507,6 +516,55 @@ describe('role verification (read-only)', () => {
     });
   });
 
+  for (const [name, role] of [
+    ['DATABASE_URL', 'app_user'],
+    ['DATABASE_URL_AUTH', 'app_auth'],
+    ['DATABASE_URL_WORKER', 'app_worker'],
+  ] as const) {
+    it(`${role}: a role other than the non-application database owner as its member fails identity`, async () => {
+      const r = await run([...ARGS, ...FAST], neonEnv(), {
+        roleRow: (rr) => (rr === role ? { unexpected_members: 1 } : {}),
+      });
+      expect(r.code).toBe(EXIT.FAILED);
+      expect(r.json.status).toBe('IDENTITY_FAILED');
+      expect(r.json.identity_status).toBe('FAIL');
+      expect(r.json.load_status).toBe('SKIPPED');
+      expect(r.json.neon_pooler_verified).toBe(false);
+      expect(r.json.identity[name]).toMatchObject({
+        ok: false,
+        login_ok: true,
+        attributes_ok: true,
+        membership_ok: true,
+        unexpected_members: 1,
+        members_ok: false,
+      });
+    });
+  }
+
+  it('the owner-only state (no unexpected member, member of nothing) passes both directions', async () => {
+    const r = await run([...ARGS, ...FAST], neonEnv());
+    for (const name of ['DATABASE_URL', 'DATABASE_URL_AUTH', 'DATABASE_URL_WORKER']) {
+      expect(r.json.identity[name]).toMatchObject({
+        ok: true,
+        member_of_other_roles: 0,
+        membership_ok: true,
+        unexpected_members: 0,
+        members_ok: true,
+      });
+    }
+    // The migration login is not a runtime role: the membership rule is not applied to it.
+    expect(r.json.identity.DATABASE_URL_MIGRATE.members_ok).toBeUndefined();
+    expect(r.json.status).toBe('NEON_VERIFIED');
+  });
+
+  it('a missing membership count fails closed instead of passing', async () => {
+    const r = await run([...ARGS, ...FAST], neonEnv(), {
+      roleRow: (rr) => (rr === 'app_worker' ? { unexpected_members: undefined } : {}),
+    });
+    expect(r.json.status).toBe('IDENTITY_FAILED');
+    expect(r.json.identity.DATABASE_URL_WORKER.members_ok).toBe(false);
+  });
+
   it('a login that cannot connect fails identity with a sanitized code only', async () => {
     const leaky = Object.assign(new Error(`password authentication failed: ${PASSWORD}`), {
       code: '28P01',
@@ -607,5 +665,68 @@ describe('load results', () => {
     const loadPools = r.created.filter((p) => p.max > 1);
     expect(loadPools.filter((p) => p.role === 'app_auth').map((p) => p.max)).toEqual([2, 2, 2]);
     expect(loadPools.filter((p) => p.role === 'app_user').map((p) => p.max)).toEqual([4, 4, 4]);
+  });
+});
+
+// ── the probe's membership rule is the migrations' rule ─────────────────────────────
+
+/**
+ * The probe states the "unexpected member" half of the rule over its own aliases (`m` for the
+ * pg_auth_members row, `mr` for the member's role); migrations 0070, 0072 and 0073 state it over
+ * `am` and `m`. With the aliases mapped, the probe's exemption must EQUAL the parenthesised
+ * exemption each migration states (whitespace aside) — not merely occur inside it, so dropping
+ * a clause on either side fails here.
+ */
+const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+const asMigrationText = (s: string) =>
+  squash(s.replace(/\bm\.member\b/g, 'am.member').replace(/\bmr\.rolname\b/g, 'm.rolname'));
+
+/** The balanced-parenthesis group that opens at `(am.member <>` in a migration's text. */
+function migrationExemption(sql: string): string | undefined {
+  const start = sql.indexOf('(am.member <>');
+  if (start < 0) return undefined;
+  let depth = 0;
+  for (let i = start; i < sql.length; i += 1) {
+    if (sql[i] === '(') depth += 1;
+    else if (sql[i] === ')' && (depth -= 1) === 0) return sql.slice(start, i + 1);
+  }
+  return undefined;
+}
+
+describe('membership rule: the probe and the migrations agree', () => {
+  for (const file of [
+    '0070_app_worker_role.sql',
+    '0072_auth_role_expand.sql',
+    '0073_auth_role_contract.sql',
+  ]) {
+    it(`${file} states exactly the probe's exemption`, () => {
+      const migration = squash(readFileSync(join(process.cwd(), 'drizzle', file), 'utf8'));
+      expect(migrationExemption(migration)).toBe(asMigrationText(UNEXPECTED_MEMBER));
+    });
+  }
+});
+
+const HAS_DB = Boolean(process.env.DATABASE_URL_MIGRATE);
+
+describe.skipIf(!HAS_DB)('membership rule: the probe fragment evaluated in Postgres', () => {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
+  afterAll(() => pool.end());
+
+  it('counts every member except the non-application database owner', async () => {
+    const OWNER = '(select datdba from pg_database where datname = current_database())';
+    const r = await pool.query<{ id: number }>(
+      `with cases(id, member_oid, member_name) as (values
+         (1, ${OWNER}, 'neondb_owner'),  -- the owner's automatic ADMIN grant: allowed
+         (2, 0::oid,   'app_user'),      -- an application role could SET ROLE: rejected
+         (3, 0::oid,   'someone_else'),  -- any other role could SET ROLE: rejected
+         (4, ${OWNER}, 'app_owner')      -- an application role owning the database: rejected
+       )
+       select c.id from cases c
+       cross join lateral (select c.member_oid as member) m
+       cross join lateral (select c.member_name::name as rolname) mr
+       where ${UNEXPECTED_MEMBER}
+       order by c.id`,
+    );
+    expect(r.rows.map((x) => Number(x.id))).toEqual([2, 3, 4]);
   });
 });
