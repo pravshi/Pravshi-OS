@@ -569,6 +569,14 @@
       "tag": "0075_audit_partition_lock_order",
       "breakpoints": true,
       "hash": "b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0"
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791591728057,
+      "tag": "0076_job_schedule_principal_binding",
+      "breakpoints": true,
+      "hash": "3a2ebbfbaaee84a595d7e8cad516b24ef7527c2dd645b386a8a457e93c925de6"
     }
   ]
 }

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0075 (production still pending — see the
+Database migrations: 0063–0076 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -100,6 +100,17 @@ Database migrations: 0063–0075 (production still pending — see the
 
 ### Security
 
+- A job or schedule can only run as the person who created it, enforced in the database
+  (migration 0076). A workflow job runs with the permissions of the person who enqueued it and a
+  scheduled run with those of the schedule's creator; at the SQL level, a member allowed to
+  create jobs could previously name someone else in either column, point another member's
+  schedule at a workflow of their own, or queue a scheduled run directly — each running a
+  workflow with another person's permissions. The application never did any of these. The
+  database now refuses all four.
+- Changes to jobs and schedules (schedule create, edit and delete; job cancel and retry) write
+  their audit entry in the same transaction as the change. Before, the entry was written after
+  the change had been saved, and a failure only produced a log line, leaving the change
+  unaudited. Now a failed audit write cancels the change.
 - A database failure during sign-in or a session check no longer writes the session token to
   the server log. Database errors carry every query parameter, and the authentication library
   printed them whole; the session's token was one of them. Authentication now logs errors as

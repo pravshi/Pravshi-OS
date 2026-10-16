@@ -30,10 +30,12 @@ describe.skipIf(!DB_READY)('schedule reactivation respects the minimum interval 
     const personId = await mkPerson(owner, orgId, `React ${RUN}`);
     await mkRoleFor(owner, orgId, personId, `react_${RUN}`, ['jobs.view', 'jobs.create']);
     workflowId = (await mkWorkflow(owner, orgId)).id;
-    // The store takes the caller's identity from auth.ctx; requestId is read on refusals.
+    // The store takes the caller's identity from auth.ctx; requestId is read on refusals,
+    // and meta by the audit entry a successful update writes in the update's transaction.
     auth = {
       ctx: { personId, orgId, aal: 'aal1' },
       requestId: '00000000-0000-4000-8000-0000000000aa',
+      meta: { requestId: '00000000-0000-4000-8000-0000000000aa', ip: null, userAgent: null },
     } as unknown as Authorization;
   }, 60_000);
 

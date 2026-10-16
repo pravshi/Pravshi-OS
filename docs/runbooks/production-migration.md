@@ -60,7 +60,7 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 75 74 0075_audit_partition_lock_order
+      # expected at the current release: 76 75 0076_job_schedule_principal_binding
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -97,16 +97,16 @@ Do not use any other tool, workflow, or hand-written SQL to apply migrations.
 
 ## The chain as of writing
 
-The repo journal holds 75 entries (idx 0–74). Per project records, production
+The repo journal holds 76 entries (idx 0–75). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-30 migrations **idx 45–74 (0045–0075)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4574). Step 0 verifies this;
+31 migrations **idx 45–75 (0045–0076)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4575). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the runner selects what to
 apply by `when > max(created_at)`. In the pending segment, `when` values are
 strictly increasing and all greater than idx 44's `when` (1791111413392), so
-the runner will select exactly idx 45–74 — no more, no fewer.
+the runner will select exactly idx 45–75 — no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
 
@@ -143,7 +143,7 @@ hashes of idx 0…K−1 exactly. For the state project records describe, K = 45
 rows: count `45`, max_created_at `1791111413392`, last hash
 `44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4`
 (idx 44, `0044_workflow_engine`). Any other clean prefix (a different K) is
-also workable — the pending chain is then idx K…74 — but record the
+also workable — the pending chain is then idx K…75 — but record the
 difference prominently; it means the 2026-10-06 run (or another act) applied
 more than the records show.
 
@@ -203,21 +203,21 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 75, last applied created_at: 1791111413392
+   journal entries: 76, last applied created_at: 1791111413392
    applying idx 45 0045_automation_jobs (… statements)
    …
-   applying idx 74 0075_audit_partition_lock_order (… statements)
-   done: applied 30, total 75
+   applying idx 75 0076_job_schedule_principal_binding (… statements)
+   done: applied 31, total 76
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `75`, max_created_at `1791590728057`, and the
-     ordered hash list equal to the file-byte hashes of idx 0…74.
+     full repo state: count `76`, max_created_at `1791591728057`, and the
+     ordered hash list equal to the file-byte hashes of idx 0…75.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
-     security hardening, project members, task reminders, db maintenance, worker next-due, admin audit) run green against the branch, or in CI's equivalent
+     security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity)) run green against the branch, or in CI's equivalent
      from-empty shape. Note what this rehearsal proves that CI cannot: the
      **upgrade path** — the chain applied over lived-in 0044 data, not over
      an empty database.
@@ -271,8 +271,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `75`, max_created_at `1791590728057`, ordered hash list equal to the
-   file-byte hashes of idx 0…74 (same comparison method as Step 0).
+   count `76`, max_created_at `1791591728057`, ordered hash list equal to the
+   file-byte hashes of idx 0…75 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -406,7 +406,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–74)
+## Appendix A — The pending chain (idx 45–75)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -461,13 +461,14 @@ re-apply.
 | 72  | `0073_auth_role_contract` | 1791588728057 | `f1ab5b224b5051d9b278d46f915fbc87cc336a64b8a6bad68ac2f483beb3b9a4` |
 | 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
 | 74  | `0075_audit_partition_lock_order` | 1791590728057 | `b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0` |
+| 75  | `0076_job_schedule_principal_binding` | 1791591728057 | `3a2ebbfbaaee84a595d7e8cad516b24ef7527c2dd645b386a8a457e93c925de6` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `75`,
-max_created_at `1791590728057`.
+Final expected state after a complete run: count `76`,
+max_created_at `1791591728057`.
 
 ## Appendix B — Run record template
 
@@ -498,7 +499,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 75 / max 1791590728057 / hashes): yes/no
+  - journal == repo (count 76 / max 1791591728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

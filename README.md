@@ -27,7 +27,7 @@ security hardening, and performance/reliability hardening.
 | Performance & reliability (Phase 12)  | Done — migration 0062                              |
 | Production readiness (Phase 13)       | Docs, runbooks and release identity in this change |
 | **Vercel deployment and DNS**         | **Not performed — founder gates HG-1, HG-5**       |
-| **Production migrations (0045–0075)** | **Not applied — founder gate HG-2**                |
+| **Production migrations (0045–0076)** | **Not applied — founder gate HG-2**                |
 | **First SUPER_ADMIN bootstrap**       | **Not performed — founder gate HG-9**              |
 | **Cloudflare R2 buckets**             | **Deferred — no file storage in V1 (ADR-006)**     |
 | **Sentry**                            | **Not configured — no DSN issued (gate HG-6)**     |

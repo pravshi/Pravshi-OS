@@ -62,7 +62,7 @@ confirmed above, never production.
 
 The probe's checks need no schema, but the gate this procedure closes is "the first
 non-production branch that receives 0072/0073". On that branch, apply the migrations through the
-latest (0075) with the direct `app_owner` connection:
+latest (0076) with the direct `app_owner` connection:
 `node --env-file=<owner env file> scripts/migrate-ws.mjs` (the file holds only
 `DATABASE_URL_MIGRATE`; same handling as step 5). Then run, as the owner, the read-only role and
 grant checks of the production migration runbook, step 3 ("Worker role", "Authentication role"),
