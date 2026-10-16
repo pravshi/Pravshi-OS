@@ -414,11 +414,16 @@ Regenerate them with the command in Step 0 rather than trusting this table
 after any repo change.
 
 **0070, 0072 and 0073 were corrected in place on 2026-10-15** (the role-membership rule — see
-Step 3, "Membership rule"), before any persistent database recorded them: CI has migrated its
-own throwaway Postgres since 2026-10-09 (0070 was first committed on 2026-10-12), production's
-records end at idx 44, and the development database's journal ended near idx 63 when it was
-checked read-only. A database that recorded the earlier bytes of those three files would show a
-hash mismatch on exactly those rows in Step 0: that is a STOP condition — escalate, do not
+Step 3, "Membership rule"). No persistent database is known to have recorded the original
+migration files based on the available evidence. The previous development database has not been
+checked. If that database is reused, follow Step 0 and stop if its migration hashes or history do
+not match the expected state.
+
+The evidence, and its limits: CI has migrated only its own throwaway Postgres since 2026-10-09
+(0070 was first committed on 2026-10-12); project records place production at idx 44, which is
+unverified until Step 0; and the current development database's journal ended near idx 63 when
+it was checked read-only. Any database that recorded the earlier bytes of those three files would
+show a hash mismatch on exactly those rows in Step 0: that is a STOP condition — escalate, do not
 re-apply.
 
 | idx | tag                                    | `when`        | sha256 (file bytes)                                                |
