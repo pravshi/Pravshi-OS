@@ -17,7 +17,9 @@ begin
   end if;
   -- The background worker's own login (migration 0070). It is granted EXECUTE on the
   -- worker-plane functions by that migration and nothing else: no table privileges, no
-  -- RLS policy, no membership in or of any other role. Its connection string
+  -- RLS policy, a member of no role, and no member but the branch owner running this file
+  -- (PG16+ grants a non-superuser creator ADMIN on the role; 0070 allows exactly that and
+  -- nothing else). Its connection string
   -- (DATABASE_URL_WORKER) belongs on the worker host only — never Vercel.
   if not exists (select 1 from pg_roles where rolname = 'app_worker') then
     create role app_worker login nobypassrls;
@@ -25,8 +27,9 @@ begin
   -- The authentication plane's own login (migrations 0072/0073). Better Auth and the
   -- pre-login functions run on it; it holds the credential store (the auth schema's
   -- tables) and EXECUTE on the pre-login and administrator-session functions, and
-  -- nothing in the business schema: no table privileges, no RLS policy, no membership
-  -- in or of any other role. Its connection string (DATABASE_URL_AUTH) belongs on the
+  -- nothing in the business schema: no table privileges, no RLS policy, a member of no
+  -- role, and no member but the branch owner running this file (as for app_worker; 0072
+  -- and 0073 allow exactly that). Its connection string (DATABASE_URL_AUTH) belongs on the
   -- web app only — never on the worker host.
   if not exists (select 1 from pg_roles where rolname = 'app_auth') then
     create role app_auth login nobypassrls;

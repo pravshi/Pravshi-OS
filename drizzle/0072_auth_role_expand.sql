@@ -53,12 +53,17 @@ begin
     raise exception 'app_auth must be a plain login role (no SUPERUSER, BYPASSRLS, CREATEROLE or CREATEDB)';
   end if;
 
+  -- app_auth is a member of no role, and no role is a member of it except the database owner,
+  -- which is not an application role: PostgreSQL 16+ grants a non-superuser creator (Neon's
+  -- branch owner, running scripts/db/roles.sql) ADMIN on the roles it creates — see 0070.
   select string_agg(m.rolname || ' -> ' || r.rolname, ', ') into v_bad
   from pg_auth_members am
   join pg_roles m on m.oid = am.member
   join pg_roles r on r.oid = am.roleid
-  where (m.rolname = 'app_auth' and r.rolname like 'app\_%')
-     or (r.rolname = 'app_auth');
+  where m.rolname = 'app_auth'
+     or (r.rolname = 'app_auth'
+         and (am.member <> (select datdba from pg_database where datname = current_database())
+              or m.rolname like 'app\_%'));
   if v_bad is not null then
     raise exception 'app_auth must share no role membership: %', v_bad;
   end if;

@@ -153,11 +153,16 @@ begin
                       'public.jobs_run_cleanup(uuid,text)']) w
     where to_regprocedure(w) is not null and has_function_privilege('app_auth', w, 'execute')
     union all
+    -- Membership as 0072 checks it: none, except the database owner's (not an application
+    -- role) that PostgreSQL 16+ grants a non-superuser creator — see 0070.
     select 'app_auth shares a role membership'
     where exists (
       select 1 from pg_auth_members am
       join pg_roles m on m.oid = am.member join pg_roles r on r.oid = am.roleid
-      where 'app_auth' in (m.rolname, r.rolname))
+      where m.rolname = 'app_auth'
+         or (r.rolname = 'app_auth'
+             and (am.member <> (select datdba from pg_database where datname = current_database())
+                  or m.rolname like 'app\_%')))
     union all
     select 'app_worker holds a privilege in the auth schema'
     where has_schema_privilege('app_worker', 'auth', 'usage')

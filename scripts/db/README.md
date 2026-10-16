@@ -43,15 +43,18 @@ probe left behind by accident cannot make that unrelated guard fail for the wron
 - **`app_admin`** covers three narrow, audited paths only: bootstrap, provisioning, and the audit
   writer. It is not the application's runtime role.
 - **`app_worker`** is the background worker's login (migration 0070). It holds EXECUTE on the
-  worker-plane functions and nothing else — no table or sequence privilege, no RLS policy, no
-  membership in or of any role. The database recognises the worker by this login
-  (`session_user`), so an `app_user` connection cannot pass itself off as the worker by setting
-  `app.person_id` / `app.org_id`. Its credential (`DATABASE_URL_WORKER`) lives on the worker host
-  only. `roles.sql` creates it like the others; 0070 refuses to run if it is missing.
+  worker-plane functions and nothing else — no table or sequence privilege, no RLS policy, a
+  member of no role, and no member but the branch owner (PG16+ grants a non-superuser creator
+  ADMIN on every role it creates; 0070 allows exactly that). The database recognises the worker
+  by this login (`session_user`), so an `app_user` connection cannot pass itself off as the
+  worker by setting `app.person_id` / `app.org_id`. Its credential (`DATABASE_URL_WORKER`) lives
+  on the worker host only. `roles.sql` creates it like the others; 0070 refuses to run if it is
+  missing.
 - **`app_auth`** is the authentication plane's login (migrations 0072/0073). Better Auth and the
   pre-login functions run on it: it holds the six Better Auth tables of the `auth` schema and
   EXECUTE on the pre-login and administrator-session functions, and nothing in `public` — no
-  business table, no RLS policy, no membership in or of any role. Since 0073 `app_user` holds
+  business table, no RLS policy, a member of no role, and no member but the branch owner (as for
+  `app_worker`; 0072/0073 allow exactly that). Since 0073 `app_user` holds
   nothing in `auth`. Its credential (`DATABASE_URL_AUTH`) lives on the web app only, never the
   worker host. `roles.sql` creates it like the others; 0072 refuses to run if it is missing.
 
