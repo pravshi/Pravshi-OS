@@ -44,6 +44,19 @@ Database migrations: 0063–0076 (production still pending — see the
 
 ### Fixed
 
+- The migration runner (`scripts/migrate-ws.mjs`) could silently skip migrations. Like
+  drizzle-kit, it applied only journal entries dated after the newest recorded one, but the
+  journal's historical dates are out of order (idx 28–30 are dated before idx 27; idx 35 ties idx
+  34), so a database stopped inside those ranges would have pending migrations skipped while the
+  run reported success. It also never checked that what a database had applied matched the
+  repository. The runner now verifies the recorded history is exactly the journal's prefix — same
+  file checksum and date, row for row — and applies the rest in journal order; anything else
+  (missing, duplicated, reordered, unknown or changed migrations, or a concurrent run) is refused
+  with exit code 3 before anything is applied, and a history that changes during the run stops it
+  with the same code after the whole migrations it has committed. The production migration
+  runbook's Step 0 now reads
+  the history in insertion order instead of by date, which made a correct database fail its own
+  check, and `DEVELOPMENT.md` no longer recommends `drizzle-kit migrate`.
 - Migrations 0070 and 0072, and 0073's verification, rejected the role membership that
   Neon-style role creation produces. On PostgreSQL 16+ a non-superuser that creates a role is
   automatically granted ADMIN on it and cannot revoke that grant itself; Neon's branch owner,
