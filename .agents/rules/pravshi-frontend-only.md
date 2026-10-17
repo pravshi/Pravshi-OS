@@ -32,6 +32,8 @@ authorization, RLS, and security implementation.
 - src/components/
 - src/modules/
 - src/styles/
+  (does not exist: styles are in src/app/globals.css, covered by
+  src/app/ above. Creating src/styles/ needs founder approval.)
 - frontend-specific assets
 - frontend-specific tests
 - frontend UI documentation when necessary

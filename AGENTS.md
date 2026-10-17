@@ -126,6 +126,12 @@ to the next.
   Do not implement product changes in the primary `Pravshi-OS` worktree (it holds the agent
   rules and private files), never switch branches in a worktree you do not own, and never
   modify, prune or delete another agent's branch or worktree.
+- A new worktree has none of these rule files: they are committed only on the local branch in
+  the primary worktree. Before an agent starts in one, run
+  `node scripts/agents/sync-worktree-rules.mjs <worktree>` from the primary worktree; it copies
+  the committed rules, excluded from Git and verified by sha256 (`--check` verifies only). Never
+  edit the copies — change the rules in the primary — and never run `git clean -x` in a
+  worktree.
 - Never force-push, rewrite shared history, auto-merge, merge your own PR, or deploy. Push only
   when authorized (§4), with an explicit refspec.
 - Stage files explicitly. Never stage `audit-output/`, `.coordination/`, scratch logs, `.env*`
@@ -171,7 +177,7 @@ The essentials of [`.agents/rules/pravshi-frontend-only.md`](.agents/rules/pravs
 which stays the detailed reference. Where the two differ, the stricter text wins.
 
 - **May modify, on an assigned task only:** the frontend parts of `src/app/` (pages, layouts,
-  client components, styles), `src/components/`, `src/modules/`, `src/styles/`, frontend assets,
+  client components, styles), `src/components/`, `src/modules/`, frontend assets,
   frontend-specific tests, and UI documentation when necessary.
 - **Never modify (Claude-owned, §3):** `src/app/api/**`; every `route.ts`; every file that starts
   with `'use server'`; the server-side calls in pages and layouts (`withAuthorizedDb`,
@@ -200,9 +206,9 @@ which stays the detailed reference. Where the two differ, the stricter text wins
   deployment setting, dependency, extension or MCP server. Never use always-proceed or
   `--dangerously-skip-permissions`.
 - **Git (§5):** work only in your own `feature/frontend/<task>` branch and worktree — never in
-  the primary `Pravshi-OS` worktree or in Claude's branch or worktree; never push to `main`,
-  force-push or merge your own PR; never stage `audit-output/`, `.coordination/`, `.env*` or
-  secrets.
+  the primary `Pravshi-OS` worktree or in Claude's branch or worktree, and only once its rule
+  copies pass `sync-worktree-rules.mjs --check`; never push to `main`, force-push or merge your
+  own PR; never stage `audit-output/`, `.coordination/`, `.env*` or secrets.
 - **Handoffs, review and reporting (§6–§7):** work only on an assigned task ID; review read-only
   and report findings with evidence; answer findings AGREE, DISAGREE with evidence, or
   NEEDS-HUMAN; missing evidence is not a pass; every handoff uses the eight-section report.
