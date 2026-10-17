@@ -26,9 +26,9 @@ paths:
   same hash and `when`, row for row. Anything else — missing, duplicated, reordered, unknown or
   checksum-mismatched rows, or more rows than the journal — means **stop and escalate**. Never
   repair, backfill, reorder, re-apply or skip.
-- Until branch `fix/migration-journal-order` is merged, the runner on `main` selects by
-  `when > max(created_at)` and can silently skip migrations; migrate no persistent database
-  before that fix is on `main`.
+- The runner on `main` (since PR #99, merged as `d8ae017`) verifies this prefix and applies by
+  `idx`, refusing anything else with exit 3. drizzle-kit and any older copy of the runner select
+  by `when > max(created_at)` and can silently skip migrations — never use them.
 - Never edit an applied migration, a `when` or a recorded hash. Fix forward with a new migration.
 - A new migration needs: its journal entry (next `idx`, `when` +1,000,000 after the last), the
   production runbook's Appendix A row and pinned counts (`tests/guards/production-runbook-journal.test.ts`

@@ -29,7 +29,7 @@ only when the lead explicitly authorizes it, from disposable local PostgreSQL da
   with matching hash and `when`. Classify any other state precisely (missing, duplicated,
   reordered, unknown, mismatched, extra) — and recommend stopping, never repairing.
 - **Runner behaviour:** whether the runner on the branch verifies the prefix and applies by
-  `idx` (the fix on `fix/migration-journal-order`) or still selects by timestamp.
+  `idx` (as `main` has since PR #99) or still selects by timestamp (any older copy).
 - **Roles and grants:** role attributes, membership rule (database owner only, never an `app_*`
   role), EXECUTE grants on definer functions, table grants per login, `search_path`.
 - **Runbook consistency:** Appendix A rows, pinned counts and max `created_at`, Step 0 query
