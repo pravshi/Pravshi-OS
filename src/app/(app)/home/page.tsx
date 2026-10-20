@@ -101,7 +101,7 @@ async function firstName(ctx: { personId: string; orgId: string; aal: 'aal1' | '
 
 async function summaryCounts(
   ctx: { personId: string; orgId: string; aal: 'aal1' | 'aal2' },
-  held: Set<string>,
+  held: ReadonlySet<string>,
 ): Promise<{ unread: number | null; openTasks: number | null }> {
   let unread: number | null = null;
   let openTasks: number | null = null;

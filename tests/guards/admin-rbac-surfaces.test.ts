@@ -123,14 +123,94 @@ describe('narrow SECURITY DEFINER write pattern', () => {
   });
 });
 
+/**
+ * The source text that defines the sidebar's entries. They lived inline in sidebar.tsx and
+ * moved to the shared shell module nav-items.ts (UI-02), which the mobile drawer also reads.
+ * The guard follows the sidebar's own import rather than naming one file, so it pins whichever
+ * definition the sidebar actually renders — and cannot be satisfied by a file it no longer uses.
+ */
+// Every spelling the sidebar can use to import the module: relative or the @/ alias, either
+// quote, with or without the extension.
+const NAV_ITEMS_IMPORT = /from\s+['"](?:\.\/|@\/components\/shell\/)nav-items(?:\.ts)?['"]/;
+
+function sidebarNavSource(readFile: (p: string) => string): string {
+  const sidebar = readFile('components/shell/sidebar.tsx');
+  return NAV_ITEMS_IMPORT.test(sidebar) ? readFile('components/shell/nav-items.ts') : sidebar;
+}
+
 describe('navigation exposes the new admin surfaces', () => {
   it('sidebar and nav know the permissions and teams entries', () => {
-    const sidebar = read('components/shell/sidebar.tsx');
-    expect(sidebar).toContain("href: '/admin/permissions'");
-    expect(sidebar).toContain("href: '/admin/teams'");
+    const navSource = sidebarNavSource(read);
+    expect(navSource).toContain("href: '/admin/permissions'");
+    expect(navSource).toContain("href: '/admin/teams'");
     const nav = read('lib/authz/nav.ts');
     for (const p of ['users.manage', 'roles.manage', 'teams.view']) {
       expect(nav).toContain(`'${p}'`);
     }
+  });
+
+  it('each entry keeps the permission its page is gated on', () => {
+    const navSource = sidebarNavSource(read);
+    expect(navSource).toMatch(/href: '\/admin\/permissions',\s*permission: 'roles\.manage'/);
+    // The Permissions page also answers users.manage (see /admin/permissions above).
+    expect(navSource).toContain("held.has('users.manage')");
+    expect(navSource).toMatch(/href: '\/admin\/teams',\s*permission: 'teams\.view'/);
+  });
+
+  it('shows the Permissions entry to roles.manage OR users.manage, as its page answers', () => {
+    const navSource = sidebarNavSource(read);
+    // The OR is the Permissions entry's own visibility condition, not text elsewhere in the file.
+    expect(navSource).toMatch(
+      /const canSeePermissions\s*=\s*held\.has\('roles\.manage'\)\s*\|\|\s*held\.has\('users\.manage'\)/,
+    );
+    expect(navSource).toMatch(/s\.href === '\/admin\/permissions' && canSeePermissions/);
+  });
+
+  it('follows the definition the sidebar imports, not a file it no longer reads', () => {
+    const files: Record<string, string> = {
+      'components/shell/sidebar.tsx': "import { getVisibleNavItems } from './nav-items';",
+      'components/shell/nav-items.ts': "{ href: '/admin/teams', permission: 'teams.view' }",
+    };
+    expect(sidebarNavSource((p) => files[p] ?? '')).toBe(files['components/shell/nav-items.ts']);
+
+    const inline = { 'components/shell/sidebar.tsx': "{ href: '/admin/teams' }" };
+    expect(sidebarNavSource((p) => inline[p as keyof typeof inline] ?? '')).toBe(
+      inline['components/shell/sidebar.tsx'],
+    );
+
+    // A sidebar that delegates to nav-items.ts without the entries there must fail the guard,
+    // even if stale entries remain in sidebar.tsx.
+    const stale: Record<string, string> = {
+      'components/shell/sidebar.tsx':
+        "import { getVisibleNavItems } from './nav-items';\n// href: '/admin/teams'",
+      'components/shell/nav-items.ts': "{ href: '/work', permission: 'projects.view' }",
+    };
+    expect(sidebarNavSource((p) => stale[p] ?? '')).not.toContain("href: '/admin/teams'");
+  });
+
+  it('recognises every supported spelling of the nav-items import', () => {
+    const NAV_ITEMS = "{ href: '/admin/teams', permission: 'teams.view' }";
+    for (const spec of [
+      "'./nav-items'",
+      '"./nav-items"',
+      "'./nav-items.ts'",
+      "'@/components/shell/nav-items'",
+      '"@/components/shell/nav-items.ts"',
+    ]) {
+      const files: Record<string, string> = {
+        'components/shell/sidebar.tsx': `import { getVisibleNavItems } from ${spec};`,
+        'components/shell/nav-items.ts': NAV_ITEMS,
+      };
+      expect(
+        sidebarNavSource((p) => files[p] ?? ''),
+        spec,
+      ).toBe(NAV_ITEMS);
+    }
+    // A different module that merely ends in "nav-items" is not the shared definition.
+    const other: Record<string, string> = {
+      'components/shell/sidebar.tsx': "import { x } from './old-nav-items';",
+      'components/shell/nav-items.ts': NAV_ITEMS,
+    };
+    expect(sidebarNavSource((p) => other[p] ?? '')).toBe(other['components/shell/sidebar.tsx']);
   });
 });
