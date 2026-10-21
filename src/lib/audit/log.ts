@@ -48,14 +48,16 @@ const USER_AGENT_MAX = 512;
 /**
  * The request facts an audit entry may carry. The client address is the first hop of
  * x-forwarded-for, which the platform sets; it is informational only and never used to decide
- * anything. A value that is not an IP literal is dropped rather than stored.
+ * anything. A value that is not an IP literal is dropped rather than stored — including an
+ * IPv6 literal with a zone id (fe80::1%eth0): Node's isIP accepts it, Postgres inet does not,
+ * and the `::inet` cast below would throw and lose the audit entry.
  */
 export function requestMetadata(headers: Headers, requestId: string): RequestMetadata {
   const first = headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
   const agent = headers.get('user-agent');
   return {
     requestId,
-    ip: isIP(first) ? first : null,
+    ip: isIP(first) && !first.includes('%') ? first : null,
     userAgent: agent ? agent.slice(0, USER_AGENT_MAX) : null,
   };
 }

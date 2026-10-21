@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 import { generateResetToken, hashResetToken } from './password-reset';
 import { sqlstateOf } from './invitations';
+import { ipRateLimitKey } from './rate-limit';
 
 /**
  * The auth layer's surface for administrator-initiated session and credential operations:
@@ -187,9 +188,11 @@ export async function issueAdminPasswordReset(
   personId: string,
   meta: AdminActionMeta,
 ): Promise<AdminResetIssue> {
+  // The same bucket as self-service reset requests (password-reset.ts), built by
+  // the same key builder so both keep landing in it (Phase 3, F-SEC-B1-1).
   const rl = await authDb.execute<{ allowed: boolean }>(sql`
     select authz.check_rate_limit(
-      ${`pwreset:req:${meta.ip ?? 'unknown'}`},
+      ${ipRateLimitKey('pwreset:req', meta.ip)},
       ${RESET_RATE_LIMIT_MAX},
       ${RESET_RATE_LIMIT_WINDOW_SECONDS}
     ) as allowed
