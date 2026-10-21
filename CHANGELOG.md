@@ -113,6 +113,16 @@ Database migrations: 0063–0076 (production still pending — see the
 
 ### Security
 
+- A workflow can no longer sign its webhooks with a deployment-level secret
+  (`WEBHOOK_SIGNING_SECRET_<REF>`, named by the webhook action's `signatureSecretRef`). Those
+  secrets belong to the deployment, not to an organization: any organization that knew a ref
+  could have had a URL of its own choosing signed with it. A workflow that names one is now
+  refused when it is saved, edited or activated, and its webhook step fails without sending
+  anything if it runs; a stored workflow that still has one stays visible so it can be edited.
+  Webhook jobs refuse the field at enqueue, and a job queued before this change (including a
+  retry) fails without sending — never signed with that secret, and never sent unsigned in its
+  place. Signed delivery is through a webhook subscription, which signs with its own secret; a
+  URL action is sent unsigned. `WEBHOOK_SIGNING_SECRET_<REF>` is no longer read.
 - A job or schedule can only run as the person who created it, enforced in the database
   (migration 0076). A workflow job runs with the permissions of the person who enqueued it and a
   scheduled run with those of the schedule's creator; at the SQL level, a member allowed to

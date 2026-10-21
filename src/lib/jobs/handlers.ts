@@ -36,7 +36,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { env, webhookSigningSecret } from '@/env';
+import { env } from '@/env';
 import { sendViaResend } from '../integrations/providers/email/send';
 import { decryptSecret, IntegrationsVaultError } from '../integrations/secrets';
 import { withWorkerContext, type WorkItem } from '../db/worker-pool';
@@ -996,28 +996,23 @@ export interface NormalizedWebhook {
   deliveryId?: string;
 }
 
-/**
- * Resolve a `signatureSecretRef` to its secret value via
- * env WEBHOOK_SIGNING_SECRET_<REF>. The value is never logged — only a
- * boolean "signed/unsigned" is recorded.
- */
-function resolveWebhookSecretRef(ref: string | undefined): string | undefined {
-  if (typeof ref !== 'string' || ref.length === 0) return undefined;
-  // Dynamic per-ref secret (WEBHOOK_SIGNING_SECRET_<REF>); read through the
-  // env.ts helper — the one sanctioned process.env read path.
-  const value = webhookSigningSecret(ref);
-  if (!value) {
-    failConfig(
-      `webhook signatureSecretRef '${ref}' is not configured ` +
-        `(expected env WEBHOOK_SIGNING_SECRET_<REF>); refusing to send unsigned.`,
+export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
+  // B3: deployment signing secrets (env WEBHOOK_SIGNING_SECRET_<REF>) are not
+  // available to jobs. Every webhook job is enqueued under a tenant's
+  // authority, so honouring a `signatureSecretRef` would let a tenant have its
+  // own URL signed with a deployment secret. Enqueue refuses the field (strict
+  // schema); a job stored before B3 that still carries it fails here — never
+  // signed with the deployment secret, and never sent unsigned in its place.
+  if (raw !== null && typeof raw === 'object' && 'signatureSecretRef' in raw) {
+    failValidation(
+      'webhook signatureSecretRef is not supported: deployment signing secrets are not ' +
+        'available to jobs; refusing to send.',
     );
   }
-  return value;
-}
-
-export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
-  // Task-contract alias: inline `signatureSecret`. strictObject would strip it,
-  // so capture it before validation; it takes precedence over a ref.
+  // Inline `signatureSecret`: how handleWebhook passes a subscription's
+  // decrypted secret in. strictObject would reject it, so capture it before
+  // validation. Never a stored payload field: enqueue's strict schema
+  // refuses it, so only the handler itself can supply one.
   let inlineSecret: unknown;
   let toValidate: unknown = raw;
   if (raw !== null && typeof raw === 'object' && 'signatureSecret' in raw) {
@@ -1046,9 +1041,7 @@ export function normalizeWebhookPayload(raw: unknown): NormalizedWebhook {
     if (lower === 'x-pravshi-signature' || lower === WEBHOOK_TIMESTAMP_HEADER) delete headers[k];
   }
   const signatureSecret =
-    typeof inlineSecret === 'string' && inlineSecret.length > 0
-      ? inlineSecret
-      : resolveWebhookSecretRef(p.signatureSecretRef);
+    typeof inlineSecret === 'string' && inlineSecret.length > 0 ? inlineSecret : undefined;
   return {
     url: p.url,
     method: p.method,
@@ -1137,10 +1130,10 @@ async function resolveSubscriptionSigningSecret(
  *   the attached statusCode).
  * - Phase 10: a payload carrying `subscriptionId` is an org subscription
  *   delivery — its signing secret is resolved + decrypted inside the
- *   worker (resolveSubscriptionSigningSecret) and takes precedence over
- *   any env-ref; a subscription disabled after enqueue drops the delivery
- *   (job succeeds, nothing is sent). Deployment-level payloads (env-ref
- *   or inline secret, no subscriptionId) behave exactly as before.
+ *   worker (resolveSubscriptionSigningSecret); a subscription disabled
+ *   after enqueue drops the delivery (job succeeds, nothing is sent). A
+ *   payload without a subscriptionId is sent unsigned; one carrying a
+ *   deployment `signatureSecretRef` is refused (B3, normalizeWebhookPayload).
  */
 export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
   const rawSubscriptionId = ctx.job.payload['subscriptionId'];
@@ -1154,9 +1147,8 @@ export const handleWebhook: JobHandler = async (ctx: JobExecutionContext) => {
       );
       return;
     }
-    // Inject as the inline-secret alias: normalizeWebhookPayload gives it
-    // precedence over any signatureSecretRef, and strips it before the
-    // schema parse — the plaintext never lands in the stored payload.
+    // Inject as the inline secret: normalizeWebhookPayload strips it before
+    // the schema parse — the plaintext never lands in the stored payload.
     w = normalizeWebhookPayload({ ...ctx.job.payload, signatureSecret: subscriptionSecret });
   } else {
     w = normalizeWebhookPayload(ctx.job.payload);

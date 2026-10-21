@@ -78,6 +78,7 @@ import {
   AssignTaskParamsSchema,
   CreateProjectParamsSchema,
   CreateTaskParamsSchema,
+  DEPLOYMENT_SECRET_REF_MESSAGE,
   IMPLEMENTED_ACTION_TYPES,
   LinkDealProjectParamsSchema,
   UpdateDealParamsSchema,
@@ -93,6 +94,7 @@ import {
   type UpdateDealParams,
   type UpdateTaskParams,
   type WebhookActionParams,
+  hasDeploymentSecretRef,
   templateOr,
 } from './schema';
 import type { WorkflowEvent } from './events';
@@ -197,8 +199,8 @@ export const ACTION_REGISTRY: Record<RegistryActionType, ActionRegistryEntry> = 
     description:
       'Phase 10: enqueue an outbound webhook job — either to an org webhook ' +
       'subscription (subscriptionId; signed with the subscription\u2019s own ' +
-      'secret, resolved inside the worker) or to a URL (url, optional ' +
-      'signatureSecretRef). Runs under the trigger actor\u2019s authority — ' +
+      'secret, resolved inside the worker) or to a URL (url; unsigned). ' +
+      'Runs under the trigger actor\u2019s authority — ' +
       'the actor needs jobs.create.',
   },
   run_ai_action: {
@@ -615,9 +617,10 @@ async function executeSendEmail(
  *    worker at delivery time, never placed in the job payload (§4.5).
  *    A disabled subscription fails the step (INVALID_REQUEST): the
  *    workflow asked for a delivery the admin has paused.
- *  - url: a deployment-level endpoint. The job payload is the legacy
- *    shape (url + body + optional signatureSecretRef env reference) and
- *    the handler's behaviour for it is unchanged.
+ *  - url: an endpoint named by the workflow. The job payload is url + body
+ *    and the delivery is unsigned. A deployment signing-secret reference
+ *    (signatureSecretRef) is refused by guardActionType before this runs
+ *    (B3), and is never copied into the payload.
  */
 async function executeWebhook(
   auth: Authorization,
@@ -660,13 +663,7 @@ async function executeWebhook(
   );
   const job = await enqueueJob(auth, {
     type: 'webhook',
-    payload: {
-      url: params.url as string,
-      body,
-      ...(params.signatureSecretRef !== undefined
-        ? { signatureSecretRef: params.signatureSecretRef }
-        : {}),
-    },
+    payload: { url: params.url as string, body },
     dedupKey,
   });
   return { ok: true, output: { jobId: job.id } };
@@ -732,6 +729,15 @@ function guardActionType(type: string, rawParams: unknown): ActionResult | null 
       errorCode: 'INTERNAL',
       errorMessage: `internal error while executing action '${type}'`,
     };
+  }
+
+  // B3: a webhook action never selects a deployment signing secret. Workflows
+  // saved before B3 can still carry the key; they fail here, before anything
+  // is enqueued, rather than sending signed with a secret the tenant does not
+  // own (or unsigned when its author expected a signature). Keys are never
+  // template-substituted, so the raw params decide.
+  if (hasDeploymentSecretRef(type, rawParams)) {
+    return { ok: false, errorCode: 'INVALID_REQUEST', errorMessage: DEPLOYMENT_SECRET_REF_MESSAGE };
   }
 
   // Stage changes are never allowed through update_deal — they go through the
