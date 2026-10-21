@@ -110,7 +110,10 @@ describe('rate-limit helper: one shared IP-bucket check', () => {
 
   it('namespaces buckets per route with an unknown-IP fallback', () => {
     expect(HELPER).toMatch(/export function ipRateLimitKey/);
-    expect(HELPER).toMatch(/ip \?\? 'unknown'/);
+    // Phase 3 (A1 review): an absent AND an invalid address both fall back to the
+    // shared bucket; behaviour is tested in tests/auth/client-address.test.ts.
+    expect(HELPER).toMatch(/if \(ip === null\) return 'unknown'/);
+    expect(HELPER).toMatch(/if \(family !== 6\) return 'unknown'/);
   });
 });
 

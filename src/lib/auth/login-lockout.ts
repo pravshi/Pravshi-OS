@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
+import { reportAuthFailure } from './safe-log';
 
 /**
  * LOGIN LOCKOUT (migration 0027).
@@ -11,29 +12,44 @@ import { authDb } from '@/lib/db/auth-client';
  * audit entry (auth.login.lockout) is written inside authz.record_login_failure()
  * when the threshold is crossed. A successful login clears the counter.
  *
- * Every helper is fail-open and never throws: lockout bookkeeping must never
- * break authentication itself. The route (src/app/api/auth/login/route.ts)
- * answers with generic credentials errors regardless of what happens here.
+ * No helper throws. The CHECK fails closed (Phase 3, S-6): when it cannot answer,
+ * the account is treated as locked, so a broken or unreachable check can never
+ * silently switch brute-force protection off. The refusal is the locked
+ * account's own — same generic 401, same timing parity (src/lib/auth/server.ts) —
+ * and it is decided before any account lookup, so it reveals nothing about
+ * whether the account exists. The bookkeeping helpers cannot change a response
+ * that is already decided; their failures raise an alert (reportAuthFailure)
+ * instead of a console line nobody watches.
  */
 
-/** True when the account is inside a 15-minute lockout. Never throws. */
+/** True when the account is inside a 15-minute lockout — or the check cannot tell. Never throws. */
 export async function isLockedOut(email: string): Promise<boolean> {
   try {
     const res = await authDb.execute<{ locked: boolean }>(sql`
       select authz.check_login_lockout(${email}) as locked
     `);
-    return res.rows[0]?.locked ?? false;
+    const locked = res.rows[0]?.locked;
+    if (typeof locked === 'boolean') return locked;
+    // The function always returns one boolean row; anything else is a broken check.
+    reportAuthFailure(
+      'auth.login.lockout_check_failed',
+      new Error('lockout check returned no row'),
+    );
+    return true;
   } catch (e) {
-    console.error('[auth/login] lockout check failed', {
-      name: e instanceof Error ? e.name : typeof e,
-    });
-    return false;
+    reportAuthFailure('auth.login.lockout_check_failed', e);
+    return true;
   }
 }
 
 /**
  * Records one failed password attempt. The HIGH audit entry on lockout is written
  * inside the function. Never throws and never changes the generic client response.
+ * A failure here means attempts stop counting toward a lockout, so it alerts.
+ * Meanwhile the login route's rate limit still bounds guesses per client address
+ * (IPv6 per /64) — as far as the forwarded address can be trusted, which on Vercel
+ * the platform sets. An invalid address is recorded as NULL rather than failing
+ * the cast (forwardedIp), so a forged header cannot stop the counting.
  */
 export async function noteLoginFailure(
   email: string,
@@ -45,9 +61,7 @@ export async function noteLoginFailure(
       select authz.record_login_failure(${email}, ${ip}::inet, ${userAgent})
     `);
   } catch (e) {
-    console.error('[auth/login] failure recording failed', {
-      name: e instanceof Error ? e.name : typeof e,
-    });
+    reportAuthFailure('auth.login.failure_record_failed', e);
   }
 }
 
@@ -67,9 +81,7 @@ export async function clearLoginLockout(email: string): Promise<void> {
       select authz.clear_login_lockout(${email})
     `);
   } catch (e) {
-    console.error('[auth/login] lockout clear failed', {
-      name: e instanceof Error ? e.name : typeof e,
-    });
+    reportAuthFailure('auth.login.lockout_clear_failed', e);
   }
 }
 

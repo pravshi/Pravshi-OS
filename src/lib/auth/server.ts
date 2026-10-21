@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
 import { loginPersonActive } from './login-person-check';
-import { recordLoginEvent, resolveLoginOrg } from './login-events';
+import { forwardedIp, recordLoginEvent, resolveLoginOrg } from './login-events';
 import { isLockedOut, noteLoginFailure, noteLoginSuccess } from './login-lockout';
 import { env } from '@/env';
 import { authLoggerOptions } from './safe-log';
@@ -103,9 +103,7 @@ function signInEmailOf(body: unknown): string | null {
 
 /** clientIp()'s rule (login-events.ts) over the Headers a hook carries instead of a Request. */
 function ipOfHeaders(headers: Headers | undefined): string | null {
-  const forwarded = headers?.get('x-forwarded-for');
-  const ip = forwarded?.split(',')[0]?.trim() ?? null;
-  return ip && ip.length > 0 ? ip : null;
+  return forwardedIp(headers?.get('x-forwarded-for'));
 }
 
 /**

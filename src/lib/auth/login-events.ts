@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 
@@ -72,9 +73,22 @@ export async function recordLoginEvent(opts: {
   }
 }
 
-/** Best-effort client IP: Vercel's forwarded header, else nothing. Never trusted for decisions. */
+/**
+ * The client address in an x-forwarded-for value: its first entry, and only when
+ * that is a valid IPv4 or IPv6 address (no zone id); anything else is null. A
+ * garbage value must never reach an `::inet` cast — the cast throws, and the
+ * lockout recorder would silently stop counting — nor become a rate-limit key a
+ * client can rotate at will.
+ */
+export function forwardedIp(header: string | null | undefined): string | null {
+  const first = header?.split(',')[0]?.trim() ?? '';
+  return isIP(first) !== 0 && !first.includes('%') ? first : null;
+}
+
+/**
+ * Best-effort client IP: Vercel's forwarded header, validated, else nothing. The
+ * platform sets the header; it feeds rate limiting and recording, never access.
+ */
 export function clientIp(req: Request): string | null {
-  const forwarded = req.headers.get('x-forwarded-for');
-  const ip = forwarded?.split(',')[0]?.trim() ?? null;
-  return ip && ip.length > 0 ? ip : null;
+  return forwardedIp(req.headers.get('x-forwarded-for'));
 }
