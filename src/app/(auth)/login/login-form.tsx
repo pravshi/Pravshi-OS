@@ -46,6 +46,10 @@ export function LoginForm({ next }: { next?: string }) {
         error?: string;
       } | null;
 
+      if (res.status === 429 || data?.error === 'RATE_LIMITED') {
+        setError('Too many sign-in attempts. Please wait a minute and try again.');
+        return;
+      }
       if (!res.ok || !data) {
         setError('The email or password is incorrect.');
         return;
