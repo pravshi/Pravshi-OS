@@ -12,6 +12,27 @@ Database migrations: 0063–0076 (production still pending — see the
 
 ### Added
 
+- Worker liveness (REL-11). A job's lease renewal proved only that the worker process was
+  alive: a handler that never returned kept its lease, so the job was never reaped and
+  nothing noticed. An in-process watchdog now holds every wait of the worker loop to the
+  sleep it chose or to a budget (`WORKER_PASS_STALL_MS`, `WORKER_MAINTENANCE_STALL_MS`,
+  `WORKER_JOB_STALL_MS`, `WORKER_STALL_GRACE_MS`), using a monotonic clock and no database
+  query, and calls the loop stalled after two consecutive overdue checks. The worker's
+  `GET /healthz` answers 503 `stalled` then, 200 `degraded` when the database is not
+  answering or due work will not clear, and 200 `ok` otherwise — one word, never an id or a
+  detail. Transitions and a per-phase summary of the longest waits are logged. It only
+  reports: no job is aborted, the process does not exit, and retry, reap and dead-letter
+  behaviour are unchanged. Known gap, documented and pinned by a test but not fixed here: a
+  job that hangs on every attempt is retried for as long as something keeps restarting the
+  worker — a graceful restart releases its claim without counting the attempt, a hard one
+  leaves it to the reaper, which never dead-letters, and the claim ignores attempts.
+  **Upgrade note:** `DEPLOYMENT.md` previously advised using `GET /healthz` as the worker
+  platform's health check, when it always answered 200. It now answers 503 when the loop
+  stalls, so a host configured that way may start restarting the worker on its own — which,
+  for a job that hangs every time, is the unbounded loop above. Review the host's
+  health-check and restart settings before deploying this change; alerting a human (an uptime
+  monitor on `/healthz`) is the recommended setup until the gap is closed.
+
 - Low-cost worker mode for the Neon Free plan (the default). Neon Free suspends
   compute only after five minutes without a query and caps a project at 100
   CU-hours a month; a worker polling every 10 seconds kept compute awake

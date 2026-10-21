@@ -45,6 +45,12 @@
  *                              usage estimate's warnings (default 30)
  *   WORKER_COMPUTE_CU          Neon compute size the estimate assumes (default 0.25)
  *
+ * Liveness (REL-11 — see "LIVENESS" below; defaults and their evidence in liveness.ts):
+ *   WORKER_PASS_STALL_MS        a database pass (sweep, reap, claim, …) (default 300000)
+ *   WORKER_MAINTENANCE_STALL_MS the maintenance pass                    (default 900000)
+ *   WORKER_JOB_STALL_MS         one job                                 (default 900000)
+ *   WORKER_STALL_GRACE_MS       added to every allowance                (default 60000)
+ *
  * ── WHAT IT DOES ────────────────────────────────────────────────────────────
  * 1. Imports `./handlers` and `./workflow-jobs` for their side effects: that
  *    registers the notification, webhook, email, cleanup, workflow_run and
@@ -107,11 +113,29 @@
  * scheduled wake (at most WORKER_MAX_SLEEP_MS); everything else runs on time.
  * WORKER_IDLE_MODE=poll restores the always-polling behaviour (paid plans).
  *
+ * ── LIVENESS (REL-11) ────────────────────────────────────────────────────────
+ * A job's lease renewal proves the process is alive, not that the loop is getting anywhere. A
+ * watchdog (liveness.ts) is told before every wait what the loop waits for — an exact sleep,
+ * or a pass or job held to a budget — and, without touching the database, flags the loop
+ * STALLED after two consecutive overdue checks. GET /healthz on the wake endpoint answers 503
+ * "stalled" then (200 "ok" / "degraded" otherwise); transitions are logged as
+ * `[worker] liveness: …` with the phase and timings only. It reports, nothing more: no job is
+ * aborted and the process does not exit — restarting is the operator's or the platform's call
+ * (DEPLOYMENT.md). In 'poll' mode there is no wake endpoint, so the logs are the only signal,
+ * and the scheduler's own interval timer is outside the watchdog.
+ *
  * The process stays alive until SIGTERM/SIGINT. A supervisor (systemd,
  * Docker, Render, etc.) should restart it on non-zero exit.
  */
 
 import { hostname } from 'node:os';
+// No side effects and no env access, so `--help` still exits before env validation.
+import {
+  DEFAULT_LIVENESS_BUDGETS,
+  LivenessMonitor,
+  type LivenessBudgets,
+  type LivenessEvent,
+} from './liveness';
 
 const DEFAULT_TICK_MS = 60_000;
 const MAX_WORKER_ID_LENGTH = 128;
@@ -174,6 +198,11 @@ async function main(): Promise<void> {
   const { runWorker, reapStaleJobs, workerNextDueAt } = await import('./worker');
   const { runDbMaintenance } = await import('./maintenance');
   const { tickScheduler } = await import('./scheduler');
+
+  // REL-11: watch the loop from here on — the start-up checks below are the 'starting' phase.
+  const liveness = new LivenessMonitor({ budgets: parseLivenessBudgets(), onEvent: logLiveness });
+  liveness.start();
+  console.log('[worker] liveness budgets', liveness.budgets);
 
   // The shared Neon pool emits 'error' for failures on idle clients (e.g. a
   // scale-to-zero suspend dropping sockets — normal, not exceptional). With no
@@ -286,8 +315,23 @@ async function main(): Promise<void> {
     }
   };
 
+  const stopLiveness = () => {
+    liveness.stop();
+    console.log('[worker] liveness summary (longest wait per phase, ms)', liveness.summary());
+  };
+
   if (lowCost.idleMode === 'deep-sleep') {
-    await runLowCost({ env, workerId, tickMs, lowCost, runWorker, workerNextDueAt, runTick });
+    await runLowCost({
+      env,
+      workerId,
+      tickMs,
+      lowCost,
+      runWorker,
+      workerNextDueAt,
+      runTick,
+      liveness,
+    });
+    stopLiveness();
     console.log('[worker] graceful shutdown complete');
     process.exit(0);
   }
@@ -298,6 +342,7 @@ async function main(): Promise<void> {
   // the reaped count; a failure here must never kill the worker — the
   // in-loop reap (reapIntervalMs) retries on cadence.
   try {
+    liveness.expect('reap');
     const reaped = await reapStaleJobs();
     console.log(`[worker] startup reap: reaped ${reaped} stale job(s)`);
   } catch (err) {
@@ -306,21 +351,24 @@ async function main(): Promise<void> {
 
   // Audit partitions + retention once at startup (WP-2), so a worker that
   // restarts often still keeps the partition window extended.
+  liveness.expect('maintenance');
   await runDbMaintenance();
 
   // Fire once at startup so a fresh deploy does not wait a full interval,
   // then keep ticking. The first tick runs before the claim loop blocks.
+  liveness.expect('scheduler');
   await runTick('startup');
   const timer = setInterval(() => void runTick('interval'), tickMs);
 
   try {
     // runWorker installs its own SIGTERM/SIGINT handlers, stops claiming,
     // drains the in-flight job, and resolves. Resolving means we may exit.
-    await runWorker({ workerId });
+    await runWorker({ workerId, liveness });
   } finally {
     clearInterval(timer);
   }
 
+  stopLiveness();
   console.log('[worker] graceful shutdown complete');
   process.exit(0);
 }
@@ -341,18 +389,19 @@ interface LowCostConfig {
  * entrypoint (the SCHEDULER_TICK_MS precedent). Invalid values fall back to defaults with a
  * warning; the secret (WORKER_WAKE_TOKEN) is read through @/env, never here.
  */
+function num(name: string, fallback: number, min: number): number {
+  // eslint-disable-next-line no-restricted-syntax
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min) {
+    console.warn(`[worker] invalid ${name}=${JSON.stringify(raw)}; using default ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 function parseLowCostConfig(): LowCostConfig {
-  const num = (name: string, fallback: number, min: number): number => {
-    // eslint-disable-next-line no-restricted-syntax
-    const raw = process.env[name];
-    if (raw === undefined || raw.trim() === '') return fallback;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < min) {
-      console.warn(`[worker] invalid ${name}=${JSON.stringify(raw)}; using default ${fallback}`);
-      return fallback;
-    }
-    return n;
-  };
   // eslint-disable-next-line no-restricted-syntax
   const mode = process.env.WORKER_IDLE_MODE?.trim();
   if (mode && mode !== 'deep-sleep' && mode !== 'poll') {
@@ -368,6 +417,42 @@ function parseLowCostConfig(): LowCostConfig {
   };
 }
 
+/** REL-11 budgets: non-secret tuning knobs, read like the ones above. At least 1 s each. */
+function parseLivenessBudgets(): LivenessBudgets {
+  return {
+    passMs: num('WORKER_PASS_STALL_MS', DEFAULT_LIVENESS_BUDGETS.passMs, 1_000),
+    maintenanceMs: num(
+      'WORKER_MAINTENANCE_STALL_MS',
+      DEFAULT_LIVENESS_BUDGETS.maintenanceMs,
+      1_000,
+    ),
+    jobMs: num('WORKER_JOB_STALL_MS', DEFAULT_LIVENESS_BUDGETS.jobMs, 1_000),
+    graceMs: num('WORKER_STALL_GRACE_MS', DEFAULT_LIVENESS_BUDGETS.graceMs, 0),
+  };
+}
+
+/** One line per liveness change: the phase, timings and job type — never an id or a payload. */
+function logLiveness(event: LivenessEvent): void {
+  if (event.kind === 'event-loop-blocked') {
+    console.warn('[worker] liveness: event loop was blocked', {
+      lagMs: event.lagMs,
+      phase: event.phase,
+    });
+    return;
+  }
+  const detail = {
+    previous: event.previous,
+    phase: event.phase,
+    ...(event.overdueMs !== undefined ? { overdueMs: event.overdueMs } : {}),
+    ...(event.stalledForMs !== undefined ? { stalledForMs: event.stalledForMs } : {}),
+    ...(event.jobType !== undefined ? { jobType: event.jobType } : {}),
+    ...(event.reasons.length > 0 ? { reasons: event.reasons } : {}),
+  };
+  if (event.status === 'stalled') console.error('[worker] liveness: stalled', detail);
+  else if (event.status === 'degraded') console.warn('[worker] liveness: degraded', detail);
+  else console.log('[worker] liveness: ok', detail);
+}
+
 async function runLowCost(deps: {
   env: { WORKER_WAKE_TOKEN?: string };
   workerId: string;
@@ -376,6 +461,7 @@ async function runLowCost(deps: {
   runWorker: typeof import('./worker').runWorker;
   workerNextDueAt: typeof import('./worker').workerNextDueAt;
   runTick: (reason: string) => Promise<void>;
+  liveness: LivenessMonitor;
 }): Promise<void> {
   const { WakeLatch } = await import('./wake-latch');
   const { startWakeServer } = await import('./wake-server');
@@ -389,7 +475,12 @@ async function runLowCost(deps: {
   // The wake endpoint only exists when a token is configured; without it the worker still
   // finds every job at its scheduled wakes, only later.
   const wakeServer = deps.env.WORKER_WAKE_TOKEN
-    ? await startWakeServer({ token: deps.env.WORKER_WAKE_TOKEN, latch, port: deps.lowCost.port })
+    ? await startWakeServer({
+        token: deps.env.WORKER_WAKE_TOKEN,
+        latch,
+        port: deps.lowCost.port,
+        liveness: () => deps.liveness.status(),
+      })
     : null;
   if (wakeServer) console.log(`[worker] wake endpoint listening on port ${wakeServer.port}`);
 
@@ -410,6 +501,7 @@ async function runLowCost(deps: {
         ledger.deepSleep(at);
         console.log('[worker] deep sleep', { sleepMs });
       },
+      liveness: deps.liveness,
     });
   } finally {
     await wakeServer?.close();

@@ -192,8 +192,13 @@ beforeAll(async () => {
   orgARows = rows.filter(([, org]) => org === orgA).map(([id]) => id);
 
   // Seeded before RLS is armed, as tests/db/authorized.test.ts does: FORCE subjects the owner to
-  // the table's policies, and the only policy is for app_user.
-  await owner.query(`
+  // the table's policies, and the only policy is for app_user. All of it in ONE transaction, as
+  // there: other suites assert that no public table is ever without RLS, so the moment between
+  // disabling and re-arming it must never be visible to another session.
+  const seed = await owner.connect();
+  try {
+    await seed.query('begin');
+    await seed.query(`
     create table if not exists public._authz_scope_probe (
       id uuid primary key,
       org_id uuid not null,
@@ -204,12 +209,12 @@ beforeAll(async () => {
     alter table public._authz_scope_probe disable row level security;
     truncate public._authz_scope_probe;
   `);
-  await owner.query(
-    `insert into public._authz_scope_probe (id, org_id, owner_person_id, department_id)
+    await seed.query(
+      `insert into public._authz_scope_probe (id, org_id, owner_person_id, department_id)
      select * from unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[])`,
-    [rows.map((r) => r[0]), rows.map((r) => r[1]), rows.map((r) => r[2]), rows.map((r) => r[3])],
-  );
-  await owner.query(`
+      [rows.map((r) => r[0]), rows.map((r) => r[1]), rows.map((r) => r[2]), rows.map((r) => r[3])],
+    );
+    await seed.query(`
     alter table public._authz_scope_probe enable row level security;
     alter table public._authz_scope_probe force row level security;
     drop policy if exists authz_scope_probe_select on public._authz_scope_probe;
@@ -234,6 +239,13 @@ beforeAll(async () => {
     revoke all on public._authz_scope_probe from app_user, app_admin;
     grant select on public._authz_scope_probe to app_user;
   `);
+    await seed.query('commit');
+  } catch (error) {
+    await seed.query('rollback').catch(() => undefined);
+    throw error;
+  } finally {
+    seed.release();
+  }
 
   // ── record grants, issued from the owner connection as the Task 1.9 suite does ──
   const issue = async (

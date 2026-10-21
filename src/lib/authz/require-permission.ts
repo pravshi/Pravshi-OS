@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/observability/report';
 import { sql } from 'drizzle-orm';
-import { resolveAuthContext } from '@/lib/auth/session';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Aal, AuthContext } from '@/lib/db/context';
 import {
@@ -327,6 +326,10 @@ export async function requirePermission(
   const meta = requestMetadata(headers, requestId);
   const { permission, target, minScope } = request;
 
+  // Loaded on first use, not at import: the session module pulls in the whole Better Auth server
+  // (~570 modules). The worker plane imports this file only for assertTargetAffected() and never
+  // authenticates anyone, so a static import made every cold worker start read all of it (REL-05).
+  const { resolveAuthContext } = await import('@/lib/auth/session');
   const ctx = await resolveAuthContext(headers);
   if (!ctx) {
     console.warn('[authz] unauthenticated request refused', { requestId });

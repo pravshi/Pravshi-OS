@@ -51,7 +51,7 @@
  * Owner: A8. Other agents MUST NOT modify this file.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/observability/report';
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '../db/authorized';
 import type { Authorization } from '../authz/require-permission';
