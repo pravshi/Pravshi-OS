@@ -572,7 +572,9 @@ export interface SsrfCheck {
   reason?: string;
 }
 
-const BLOCKED_HOST_SUFFIXES = ['.internal', '.local'];
+// .localhost: RFC 6761 reserves every name under it for loopback.
+// .home.arpa: RFC 8375 residential networks — always a private address.
+const BLOCKED_HOST_SUFFIXES = ['.internal', '.local', '.localhost', '.home.arpa'];
 
 /**
  * Convert an IPv4 address in any inet_aton form to 4 bytes.
@@ -633,8 +635,10 @@ function inCidr(
   return (ipv4ToNumber(b) & mask) === (ipv4ToNumber(base) & mask);
 }
 
-/** Blocked IPv4 ranges: private, loopback, link-local (covers 169.254.169.254),
- *  CGNAT, and the unspecified address. */
+/** Blocked IPv4 ranges: every IANA special-purpose block that is not globally
+ *  reachable — private, loopback, link-local (covers 169.254.169.254), CGNAT,
+ *  unspecified, protocol assignments, documentation, benchmarking — plus
+ *  multicast and the reserved 240/4 space (which holds 255.255.255.255). */
 const BLOCKED_V4: Array<[[number, number, number, number], number, string]> = [
   [[10, 0, 0, 0], 8, '10.0.0.0/8 (private)'],
   [[172, 16, 0, 0], 12, '172.16.0.0/12 (private)'],
@@ -643,7 +647,37 @@ const BLOCKED_V4: Array<[[number, number, number, number], number, string]> = [
   [[0, 0, 0, 0], 8, '0.0.0.0/8 (unspecified)'],
   [[169, 254, 0, 0], 16, '169.254.0.0/16 (link-local; includes 169.254.169.254 metadata)'],
   [[100, 64, 0, 0], 10, '100.64.0.0/10 (CGNAT)'],
+  [[192, 0, 0, 0], 24, '192.0.0.0/24 (IETF protocol assignments)'],
+  [[192, 0, 2, 0], 24, '192.0.2.0/24 (TEST-NET-1 documentation)'],
+  [[198, 51, 100, 0], 24, '198.51.100.0/24 (TEST-NET-2 documentation)'],
+  [[203, 0, 113, 0], 24, '203.0.113.0/24 (TEST-NET-3 documentation)'],
+  [[198, 18, 0, 0], 15, '198.18.0.0/15 (benchmarking)'],
+  [[192, 88, 99, 0], 24, '192.88.99.0/24 (deprecated 6to4 relay anycast)'],
+  [[224, 0, 0, 0], 4, '224.0.0.0/4 (multicast)'],
+  [[240, 0, 0, 0], 4, '240.0.0.0/4 (reserved; includes 255.255.255.255 broadcast)'],
 ];
+
+/**
+ * IPv6 is judged by allowlist: only global unicast 2000::/3 may be reached,
+ * so loopback, unspecified, link-local, site-local, unique-local, multicast,
+ * discard-only, NAT64 local-use, SRv6 and any future non-global allocation
+ * outside 2000::/3 fail closed. These are the non-global blocks INSIDE it.
+ */
+const BLOCKED_V6_IN_GLOBAL: Array<[number[], number, string]> = [
+  [[0x20, 0x01, 0x00], 23, '2001::/23 (IETF protocol assignments; includes Teredo 2001::/32)'],
+  [[0x20, 0x01, 0x0d, 0xb8], 32, '2001:db8::/32 (documentation)'],
+  [[0x20, 0x02], 16, '2002::/16 (6to4)'],
+  [[0x3f, 0xff, 0x00], 20, '3fff::/20 (documentation)'],
+];
+
+function inV6Prefix(bytes: number[], prefix: number[], bits: number): boolean {
+  for (let i = 0; i < bits; i += 8) {
+    const take = Math.min(8, bits - i);
+    const mask = (0xff << (8 - take)) & 0xff;
+    if (((bytes[i / 8] as number) & mask) !== ((prefix[i / 8] ?? 0) & mask)) return false;
+  }
+  return true;
+}
 
 /**
  * True when a host string is composed solely of inet_aton characters
@@ -716,8 +750,11 @@ export function parseIpv6Bytes(host: string): number[] | null {
 
 /**
  * True when an IPv4 literal (any inet_aton form) or IPv6 literal is blocked.
- * IPv4-mapped (::ffff:0:0/96) and IPv4-compatible (::/96) IPv6 forms are
- * unwrapped and judged by their embedded IPv4 address. A string that is not
+ * IPv6 forms that carry an IPv4 address in their last 32 bits — IPv4-mapped
+ * (::ffff:0:0/96), IPv4-compatible (::/96), SIIT IPv4-translated
+ * (::ffff:0:0:0/96) and NAT64 well-known (64:ff9b::/96) — are unwrapped and
+ * judged by that IPv4 address; every other IPv6 address must be global
+ * unicast (see BLOCKED_V6_IN_GLOBAL). A string that is not
  * a valid literal but is composed purely of inet_aton characters (see
  * looksLikeIpv4Literal) is a malformed IP literal and fails closed: e.g.
  * 0x7f.0x0.0x0x1, whose final part defeats WHATWG's ends-in-a-number
@@ -736,20 +773,25 @@ export function isBlockedIpLiteral(host: string): boolean {
     const b = parseIpv6Bytes(h);
     if (!b) return true; // colon-bearing but not parseable IPv6: fail closed
     const byte = (i: number): number => b[i] as number;
+    const zero = (from: number, to: number): boolean => b.slice(from, to).every((x) => x === 0);
     // :: (unspecified) and ::1 (loopback)
-    if (b.slice(0, 15).every((x) => x === 0) && (byte(15) === 0 || byte(15) === 1)) return true;
-    if (byte(0) === 0xfe && (byte(1) & 0xc0) === 0x80) return true; // fe80::/10 link-local
-    if ((byte(0) & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
-    // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible ::/96 embed an IPv4
-    // address in the last 32 bits; judge that address by the IPv4 ranges.
+    if (zero(0, 15) && (byte(15) === 0 || byte(15) === 1)) return true;
+    // Forms that embed an IPv4 address in the last 32 bits: judge that
+    // address by the IPv4 ranges (a NAT64 path to 169.254.169.254 is still
+    // the metadata endpoint).
     const embedded = `${byte(12)}.${byte(13)}.${byte(14)}.${byte(15)}`;
-    if (b.slice(0, 10).every((x) => x === 0) && byte(10) === 0xff && byte(11) === 0xff) {
+    const mapped = zero(0, 10) && byte(10) === 0xff && byte(11) === 0xff; // ::ffff:0:0/96
+    const compatible = zero(0, 12); // ::/96 (deprecated)
+    const siit = zero(0, 8) && byte(8) === 0xff && byte(9) === 0xff && zero(10, 12); // ::ffff:0:0:0/96
+    const nat64 = byte(0) === 0x00 && byte(1) === 0x64 && byte(2) === 0xff && byte(3) === 0x9b;
+    if (mapped || compatible || siit || (nat64 && zero(4, 12))) {
       return isBlockedIpLiteral(embedded);
     }
-    if (b.slice(0, 12).every((x) => x === 0)) {
-      return isBlockedIpLiteral(embedded);
-    }
-    return false;
+    // Everything else must be global unicast 2000::/3 — this also blocks
+    // fe80::/10, fec0::/10, fc00::/7, ff00::/8, 100::/64, 5f00::/16 and the
+    // NAT64 local-use 64:ff9b:1::/48 — and outside the non-global sub-blocks.
+    if ((byte(0) & 0xe0) !== 0x20) return true;
+    return BLOCKED_V6_IN_GLOBAL.some(([prefix, bits]) => inV6Prefix(b, prefix, bits));
   }
 
   // Malformed IP literal (see header): fail closed.
@@ -866,8 +908,11 @@ function serializeWebhookBody(body: unknown): Buffer {
  * IP (custom `lookup`), so DNS cannot change between validation and connect
  * (TOCTOU/DNS-rebinding mitigation). Host header and TLS SNI still use the
  * original hostname from the URL.
+ *
+ * @internal Exported for tests only. It trusts `pinnedIp`: callers must take
+ * it from assertWebhookTargetAllowed, as handleWebhook does on every hop.
  */
-function fetchWebhookPinned(
+export function fetchWebhookPinned(
   url: URL,
   opts: {
     method: string;
@@ -886,9 +931,21 @@ function fetchWebhookPinned(
       {
         method: opts.method,
         headers: opts.headers,
+        // A fresh connection every time. The global agent keeps sockets alive
+        // and pools them by host:port, so a later request (another hop, or
+        // another org's job after the name re-pointed) would reuse a socket
+        // validated for an earlier one and never ask the pin below.
+        agent: false,
         // Pin the connection to the verified IP; hostname (Host/SNI) unchanged.
-        lookup: (_hostname, _options, callback) => {
-          callback(null, opts.pinnedIp, opts.pinnedFamily);
+        // Node's connect (autoSelectFamily, the default since Node 20) asks
+        // with { all: true } and expects an address list; a bare address is
+        // then rejected with ERR_INVALID_IP_ADDRESS before any connection.
+        lookup: (_hostname, options, callback) => {
+          if (options.all) {
+            callback(null, [{ address: opts.pinnedIp, family: opts.pinnedFamily }]);
+          } else {
+            callback(null, opts.pinnedIp, opts.pinnedFamily);
+          }
         },
       },
       (res) => {
@@ -1070,8 +1127,9 @@ async function resolveSubscriptionSigningSecret(
 
 /**
  * `webhook` job → SSRF-guarded outbound HTTP request.
- * - Only http/https; private/loopback/link-local/metadata IPs blocked
- *   (literal AND resolved); .internal/.localhost hostnames blocked.
+ * - Only http/https; every non-global IP blocked (literal AND resolved, IPv4
+ *   embedded in IPv6 unwrapped); .internal/.local/.localhost/.home.arpa
+ *   hostnames blocked.
  * - 10s default timeout (payload-overridable 1–30s), 1 MiB response cap,
  *   max 2 redirects (each hop re-validated).
  * - HMAC-SHA256 signature header when a secret is configured (never logged).

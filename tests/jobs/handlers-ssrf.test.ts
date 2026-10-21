@@ -105,7 +105,7 @@ describe('SSRF guard — allowed URLs', () => {
     'http://example.com/hook',
     'https://hooks.slack.com/services/T000/B000/XXXX',
     'https://api.example.co.uk:8443/v1/events?x=1',
-    'http://203.0.113.5/hook', // TEST-NET-3 documentation range: not private
+    'http://1.1.1.1/hook', // public dotted-quad literal
     'http://93.184.216.34/hook', // public dotted-quad literal
     'https://sub.domain.example.io/a/b',
   ];
@@ -135,7 +135,7 @@ describe('isBlockedIpLiteral', () => {
 
   it('allows public IPv4/IPv6 literals', () => {
     expect(isBlockedIpLiteral('8.8.8.8')).toBe(false);
-    expect(isBlockedIpLiteral('203.0.113.9')).toBe(false);
+    expect(isBlockedIpLiteral('9.9.9.9')).toBe(false);
     expect(isBlockedIpLiteral('1.1.1.1')).toBe(false);
     expect(isBlockedIpLiteral('93.184.216.34')).toBe(false);
     expect(isBlockedIpLiteral('[2606:4700:4700::1111]')).toBe(false);
@@ -180,7 +180,89 @@ describe('isBlockedIpLiteral', () => {
     expect(isBlockedIpLiteral('[febf::ffff]')).toBe(true); // fe80::/10 upper edge
     expect(isBlockedIpLiteral('[fd12:3456::1]')).toBe(true); // fc00::/7
     expect(isBlockedIpLiteral('[fe80::1%25eth0]')).toBe(true); // zone id stripped
-    expect(isBlockedIpLiteral('[2001:db8::1]')).toBe(false); // public documentation range
+    // Documentation ranges are not globally reachable (IANA special-purpose
+    // registry), so they are blocked like the other non-global blocks.
+    expect(isBlockedIpLiteral('[2001:db8::1]')).toBe(true);
+  });
+});
+
+describe('SSRF guard — every non-global range (IANA special-purpose registry)', () => {
+  const blockedV4: Array<[string, string]> = [
+    ['192.0.0.1', '192.0.0.0/24 IETF protocol assignments'],
+    ['192.0.2.1', '192.0.2.0/24 TEST-NET-1'],
+    ['198.51.100.1', '198.51.100.0/24 TEST-NET-2'],
+    ['203.0.113.5', '203.0.113.0/24 TEST-NET-3'],
+    ['198.18.0.1', '198.18.0.0/15 benchmarking, low half'],
+    ['198.19.255.254', '198.18.0.0/15 benchmarking, high edge'],
+    ['192.88.99.1', '192.88.99.0/24 6to4 relay anycast'],
+    ['224.0.0.1', '224.0.0.0/4 multicast'],
+    ['239.255.255.250', '224.0.0.0/4 multicast (SSDP), high edge'],
+    ['240.0.0.1', '240.0.0.0/4 reserved'],
+    ['255.255.255.255', 'limited broadcast'],
+    ['4026531841', '240.0.0.1 as a single decimal integer'],
+    ['0xe0.0.0.1', '224.0.0.1 with a hex first part'],
+  ];
+  it.each(blockedV4)('blocks IPv4 %s (%s)', (ip) => {
+    expect(isBlockedIpLiteral(ip)).toBe(true);
+    expect(checkWebhookUrlStatic(`http://${ip}/hook`).allowed).toBe(false);
+  });
+
+  const blockedV6: Array<[string, string]> = [
+    ['64:ff9b::7f00:1', 'NAT64 to 127.0.0.1'],
+    ['64:ff9b::a9fe:a9fe', 'NAT64 to 169.254.169.254 metadata'],
+    ['64:ff9b::10.0.0.1', 'NAT64 to 10.0.0.1, dotted tail'],
+    ['64:ff9b:1::1', 'NAT64 local-use 64:ff9b:1::/48'],
+    ['::ffff:0:7f00:1', 'SIIT IPv4-translated 127.0.0.1'],
+    ['::ffff:0:a9fe:a9fe', 'SIIT IPv4-translated 169.254.169.254'],
+    ['2002:7f00:1::', '6to4 wrapping 127.0.0.1'],
+    ['2002:808:808::1', '6to4 wrapping a public address — 6to4 is blocked outright'],
+    ['2001:0:4136:e378:8000:63bf:3fff:fdd2', 'Teredo 2001::/32'],
+    ['2001:2::1', 'benchmarking 2001:2::/48 (inside 2001::/23)'],
+    ['2001:db8:1234::1', 'documentation 2001:db8::/32'],
+    ['3fff::1', 'documentation 3fff::/20'],
+    ['ff02::1', 'multicast ff00::/8, link-local all-nodes'],
+    ['ff05::1:3', 'multicast ff00::/8, site-local'],
+    ['fec0::1', 'deprecated site-local fec0::/10'],
+    ['100::1', 'discard-only 100::/64'],
+    ['5f00::1', 'SRv6 SIDs 5f00::/16'],
+    ['4000::1', 'unallocated space outside 2000::/3'],
+  ];
+  // Judged on isBlockedIpLiteral, the check every DNS answer goes through. A
+  // URL-level assertion would prove nothing here: see the next test.
+  it.each(blockedV6)('blocks IPv6 %s (%s)', (ip) => {
+    expect(isBlockedIpLiteral(`[${ip}]`)).toBe(true);
+    expect(isBlockedIpLiteral(ip)).toBe(true);
+  });
+
+  it('refuses every IPv6-literal URL statically (existing behaviour, unchanged)', () => {
+    // The bracketed hostname has no dot, so the single-label rule refuses it
+    // before any range check — a public IPv6 literal included. IPv6 targets
+    // are reached by name, and their DNS answers are range-checked.
+    const result = checkWebhookUrlStatic('http://[2606:4700:4700::1111]/hook');
+    expect(result).toEqual({ allowed: false, reason: 'blocked hostname: single-label hostname' });
+  });
+
+  it('still allows public addresses, including through NAT64 and SIIT', () => {
+    for (const ip of [
+      '8.8.8.8',
+      '[2606:4700:4700::1111]',
+      '[2a00:1450:4001:80b::200e]', // global unicast
+      '[64:ff9b::808:808]', // NAT64 to 8.8.8.8 — the embedded address is public
+      '[::ffff:0:808:808]', // SIIT 8.8.8.8
+      '[2001:200::1]', // first allocation just above 2001::/23
+    ]) {
+      expect(isBlockedIpLiteral(ip), ip).toBe(false);
+    }
+  });
+
+  it('keeps the boundaries exact', () => {
+    expect(isBlockedIpLiteral('198.17.255.255')).toBe(false); // below 198.18/15
+    expect(isBlockedIpLiteral('198.20.0.0')).toBe(false); // above 198.18/15
+    expect(isBlockedIpLiteral('223.255.255.255')).toBe(false); // below multicast
+    expect(isBlockedIpLiteral('[1fff:ffff::1]')).toBe(true); // just below 2000::/3
+    expect(isBlockedIpLiteral('[2001:1ff::1]')).toBe(true); // top of 2001::/23
+    expect(isBlockedIpLiteral('[3fff:fff::1]')).toBe(true); // top of 3fff::/20
+    expect(isBlockedIpLiteral('[3fff:1000::1]')).toBe(false); // just above 3fff::/20
   });
 
   it('returns false for non-IP hostnames (DNS path handles those)', () => {
@@ -252,6 +334,14 @@ describe('isBlockedHostname', () => {
     expect(isBlockedHostname('printer.local')).toBeTruthy();
     expect(isBlockedHostname('intranet')).toBeTruthy();
     expect(isBlockedHostname('LOCALHOST')).toBeTruthy(); // case-insensitive
+  });
+
+  it('blocks every name under .localhost and .home.arpa', () => {
+    expect(isBlockedHostname('api.localhost')).toBeTruthy(); // RFC 6761: loopback
+    expect(isBlockedHostname('a.b.LOCALHOST.')).toBeTruthy(); // case and trailing dot
+    expect(isBlockedHostname('nas.home.arpa')).toBeTruthy(); // RFC 8375: private network
+    expect(checkWebhookUrlStatic('http://admin.localhost:8080/hook').allowed).toBe(false);
+    expect(isBlockedHostname('localhost.example.com')).toBeNull(); // label boundary
   });
 
   it('allows normal public hostnames', () => {
