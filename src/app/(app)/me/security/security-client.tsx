@@ -197,8 +197,11 @@ export function SecurityClient() {
                 </Button>
               </div>
             ) : (
-              <form onSubmit={regenerateBackupCodes} className="flex items-end gap-2">
-                <div className="space-y-2">
+              <form
+                onSubmit={regenerateBackupCodes}
+                className="flex flex-col gap-2 sm:flex-row sm:items-end"
+              >
+                <div className="space-y-2 flex-1">
                   <Label htmlFor="regen-pw">Password</Label>
                   <Input
                     id="regen-pw"
@@ -206,18 +209,19 @@ export function SecurityClient() {
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    className="w-full"
                   />
                 </div>
-                <Button type="submit" variant="outline">
+                <Button type="submit" variant="outline" className="w-full sm:w-auto">
                   New backup codes
                 </Button>
               </form>
             )}
             <form
               onSubmit={disableTwoFactor}
-              className="flex items-end gap-2 border-t border-line pt-4"
+              className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-end"
             >
-              <div className="space-y-2">
+              <div className="space-y-2 flex-1">
                 <Label htmlFor="disable-pw">Password</Label>
                 <Input
                   id="disable-pw"
@@ -225,9 +229,10 @@ export function SecurityClient() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  className="w-full"
                 />
               </div>
-              <Button type="submit" variant="destructive">
+              <Button type="submit" variant="destructive" className="w-full sm:w-auto">
                 Turn off two-factor
               </Button>
             </form>
@@ -259,8 +264,11 @@ export function SecurityClient() {
                 </ul>
               </div>
             )}
-            <form onSubmit={confirmEnrollment} className="flex items-end gap-2">
-              <div className="space-y-2">
+            <form
+              onSubmit={confirmEnrollment}
+              className="flex flex-col gap-2 sm:flex-row sm:items-end"
+            >
+              <div className="space-y-2 flex-1">
                 <Label htmlFor="totp-code">Authenticator code</Label>
                 <Input
                   id="totp-code"
@@ -269,14 +277,20 @@ export function SecurityClient() {
                   required
                   value={verifyCode}
                   onChange={(e) => setVerifyCode(e.target.value)}
+                  className="w-full"
                 />
               </div>
-              <Button type="submit">Verify and enable</Button>
+              <Button type="submit" className="w-full sm:w-auto">
+                Verify and enable
+              </Button>
             </form>
           </div>
         ) : (
-          <form onSubmit={startEnrollment} className="mt-3 flex items-end gap-2">
-            <div className="space-y-2">
+          <form
+            onSubmit={startEnrollment}
+            className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
+          >
+            <div className="space-y-2 flex-1">
               <Label htmlFor="enroll-pw">Password</Label>
               <Input
                 id="enroll-pw"
@@ -286,9 +300,10 @@ export function SecurityClient() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={enrolling}
+                className="w-full"
               />
             </div>
-            <Button type="submit" disabled={enrolling}>
+            <Button type="submit" disabled={enrolling} className="w-full sm:w-auto">
               {enrolling ? 'Starting…' : 'Set up authenticator app'}
             </Button>
           </form>
@@ -361,10 +376,10 @@ export function SecurityClient() {
 
       {/* ── sessions ── */}
       <section className="rounded-lg border border-line bg-white p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-medium">Active sessions</h2>
           {sessions.length > 1 && (
-            <Button variant="outline" size="sm" onClick={revokeOthers}>
+            <Button variant="outline" size="sm" onClick={revokeOthers} className="w-full sm:w-auto">
               Sign out other sessions
             </Button>
           )}
@@ -373,12 +388,17 @@ export function SecurityClient() {
           {sessions.map((s) => (
             <li
               key={s.token}
-              className="flex items-center justify-between rounded border border-line px-3 py-2 text-sm"
+              className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded border border-line px-3 py-2 text-sm"
             >
-              <span className="text-ink-muted">
+              <span className="text-ink-muted break-words">
                 {s.userAgent ?? 'Unknown device'} · {new Date(s.createdAt).toLocaleString()}
               </span>
-              <Button variant="outline" size="sm" onClick={() => revokeSession(s.token)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => revokeSession(s.token)}
+                className="w-full sm:w-auto shrink-0"
+              >
                 Sign out
               </Button>
             </li>

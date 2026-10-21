@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Sidebar } from './sidebar';
+import { MobileNav } from './mobile-nav-server';
 import { MobileTabBar } from './mobile-tab-bar-server';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
@@ -12,6 +13,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-col">
         <header className="flex h-14 items-center gap-3 border-b border-rule px-6">
+          <MobileNav />
           <span className="shrink-0 text-sm text-ink-muted">PRAVSHI OS</span>
           {/* Workstream D (Search, 2026-10-07): global typeahead, header center.
               Re-applied after a parallel overwrite reverted it — D owns this
