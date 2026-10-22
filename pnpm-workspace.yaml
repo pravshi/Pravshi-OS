@@ -2,14 +2,21 @@ allowBuilds:
   '@sentry/cli': true
   esbuild: true
   unrs-resolver: true
+# Security floors. Each `pkg@<fixed: fixed` lifts only resolutions below the first
+# patched release, so it never holds a package at an old version once a newer fix ships
+# (exact pins held postcss, brace-expansion and the MCP SDK at vulnerable versions).
 overrides:
   proxy-addr: 2.0.8
-  brace-expansion@1: 1.1.20
-  brace-expansion@4: 5.0.11
-  brace-expansion@5: 5.0.11
+  brace-expansion@1: 1.1.21 # GHSA-q2hr-2g5m-vwhr
+  brace-expansion@4: 5.0.12 # GHSA-q2hr-2g5m-vwhr
+  brace-expansion@5: 5.0.12 # GHSA-q2hr-2g5m-vwhr
   source-map-js: 1.2.2
-  postcss: 8.5.18
-  '@modelcontextprotocol/sdk': 1.31.0
+  postcss@<8.5.23: 8.5.23 # GHSA-fxqj-rqcc-2cmp
+  '@modelcontextprotocol/sdk@<1.32.1': 1.32.1 # GHSA-22jm-h49p-29qw, GHSA-46jr-4wx8-v453, GHSA-6prh-2h8m-c8cw, GHSA-rvq5-wwqv-78pq
+  vite@<8.2.4: 8.2.4 # GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw
+  hono@<4.13.11: 4.13.11 # GHSA-5r4p-p66f-jhc7
+  ip-address@<10.7.1: 10.7.1 # GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw
+  fast-uri@<3.1.8: 3.1.8 # GHSA-hrr3-gc8f-f4qj
 
 auditConfig:
   ignoreGhsas:
