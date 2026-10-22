@@ -955,7 +955,7 @@ describe('the rest of the model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(105);
+    expect(Number(rows[0]!.n)).toBe(104); // 0077 drops deal_stage_history_insert (MT-L6)
     expect(Number(rows[0]!.with_scope)).toBe(22);
   });
 

@@ -438,30 +438,90 @@ describe('tenant isolation', () => {
     ).toBe('42501');
   });
 
-  it('direct history inserts are gated on deals.edit (the trigger is the primary writer)', async () => {
-    // 0037: the INSERT policy exists so the table is not silently unwritable
-    // outside the trigger path, gated on authz.has('deals.edit'). pManage
-    // holds no deals.* grant; pMove holds deals.edit GLOBAL.
-    expect(
-      await sqlstateOf(
-        inContext(
-          ctxOf(pManage),
-          `insert into public.deal_stage_history
-             (org_id, deal_id, from_stage_id, to_stage_id, changed_by)
-           values ($1,$2,$3,$4,$5)`,
-          [orgA, dealA, stA1, stA2, pManage],
-        ),
-      ),
-    ).toBe('42501');
-    const rows = await inContext<{ id: string }>(
-      ctxOf(pMove),
-      `insert into public.deal_stage_history
-         (org_id, deal_id, from_stage_id, to_stage_id, changed_by)
-       values ($1,$2,$3,$4,$5) returning id`,
-      [orgA, dealA, stA1, stA2, pMove],
+  // 0077 (Phase 3, MT-L6): history is written only by deals_record_stage_history().
+  // 0037's INSERT policy let a deals.edit holder executing SQL as app_user write
+  // rows the trigger never would; the policy and the INSERT/UPDATE grants are gone.
+  const historyCount = async () =>
+    Number(
+      (
+        await owner.query<{ n: string }>(
+          `select count(*) n from public.deal_stage_history where deal_id = $1`,
+          [dealA],
+        )
+      ).rows[0]!.n,
     );
-    expect(rows).toHaveLength(1);
-    await owner.query(`delete from public.deal_stage_history where id = $1`, [rows[0]!.id]);
+  const insertHistory = (as: string, cols: Record<string, unknown>) => {
+    const keys = Object.keys(cols);
+    return inContext(
+      ctxOf(as),
+      `insert into public.deal_stage_history (${keys.join(', ')})
+       values (${keys.map((_, i) => `$${i + 1}`).join(', ')})`,
+      Object.values(cols),
+    );
+  };
+
+  it.each([
+    ['pManage (no deals.* grant)', () => pManage, () => ({})],
+    ['pMove (deals.edit GLOBAL), a plausible own-org row', () => pMove, () => ({})],
+    ['pMove naming another organization’s stage', () => pMove, () => ({ to_stage_id: stB1 })],
+    ['pMove naming another organization’s person', () => pMove, () => ({ changed_by: pForeign })],
+    ['pMove naming a colleague as the actor', () => pMove, () => ({ changed_by: pManage })],
+    ['pMove backdating the move', () => pMove, () => ({ changed_at: '2000-01-01T00:00:00Z' })],
+    ['pMove future-dating the move', () => pMove, () => ({ changed_at: '2999-01-01T00:00:00Z' })],
+  ])('a direct history insert is refused: %s', async (_label, who, override) => {
+    const before = await historyCount();
+    const state = await sqlstateOf(
+      insertHistory(who(), {
+        org_id: orgA,
+        deal_id: dealA,
+        from_stage_id: stA1,
+        to_stage_id: stA2,
+        changed_by: who(),
+        ...override(),
+      }),
+    );
+    expect(state).toBe('42501');
+    expect(await historyCount()).toBe(before);
+  });
+
+  it('app_user holds no INSERT or UPDATE on deal_stage_history, and no write policy', async () => {
+    const privs = await owner.query<{ ins: boolean; upd: boolean }>(
+      `select has_table_privilege('app_user', 'public.deal_stage_history', 'INSERT') ins,
+              has_table_privilege('app_user', 'public.deal_stage_history', 'UPDATE') upd`,
+    );
+    expect(privs.rows[0]).toEqual({ ins: false, upd: false });
+    const policies = await owner.query<{ policyname: string }>(
+      `select policyname from pg_policies
+        where schemaname = 'public' and tablename = 'deal_stage_history'
+          and cmd in ('INSERT', 'UPDATE', 'ALL') and 'app_user' = any(roles)`,
+    );
+    expect(policies.rows).toEqual([]);
+  });
+
+  it('a deal move that rolls back leaves no history row (one transaction)', async () => {
+    const before = await historyCount();
+    const c = await owner.connect();
+    try {
+      await c.query('begin');
+      const current = await c.query<{ s: string | null }>(
+        `select pipeline_stage_id s from public.deals where id = $1`,
+        [dealA],
+      );
+      const target = current.rows[0]!.s === stA2 ? stA1 : stA2;
+      await c.query(`update public.deals set pipeline_stage_id = $1 where id = $2`, [
+        target,
+        dealA,
+      ]);
+      const inside = await c.query<{ n: string }>(
+        `select count(*) n from public.deal_stage_history where deal_id = $1`,
+        [dealA],
+      );
+      expect(Number(inside.rows[0]!.n)).toBe(before + 1);
+      await c.query('rollback');
+    } finally {
+      c.release();
+    }
+    expect(await historyCount()).toBe(before);
   });
 
   it('cross-tenant pipeline update touches zero rows (fail closed, not an error)', async () => {
@@ -1097,40 +1157,39 @@ describe('history has no delete path', () => {
 });
 
 describe('history update rules', () => {
-  it('history is append-only: even a deals.edit holder updates zero rows', async () => {
-    // 0037 deliberately ships NO UPDATE policy on deal_stage_history (F3
-    // security review) — history rows are written once by the recorder
-    // trigger and never modified. The application never updates history rows,
-    // and the database enforces it: UPDATE touches zero rows, fail closed.
-    const target = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where org_id=$1 limit 1`,
+  // 0037 shipped NO UPDATE policy on deal_stage_history (F3 security review), so
+  // an update touched zero rows. 0077 (MT-L6) also revokes the UPDATE grant: the
+  // statement is now refused outright (42501), and the row is unchanged either way.
+  const historyRow = async () =>
+    (
+      await owner.query<{ id: string; changed_at: string }>(
+        `select id, changed_at::text from public.deal_stage_history where org_id=$1 limit 1`,
         [orgA],
       )
-    ).rows[0]?.id;
-    expect(target).toBeTruthy();
-    const rows = await inContext(
-      ctxOf(pMove),
-      `update public.deal_stage_history set changed_at = now() where id=$1 returning id`,
-      [target],
-    );
-    expect(rows).toHaveLength(0);
-  });
+    ).rows[0];
 
-  it('history update without deals.edit touches zero rows', async () => {
-    const target = (
-      await owner.query<{ id: string }>(
-        `select id from public.deal_stage_history where org_id=$1 limit 1`,
-        [orgA],
+  it.each([
+    ['a deals.edit holder', () => pMove],
+    ['a holder without deals.edit', () => pView],
+  ])('history is append-only: an update by %s is refused', async (_label, who) => {
+    const before = await historyRow();
+    expect(before?.id).toBeTruthy();
+    expect(
+      await sqlstateOf(
+        inContext(
+          ctxOf(who()),
+          `update public.deal_stage_history set changed_at = now() where id=$1 returning id`,
+          [before!.id],
+        ),
+      ),
+    ).toBe('42501');
+    const after = (
+      await owner.query<{ changed_at: string }>(
+        `select changed_at::text from public.deal_stage_history where id=$1`,
+        [before!.id],
       )
-    ).rows[0]?.id;
-    expect(target).toBeTruthy();
-    const rows = await inContext(
-      ctxOf(pView),
-      `update public.deal_stage_history set changed_at = now() where id=$1 returning id`,
-      [target],
-    );
-    expect(rows).toHaveLength(0);
+    ).rows[0];
+    expect(after?.changed_at).toBe(before!.changed_at);
   });
 });
 

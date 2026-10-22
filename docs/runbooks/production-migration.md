@@ -42,8 +42,8 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** The only down-migrations in this repo are the two
-   prepared rollback scripts in `scripts/db/rollback/` (for 0073 and 0075), each
+2. **Forward-fix only.** The only down-migrations in this repo are the three
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075 and 0077), each
    run only with Nani's explicit approval as Failure doctrine (d) describes;
    none are invented at incident time. Every other failure is fixed by a new PR
    and a new or corrective migration, rehearsed again from Step 2.
@@ -69,7 +69,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 76 75 0076_job_schedule_principal_binding
+      # expected at the current release: 77 76 0077_deal_history_and_org_identity
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -106,10 +106,10 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
 ## The chain as of writing
 
-The repo journal holds 76 entries (idx 0–75). Per project records, production
+The repo journal holds 77 entries (idx 0–76). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-31 migrations **idx 45–75 (0045–0076)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4575). Step 0 verifies this;
+32 migrations **idx 45–76 (0045–0077)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4576). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the journal's **order is its
@@ -119,7 +119,7 @@ ordering the history by `created_at` is not journal order, and drizzle-kit's
 rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
 skip pending entries from a database stopped inside those ranges. The runner
 does not use that rule: it verifies the history as an exact prefix and applies
-the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–75 —
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–76 —
 no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
@@ -166,7 +166,7 @@ state project records describe, K = 45
 rows: count `45`, max_created_at `1791111413392`, last hash
 `44fedb2f8e658d709156c6d4ac7482aa31dde45608ba921674d01b2329d7c6d4`
 (idx 44, `0044_workflow_engine`). Any other clean prefix (a different K) is
-also workable — the pending chain is then idx K…75 — but record the
+also workable — the pending chain is then idx K…76 — but record the
 difference prominently; it means the 2026-10-06 run (or another act) applied
 more than the records show.
 
@@ -226,22 +226,22 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 76, last applied created_at: 1791111413392
-   verified history: 45 of 76 entries match the repository (idx 0-44, through 0044_workflow_engine)
+   journal entries: 77, last applied created_at: 1791111413392
+   verified history: 45 of 77 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
-   applying idx 75 0076_job_schedule_principal_binding (… statements)
-   done: applied 31, total 76
+   applying idx 76 0077_deal_history_and_org_identity (… statements)
+   done: applied 32, total 77
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `76`, max_created_at `1791591728057`, and the
-     hash list in `id` order equal to the file-byte hashes of idx 0…75.
+     full repo state: count `77`, max_created_at `1791592728057`, and the
+     hash list in `id` order equal to the file-byte hashes of idx 0…76.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
-     security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity)) run green against the branch, or in CI's equivalent
+     security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity), deal-stage history and organization identity (CRM pipelines, organizations)) run green against the branch, or in CI's equivalent
      from-empty shape. Note what this rehearsal proves that CI cannot: the
      **upgrade path** — the chain applied over lived-in 0044 data, not over
      an empty database.
@@ -303,8 +303,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `76`, max_created_at `1791591728057`, hash list in `id` order equal to
-   the file-byte hashes of idx 0…75 (same comparison method as Step 0).
+   count `77`, max_created_at `1791592728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…76 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -394,7 +394,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the two prepared rollback scripts described under (d) below (for 0073 and 0075),
+the three prepared rollback scripts described under (d) below (for 0073, 0075 and 0077),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 
@@ -429,6 +429,10 @@ invented at incident time.
   sqlstate 55P03, then `audit partition window ends soon`). It brings back the 0062 lock order —
   maintenance waiting while holding `audit_logs`, deadlocking or stalling audited writes while a
   partition is created — so it too needs Nani's explicit approval and a run-record entry.
+  `scripts/db/rollback/0077_deal_history_and_org_identity.down.sql` restores the 0076 state
+  — `app_user`'s direct INSERT policy on `deal_stage_history` and a changeable organization
+  id and slug — for the case where something legitimate turns out to depend on either. It
+  RE-OPENS MT-L6 and MT-L1, so it needs Nani's explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -438,7 +442,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–75)
+## Appendix A — The pending chain (idx 45–76)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -494,13 +498,14 @@ re-apply.
 | 73  | `0074_admin_target_visibility` | 1791589728057 | `3f485a690d7bee8438428b4214712db7062261264b28a5469d7dddab972d8c53` |
 | 74  | `0075_audit_partition_lock_order` | 1791590728057 | `b31ce1bf74ba925cebdf486ee3a03cf3dc2fb60350b2ba947bc02b58dad8a9e0` |
 | 75  | `0076_job_schedule_principal_binding` | 1791591728057 | `3a2ebbfbaaee84a595d7e8cad516b24ef7527c2dd645b386a8a457e93c925de6` |
+| 76  | `0077_deal_history_and_org_identity` | 1791592728057 | `94ba7dcbacf4d91c46932006aa74ec51672f7925d89cb1abb42b3c564f6b8fc2` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `76`,
-max_created_at `1791591728057`.
+Final expected state after a complete run: count `77`,
+max_created_at `1791592728057`.
 
 ## Appendix B — Run record template
 
@@ -531,7 +536,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 76 / max 1791591728057 / hashes): yes/no
+  - journal == repo (count 77 / max 1791592728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

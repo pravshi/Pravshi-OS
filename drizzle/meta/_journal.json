@@ -577,6 +577,14 @@
       "tag": "0076_job_schedule_principal_binding",
       "breakpoints": true,
       "hash": "3a2ebbfbaaee84a595d7e8cad516b24ef7527c2dd645b386a8a457e93c925de6"
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791592728057,
+      "tag": "0077_deal_history_and_org_identity",
+      "breakpoints": true,
+      "hash": "94ba7dcbacf4d91c46932006aa74ec51672f7925d89cb1abb42b3c564f6b8fc2"
     }
   ]
 }

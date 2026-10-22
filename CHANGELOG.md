@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0076 (production still pending — see the
+Database migrations: 0063–0077 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -185,6 +185,16 @@ Database migrations: 0063–0076 (production still pending — see the
   ordinary rejection. Nothing is cancelled — the work resumes when the
   organization is active again. A job already running when the organization is
   suspended finishes, or is recovered if its worker dies.
+- Deal-stage history can no longer be forged (migration 0077, Phase 3 MT-L6).
+  Its rows are written only by the trigger that records a deal's stage change,
+  in the same transaction and with the real actor. The runtime role lost the
+  direct INSERT path (policy and grant) that let SQL-level access insert rows
+  naming another organization's stages or people, another person as the actor,
+  or any date — rows that fed the CRM lead and velocity reports and the
+  deduplication of workflow and webhook events.
+- An organization's id and slug are fixed once it is created (migration 0077,
+  Phase 3 MT-L1): a trigger refuses any change to either. Name, status and
+  deletion stay changeable. A prepared rollback restores the 0076 state.
 
 ### Changed
 

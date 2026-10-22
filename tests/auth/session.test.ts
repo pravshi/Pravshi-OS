@@ -446,7 +446,7 @@ describe('the authorization boundary is unmoved', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints.
     // The *_owner_all policies target app_owner and are not counted here.
-    expect(Number(policies.rows[0]!.n)).toBe(105);
+    expect(Number(policies.rows[0]!.n)).toBe(104); // 0077 drops deal_stage_history_insert (MT-L6)
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
