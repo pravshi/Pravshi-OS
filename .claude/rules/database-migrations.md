@@ -34,8 +34,12 @@ paths:
   production runbook's Appendix A row and pinned counts (`tests/guards/production-runbook-journal.test.ts`
   enforces them), forbidden-case tests, and a rehearsal on a disposable database from the
   previous `main` state with representative rows.
-- Rollback scripts exist only for 0073 and 0075 (`scripts/db/rollback/`); none is invented at
-  incident time.
+- Rollback scripts exist only for 0073 and 0075 on `main`, plus 0077's, which ships with its
+  migration (`scripts/db/rollback/`); a migration that needs one prepares it in the same
+  change. None is invented at incident time.
+- Re-running `scripts/db/roles.sql` re-grants select/insert/update on every public table to
+  `app_user`, undoing table-level revokes made by migrations (0002 organizations/people, 0077
+  deal_stage_history). RLS policies are the durable control; never rely on a revoke alone.
 
 ## Roles
 
