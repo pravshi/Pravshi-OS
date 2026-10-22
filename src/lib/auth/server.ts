@@ -50,6 +50,62 @@ export const sessionAssuranceFor = (path: string | undefined): 'aal1' | 'aal2' =
   typeof path === 'string' && path.startsWith(TWO_FACTOR_VERIFY_PREFIX) ? 'aal2' : 'aal1';
 
 /**
+ * ── ONE HTTP PATH FOR THE SIGN-IN SECOND FACTOR (FU-2) ─────────────────────────
+ *
+ * POST /api/auth/mfa/verify is the only HTTP route that completes a sign-in second
+ * factor: it throttles per client address (B1 helpers, 10 a minute) and records
+ * MFA_FAILURE / LOGIN_SUCCESS. Better Auth also mounts its own verification
+ * endpoints under the [...all] catch-all, with separate per-path counters and no
+ * login_events trace, so they are closed to HTTP here — without touching the
+ * auth.api.* calls the mediated route makes, which reach the same endpoints.
+ *
+ * Two facts about the installed library (1.7.3) make that distinction possible:
+ *
+ *   * disabledPaths is checked only in the HTTP router's onRequest (api/index.mjs),
+ *     before the rate limiter and before any endpoint; auth.api.* never passes there.
+ *   * hooks run for HTTP and auth.api.* alike, with the same ctx.path. Only the
+ *     router puts the incoming Request on the context (better-call router.mjs), so
+ *     ctx.request is what tells them apart. The mediated route passes headers, never
+ *     a request — tests/guards/mfa-single-signin-path.test.ts pins that.
+ *
+ * Backup codes and email OTP have no HTTP caller in the application (no sendOTP is
+ * configured, so OTP cannot succeed anyway): both are disabled outright. TOTP cannot
+ * be: enrolment confirms the first code through the library endpoint over HTTP, with
+ * a session (security-client.tsx, scripts/bootstrap/README.md). So a routed
+ * verification is refused only when it carries the sign-in challenge cookie — the
+ * plugin can only take its sign-in branch with that cookie (verify-two-factor.mjs:
+ * no session → the signed `two_factor` cookie, or INVALID_TWO_FACTOR_COOKIE), so its
+ * presence alone, signed or not, is enough to refuse. Enrolment carries a session and
+ * no challenge, and is untouched.
+ */
+export const HTTP_DISABLED_AUTH_PATHS = [
+  '/two-factor/verify-backup-code',
+  '/two-factor/verify-otp',
+] as const;
+
+/** The two-factor plugin's challenge cookie (TWO_FACTOR_COOKIE_NAME in 1.7.3). */
+export const TWO_FACTOR_CHALLENGE_COOKIE = 'two_factor';
+
+/** The slice of a hook context the routed-challenge check reads. */
+interface VerificationHookContext {
+  path?: string;
+  request?: unknown;
+  getCookie: (key: string) => string | null;
+  context: { createAuthCookie: (name: string) => { name: string } };
+}
+
+/**
+ * True for an HTTP request to a second-factor verification endpoint that carries the
+ * sign-in challenge — the one shape the mediated route alone may complete.
+ */
+export function isRoutedSignInChallengeVerification(ctx: VerificationHookContext): boolean {
+  if (typeof ctx.path !== 'string' || !ctx.path.startsWith(TWO_FACTOR_VERIFY_PREFIX)) return false;
+  if (ctx.request === undefined || ctx.request === null) return false;
+  const challenge = ctx.context.createAuthCookie(TWO_FACTOR_CHALLENGE_COOKIE).name;
+  return ctx.getCookie(challenge) !== null;
+}
+
+/**
  * ── THE SIGN-IN CHOKE POINT (Phase 11, F-11-04 / F-11-05) ─────────────────────
  *
  * The per-account lockout and the login-event recording used to live only in the
@@ -239,6 +295,9 @@ export const auth = betterAuth({
    * Sign-in is singled out well below the default because it is the endpoint being guessed
    * at — ten attempts a minute from one address, against a hundred for everything else.
    */
+  /** HTTP-only refusals (404): see the FU-2 note above HTTP_DISABLED_AUTH_PATHS. */
+  disabledPaths: [...HTTP_DISABLED_AUTH_PATHS],
+
   rateLimit: {
     enabled: true,
     window: 60,
@@ -434,6 +493,19 @@ export const auth = betterAuth({
         throw new APIError('BAD_REQUEST', {
           message:
             'Trusted devices are disabled: every privileged session must verify its second factor.',
+        });
+      }
+
+      /**
+       * The sign-in second factor completes over HTTP only through the mediated
+       * /api/auth/mfa/verify route (FU-2 — see the note above
+       * HTTP_DISABLED_AUTH_PATHS). A routed verification carrying the challenge
+       * is refused before the endpoint runs, so it spends none of the challenge's
+       * attempts; the route's own auth.api calls carry no request and pass.
+       */
+      if (isRoutedSignInChallengeVerification(ctx)) {
+        throw new APIError('FORBIDDEN', {
+          message: 'Complete the second factor through the sign-in page.',
         });
       }
 

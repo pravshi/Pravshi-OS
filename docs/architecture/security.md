@@ -325,6 +325,61 @@ that same receipt, and the workflow dedup key keeps the work exactly-once. A del
 no external event id is instead recorded as a payload duplicate, so its original receipt stays
 `RECEIVED`. Pinned by `tests/integrations/inbound-key-rotation.test.ts`.
 
+**One HTTP path for the sign-in second factor (T-18, FU-2).** After a correct password, an
+enrolled person holds only a challenge: the two-factor plugin's `better-auth.two_factor` cookie
+(`__Secure-` prefixed in production), good for 600 seconds and one session. `POST
+/api/auth/mfa/verify` is the only HTTP route that completes it. That route checks a per-address
+limit before any factor check — ten attempts a minute in the `mfa:verify` bucket, one allowance for
+TOTP and backup codes, the address taken through B1's `clientIp()` and keyed by
+`ipRateLimitKey()` (IPv4 as itself, IPv4-mapped IPv6 as IPv4, other IPv6 by its /64, anything
+malformed as one shared `unknown` bucket) — and refuses with its generic `INVALID_CODE` when the
+limiter cannot answer. It records `MFA_FAILURE` and `LOGIN_SUCCESS` in `public.login_events`. It
+delegates the check itself to Better Auth (`auth.api.verifyTOTP` / `verifyBackupCode`), so the
+library's own per-account bounds apply underneath on every path: five attempts per challenge,
+and a lockout after ten consecutive failures across challenges and both factors, for 900 seconds.
+
+The library also mounts its own verification endpoints under `[...all]`; over HTTP they would
+have their own per-path counters and leave no `login_events` trace. They are closed to the
+challenge, for HTTP only (`src/lib/auth/server.ts`):
+
+- `/two-factor/verify-backup-code` and `/two-factor/verify-otp` are in Better Auth's
+  `disabledPaths`, which the installed version (1.7.3) checks only in its HTTP router: such a
+  request is answered `404` before the rate limiter or any endpoint. Nothing in the application
+  calls either over HTTP, and OTP cannot succeed anyway (no `sendOTP` is configured).
+- `/two-factor/verify-totp` stays open over HTTP because enrolment confirms the first code
+  through it (`/me/security`, the bootstrap runbook). The before-hook refuses (`403`) a
+  verification request that came through the router **and** carries the challenge cookie, signed
+  or not. The plugin can take its sign-in branch only with that cookie, so this refuses every HTTP
+  attempt to complete a sign-in through the library, before the endpoint runs and without
+  spending one of the challenge's attempts. Enrolment carries a session and no challenge, and is
+  unaffected.
+- Hooks see the same path for an HTTP request and an `auth.api` call; only the router puts the
+  `Request` on the hook context (`ctx.request`), and that is what the refusal keys on. The
+  mediated route passes headers, never a request, so its own `auth.api` calls are not refused —
+  a guard pins that.
+
+The installed router routes on the URL's pathname: dot segments and the query are resolved first,
+and any other spelling (case, extra or trailing slashes, percent-encoding, `;`) matches no route.
+No spelling reaches a verification endpoint. Pinned by `tests/auth/mfa-single-signin-path.test.ts`
+(the real `auth` instance, `[...all]` route and mediated route, with in-memory storage) and
+`tests/guards/mfa-single-signin-path.test.ts`; the route's limiter by
+`tests/auth/mfa-verify-rate-limit.test.ts` and `tests/guards/mfa-verify-rate-limit.test.ts`.
+A Better Auth upgrade that adds a verification endpoint fails the pinned endpoint list.
+
+Still open:
+
+- **FU-1, the client address.** The route trusts the first `x-forwarded-for` entry, which is
+  sound only if the ingress overwrites that header. The deployment path is not verified; until
+  it is, per-address limits are a ceiling an attacker with many addresses can spread across. The
+  per-account bounds above do not depend on it.
+- **FU-3 / F-MFA-5.** `authz.check_rate_limit` can admit concurrent first uses of a fresh
+  bucket; the fix is a migration, which needs its own approval.
+- **Enrolment is not audited in `login_events`.** Enrolment confirmations through the library's
+  HTTP endpoint are bounded by the library's router limit (three per ten seconds per address) and
+  record no event. Whether to audit them is a separate decision.
+- **Not verified here:** what Next.js does to a request URL before the route sees it, and the
+  library's limiter-failure path on a real database.
+
 ---
 
 ## 5. Testing strategy
