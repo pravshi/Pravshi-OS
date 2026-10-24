@@ -690,7 +690,7 @@ describe('the rest of the authorization model is unchanged', () => {
     // select/insert on integration_webhook_deliveries, select/insert/update
     // on each of integration_inbound_events and
     // integration_sync_checkpoints).
-    expect(policies.rows[0]!.n).toBe(104); // 0077 drops deal_stage_history_insert (MT-L6)
+    expect(policies.rows[0]!.n).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {

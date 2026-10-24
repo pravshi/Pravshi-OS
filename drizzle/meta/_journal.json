@@ -601,6 +601,14 @@
       "tag": "0079_rate_limit_first_use",
       "breakpoints": true,
       "hash": "29fd79c1d77320849edaf43d3ef38dce96876ac73b16e647be58546fd1b41a5e"
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1791595728057,
+      "tag": "0080_organization_types",
+      "breakpoints": true,
+      "hash": "b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91"
     }
   ]
 }

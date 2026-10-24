@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0079 (production still pending — see the
+Database migrations: 0063–0080 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
 
+- Organization types and versioned organization templates (migration 0080). Every
+  organization records the operating type it was created from — `generic_crm`,
+  `real_estate_crm`, `education_crm`, from a controlled catalog — and the template version
+  it was seeded with. A template defines the pipelines and stages an organization starts
+  with; a published version is immutable, and an upgrade to a newer version of the same
+  type only adds what the organization lacks. Existing organizations are `generic_crm`
+  version 1, which is exactly the six-stage default pipeline every organization already
+  had, so nothing changes for them or for new organizations created without a type.
+  Real Estate and Education are catalogued but disabled until their templates are
+  approved. Prepared rollback: `scripts/db/rollback/0080_organization_types.down.sql`.
 - Low-cost worker mode for the Neon Free plan (the default). Neon Free suspends
   compute only after five minutes without a query and caps a project at 100
   CU-hours a month; a worker polling every 10 seconds kept compute awake

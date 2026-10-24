@@ -1037,7 +1037,7 @@ describe('the rest of the authorization model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(104); // 0077 drops deal_stage_history_insert (MT-L6)
+    expect(Number(policies.rows[0]!.n)).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
     expect(Number(policies.rows[0]!.with_scope)).toBe(22);
   });
 

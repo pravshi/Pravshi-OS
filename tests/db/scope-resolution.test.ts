@@ -946,7 +946,7 @@ describe('RLS', () => {
     // integration_inbound_events and integration_sync_checkpoints — none of
     // them scope-driven (they branch on authz.has), so with_scope below
     // stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(104); // 0077 drops deal_stage_history_insert (MT-L6)
+    expect(Number(rows[0]!.n)).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
