@@ -159,7 +159,7 @@ it from this page.** Follow
 [docs/runbooks/production-migration.md](docs/runbooks/production-migration.md): verify the
 current production journal state read-only, freeze and snapshot, rehearse the full chain
 on the snapshot branch, then apply and verify. Migrations are forward-fix only. The three
-exceptions are prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075 and 0077); the
+exceptions are prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077 and 0078); the
 runbook says when each may be used, and each needs the founder's explicit approval for that
 step. Executing the runbook requires founder approval (gate HG-2).
 

@@ -585,6 +585,14 @@
       "tag": "0077_deal_history_and_org_identity",
       "breakpoints": true,
       "hash": "94ba7dcbacf4d91c46932006aa74ec51672f7925d89cb1abb42b3c564f6b8fc2"
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791593728057,
+      "tag": "0078_audit_history_truncate_guard",
+      "breakpoints": true,
+      "hash": "283691fcf94bda9df7290fa4d74240238d9ff4767e6cea90a49f048cda1e82b2"
     }
   ]
 }

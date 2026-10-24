@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0077 (production still pending — see the
+Database migrations: 0063–0078 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -113,6 +113,11 @@ Database migrations: 0063–0077 (production still pending — see the
 
 ### Security
 
+- Audit history cannot be truncated (migration 0078, Phase 3 MT-L3). `audit_logs` — the
+  parent and every partition, including partitions created later — `login_events` and
+  `engagement_events` refuse TRUNCATE, so a TRUNCATE … CASCADE reaching them is refused as a
+  whole. Row triggers already refused UPDATE and DELETE; a statement trigger on the
+  partitioned parent is not inherited by its partitions, hence one per partition.
 - A job or schedule can only run as the person who created it, enforced in the database
   (migration 0076). A workflow job runs with the permissions of the person who enqueued it and a
   scheduled run with those of the schedule's creator; at the SQL level, a member allowed to
