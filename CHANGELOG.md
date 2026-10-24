@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0078 (production still pending — see the
+Database migrations: 0063–0079 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -118,6 +118,10 @@ Database migrations: 0063–0078 (production still pending — see the
   `engagement_events` refuse TRUNCATE, so a TRUNCATE … CASCADE reaching them is refused as a
   whole. Row triggers already refused UPDATE and DELETE; a statement trigger on the
   partitioned parent is not inherited by its partitions, hence one per partition.
+- Rate-limit buckets count concurrent first uses (migration 0079, FU-3 / F-MFA-5).
+  `authz.check_rate_limit()` is a single upsert, so simultaneous first requests on a key are
+  each counted instead of one failing with a unique violation — which callers turned into a
+  spurious refusal and an alert. Counting semantics are unchanged.
 - A job or schedule can only run as the person who created it, enforced in the database
   (migration 0076). A workflow job runs with the permissions of the person who enqueued it and a
   scheduled run with those of the schedule's creator; at the SQL level, a member allowed to

@@ -593,6 +593,14 @@
       "tag": "0078_audit_history_truncate_guard",
       "breakpoints": true,
       "hash": "283691fcf94bda9df7290fa4d74240238d9ff4767e6cea90a49f048cda1e82b2"
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791594728057,
+      "tag": "0079_rate_limit_first_use",
+      "breakpoints": true,
+      "hash": "29fd79c1d77320849edaf43d3ef38dce96876ac73b16e647be58546fd1b41a5e"
     }
   ]
 }
