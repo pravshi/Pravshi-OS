@@ -15,14 +15,33 @@ import { Pool } from '@neondatabase/serverless';
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });
 
-/** Runs one statement inside a rolled-back transaction and returns its SQLSTATE. */
-async function stateInRollback(sql: string): Promise<string> {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * TRUNCATE public.<table> inside a rolled-back transaction; returns its SQLSTATE.
+ *
+ * The table's ACCESS EXCLUSIVE lock is taken first with NOWAIT, retried until it is free, so the
+ * probe never WAITS in the lock queue. A queued ACCESS EXCLUSIVE request on the hot audit_logs
+ * parent blocks every audit writer behind it and makes the maintenance function's own NOWAIT
+ * fail; on a shared database that flaked the parallel partition-maintenance suite. Held this way
+ * the lock lasts milliseconds: the guard fires at once, and the rollback releases it.
+ */
+async function truncateStateInRollback(table: string): Promise<string> {
   const c = await owner.connect();
   try {
-    await c.query('begin');
-    await c.query(`set local lock_timeout = '5s'`);
+    for (let attempt = 1; ; attempt += 1) {
+      await c.query('begin');
+      try {
+        await c.query(`lock table public.${table} in access exclusive mode nowait`);
+        break;
+      } catch (error) {
+        await c.query('rollback');
+        if ((error as { code?: string }).code !== '55P03' || attempt === 400) throw error;
+        await sleep(25);
+      }
+    }
     try {
-      await c.query(sql);
+      await c.query(`truncate public.${table}`);
       return 'SUCCEEDED';
     } catch (error) {
       return (error as { code?: string }).code ?? String(error);
@@ -49,7 +68,7 @@ describe.skipIf(!HAS_DB)('append-only history cannot be truncated (MT-L3, 0078)'
   it.each(['audit_logs', 'login_events', 'engagement_events'])(
     'TRUNCATE public.%s is refused',
     async (table) => {
-      expect(await stateInRollback(`truncate public.${table}`)).toBe('23514');
+      expect(await truncateStateInRollback(table)).toBe('23514');
     },
   );
 
@@ -57,7 +76,7 @@ describe.skipIf(!HAS_DB)('append-only history cannot be truncated (MT-L3, 0078)'
     const names = await partitions();
     expect(names.length).toBeGreaterThan(0);
     for (const name of names) {
-      expect({ name, state: await stateInRollback(`truncate public.${name}`) }).toEqual({
+      expect({ name, state: await truncateStateInRollback(name) }).toEqual({
         name,
         state: '23514',
       });
