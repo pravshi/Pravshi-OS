@@ -344,6 +344,30 @@ const CONTRACT_COLUMNS: Record<string, Record<string, string>> = {
 };
 
 /**
+ * Applies DDL in one transaction behind a transaction-level advisory lock.
+ *
+ * Every work suite calls ensureWorkSchema(), and vitest runs the files in parallel. PostgreSQL
+ * does not serialise two sessions that CREATE OR REPLACE the same function: the loser fails with
+ * "tuple concurrently updated" (reproduced: 50 of 320 attempts from 8 parallel sessions). The lock
+ * makes the second caller wait for the first and then re-apply the same, idempotent statements,
+ * so each suite still gets the definition it asserts against — nothing is skipped or weakened.
+ */
+async function applyDdlSerialized(owner: Pool, ...statements: string[]): Promise<void> {
+  const client = await owner.connect();
+  try {
+    await client.query('begin');
+    await client.query(`select pg_advisory_xact_lock(hashtext('pravshi-test:work-schema-ddl'))`);
+    for (const ddl of statements) await client.query(ddl);
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Provision the Phase 4 work schema from the contract, or — when the real
  * migration 0042 has already created the tables — verify catalogue-level
  * conformance (FORCE RLS, contract columns) and skip the DDL. Permission keys
@@ -356,12 +380,11 @@ export async function ensureWorkSchema(owner: Pool): Promise<boolean> {
     `select to_regclass('public.work_projects') is not null as exists`,
   );
   if (!rows[0]!.exists) {
-    await owner.query(CONTRACT_DDL);
-    await owner.query(WORK_SOFT_DELETE_DDL);
+    await applyDdlSerialized(owner, CONTRACT_DDL, WORK_SOFT_DELETE_DDL);
     return true;
   }
   // The function is versioned separately from the tables: always (re)apply.
-  await owner.query(WORK_SOFT_DELETE_DDL);
+  await applyDdlSerialized(owner, WORK_SOFT_DELETE_DDL);
   // Conformance path: the real migration exists — fail loudly on drift.
   for (const [table, cols] of Object.entries(CONTRACT_COLUMNS)) {
     const { rows: force } = await owner.query<{ rls: boolean }>(
