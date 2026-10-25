@@ -5,6 +5,7 @@
  *      audit_logs partitioned twelve months ahead. audit_logs has no DEFAULT
  *      partition, so without this the window set by migration 0011 simply runs
  *      out and every audited write starts failing (finding D-1).
+ *   1b. Abandoned imports — public.crm_import_fail_abandoned(limit) (0081).
  *   2. Data retention — public.run_data_retention(limit) deletes operational
  *      history and expired auth bookkeeping past fixed periods (the table is in
  *      the 0065 header), at most `limit` rows per target per call (finding D-2).
@@ -36,6 +37,8 @@ export interface DbMaintenanceResult {
   partitions: { created: number; windowEnd: string } | null;
   /** Per-target deleted counts; null when the retention step failed. */
   retention: Record<string, number> | null;
+  /** Sales Sheet imports marked FAILED because their job ended without an outcome (0081). */
+  abandonedImports?: number | null;
 }
 
 // ── Worker-plane DB (same model as reapStaleJobs in worker.ts) ──────────────
@@ -98,6 +101,19 @@ export async function runDataRetention(
   return Object.fromEntries(rows.rows.map((r) => [r.target, Number(r.deleted)]));
 }
 
+/**
+ * Sales Sheet imports still QUEUED or RUNNING whose job is gone, succeeded, dead-lettered or
+ * cancelled are marked FAILED (JOB_ENDED) and audited — an import never stays in progress
+ * without a recorded outcome (0081 crm_import_fail_abandoned).
+ */
+export async function failAbandonedImports(limit = RETENTION_BATCH_DEFAULT): Promise<number> {
+  const safeLimit = validateBatchLimit(limit);
+  const rows = await withWorkerDb((tx) =>
+    tx.execute<{ n: number }>(sql`select public.crm_import_fail_abandoned(${safeLimit}) as n`),
+  );
+  return Number(rows.rows[0]?.n ?? 0);
+}
+
 /** One maintenance pass: partitions, then retention. Never throws. */
 export async function runDbMaintenance(
   limit = RETENTION_BATCH_DEFAULT,
@@ -115,6 +131,14 @@ export async function runDbMaintenance(
     }
   } catch (error) {
     console.error('[jobs] audit partition maintenance failed', { sqlstate: sqlstateOf(error) });
+  }
+
+  // Before retention: an import whose finished job retention is about to purge is failed here.
+  try {
+    result.abandonedImports = await failAbandonedImports(limit);
+  } catch (error) {
+    result.abandonedImports = null;
+    console.error('[jobs] abandoned import sweep failed', { sqlstate: sqlstateOf(error) });
   }
 
   try {

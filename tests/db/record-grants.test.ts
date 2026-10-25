@@ -1037,8 +1037,8 @@ describe('the rest of the authorization model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
-    expect(Number(policies.rows[0]!.with_scope)).toBe(22);
+    expect(Number(policies.rows[0]!.n)).toBe(111); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
+    expect(Number(policies.rows[0]!.with_scope)).toBe(26); // 0081: four scope-driven crm_imports(/_rows) policies
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
@@ -1171,8 +1171,8 @@ describe('record_grants.manage', () => {
     // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the one
     // new Phase 10 integration permission (integrations.view) from migration
     // 0057 (integrations.manage was already in the catalogue from migration
-    // 0008; 0057 re-homes and grants it).
-    expect(Number(rows[0]!.total)).toBe(127);
+    // 0008; 0057 re-homes and grants it), plus crm.import from migration 0081.
+    expect(Number(rows[0]!.total)).toBe(128);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,

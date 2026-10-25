@@ -961,8 +961,8 @@ describe('the rest of the model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
-    expect(Number(rows[0]!.with_scope)).toBe(22);
+    expect(Number(rows[0]!.n)).toBe(111); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
+    expect(Number(rows[0]!.with_scope)).toBe(26); // 0081 adds four scope-driven crm_imports(/_rows) select/update policies
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {

@@ -609,6 +609,14 @@
       "tag": "0080_organization_types",
       "breakpoints": true,
       "hash": "b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91"
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791596728057,
+      "tag": "0081_crm_imports",
+      "breakpoints": true,
+      "hash": "16572ad4f453af52a8ac8ef4a9824e99a9fed612d43ec41f7590a0d774160a2f"
     }
   ]
 }

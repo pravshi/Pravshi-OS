@@ -7,7 +7,7 @@ import { listJobs } from './store';
 /**
  * /api/jobs — collection (Phase 6).
  * GET  ?status=&type=&page=&limit=  jobs.view  → { jobs, total }
- *      (status ∈ the 7 job statuses, type ∈ the 7 job types;
+ *      (status ∈ the 7 job statuses, type ∈ the 8 job types;
  *       page ≥ 1, limit 1–100)
  */
 

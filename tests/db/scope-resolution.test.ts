@@ -189,8 +189,8 @@ const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], 
   // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the one
   // new Phase 10 integration permission (integrations.view) from migration
   // 0057 (integrations.manage was already in the catalogue from migration
-  // 0008; 0057 re-homes and grants it).
-  expect(rows.length, `${label}: catalogue size`).toBe(127);
+  // 0008; 0057 re-homes and grants it), plus crm.import from migration 0081.
+  expect(rows.length, `${label}: catalogue size`).toBe(128);
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,
@@ -911,7 +911,7 @@ describe('RLS', () => {
     expect(rows).toEqual([]);
   });
 
-  it('keeps one app_user policy per table (two on login_events), twenty-two of them scope-driven', async () => {
+  it('keeps one app_user policy per table (two on login_events), twenty-six of them scope-driven', async () => {
     // Scope resolution arrived in Task 1.8; Task 1.16 gave people, engagements and
     // engagement_events the database.md 4.2 template, replacing their SELF policies in place.
     const { rows } = await owner.query<{ n: string; with_scope: string }>(
@@ -946,7 +946,7 @@ describe('RLS', () => {
     // integration_inbound_events and integration_sync_checkpoints — none of
     // them scope-driven (they branch on authz.has), so with_scope below
     // stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(105); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all
+    expect(Number(rows[0]!.n)).toBe(111); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
@@ -954,7 +954,7 @@ describe('RLS', () => {
     // deals branch on scope_for for view/edit. The Track B migrations add eight more —
     // the select and update policies on activities, company_contacts, company_links and
     // contact_links branch on scope_for for view/edit. The rest stay relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(22);
+    expect(Number(rows[0]!.with_scope)).toBe(26); // 0081: four scope-driven crm_imports(/_rows) policies
   });
 });
 

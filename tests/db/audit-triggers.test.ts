@@ -768,7 +768,7 @@ describe('nothing already approved has moved', () => {
     // integration_inbound_events, integration_sync_checkpoints) from
     // migration 0056.
     // 105 after the later phases; 0077 drops deal_stage_history_insert (MT-L6).
-    expect(Number(policies.rows[0]!.n)).toBe(105); // 0080 adds organization_types_select_all
+    expect(Number(policies.rows[0]!.n)).toBe(111); // 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

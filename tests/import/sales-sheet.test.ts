@@ -22,7 +22,7 @@ const OWNER_2 = '22222222-2222-4222-8222-222222222222';
 const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
   companyDomains: new Set(['existing.example']),
   companyNames: new Set([normaliseKey('Name Only Ltd')]),
-  contactEmails: new Set(['known@existing.example']),
+  contactEmails: new Map([['known@existing.example', 'domain:existing.example']]),
   contactNameCompany: new Set(),
   dealKeys: new Set(),
   activeOwnersByEmail: new Map([
@@ -174,6 +174,137 @@ describe('the preview of the representative fixture (AC-P1 … AC-D5)', () => {
       snapshot({ activeOwnersByEmail: new Map() }),
     );
     expect(other.validRows).toEqual([]);
+  });
+});
+
+describe('what the preview hands to the stored import (0081)', () => {
+  const HEADER =
+    'Company,Company Domain,Contact First Name,Contact Last Name,Deal Title,Owner Email\n';
+
+  it('reports a deal repeated within the file as a possible duplicate (AC-D3)', () => {
+    const p = buildPreview(
+      bytes(
+        HEADER +
+          'Acme,acme.example,Asha,Rao,Renewal,owner.one@pravshi.example\n' +
+          'Acme,acme.example,Asha,Rao,renewal ,owner.one@pravshi.example\n' +
+          'Acme,acme.example,Asha,Rao,Upsell,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+    );
+    expect(p.validRows.map((r) => r.deal)).toEqual(['CREATE', 'POSSIBLE_DUPLICATE', 'CREATE']);
+  });
+
+  it('carries each row’s within-file keys and its values as the file had them', () => {
+    const p = buildPreview(
+      bytes(HEADER + 'Acme , ACME.example,Asha,Rao,,owner.one@pravshi.example\n'),
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+    );
+    expect(p.header).toEqual(HEADER.trim().split(','));
+    expect(p.validRows[0]).toMatchObject({
+      companyKey: 'domain:acme.example',
+      contactKey: 'name:asha rao|domain:acme.example',
+      values: ['Acme ', ' ACME.example', 'Asha', 'Rao', '', 'owner.one@pravshi.example'],
+    });
+  });
+
+  it('reports every row naming a possible-duplicate company, not only the first (AC-D1)', () => {
+    const p = buildPreview(
+      bytes(
+        'Company,Owner Email\n' +
+          'Name Only Ltd,owner.one@pravshi.example\n' +
+          'name only  ltd,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+    );
+    expect(p.validRows.map((r) => r.company)).toEqual(['POSSIBLE_DUPLICATE', 'POSSIBLE_DUPLICATE']);
+    expect(p.counts.companies).toEqual({ create: 0, link: 0, possibleDuplicate: 2 });
+  });
+
+  it('does not count a deferred row as something later rows link to (AC-D4)', () => {
+    // Row 2 is a possible duplicate only through its deal; skipped by default, it creates no
+    // company, so row 3 — the first committing row of that company — creates it.
+    const p = buildPreview(
+      bytes(
+        HEADER +
+          'Acme,acme.example,Asha,Rao,Renewal,owner.one@pravshi.example\n' +
+          'Acme,acme.example,Ben,Roy,Upsell,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot({
+        dealKeys: new Set(['renewal|domain:acme.example|name:asha rao|domain:acme.example']),
+      }),
+    );
+    expect(p.validRows.map((r) => [r.company, r.deal])).toEqual([
+      ['CREATE', 'POSSIBLE_DUPLICATE'],
+      ['CREATE', 'CREATE'],
+    ]);
+    // The counts are what a commit with nothing included does: row 2 counts only its possible
+    // duplicate; one company, one contact and one deal are created (by row 3).
+    expect(p.counts).toEqual({
+      companies: { create: 1, link: 0, possibleDuplicate: 0 },
+      contacts: { create: 1, link: 0, possibleDuplicate: 0 },
+      deals: { create: 1, link: 0, possibleDuplicate: 1 },
+    });
+  });
+
+  it('reports a possible duplicate that would fail if included as not includable (S-1)', () => {
+    // Including it would create a second "Name Only Ltd" and then meet bob under the first.
+    const p = buildPreview(
+      bytes(
+        'Company,Contact First Name,Contact Last Name,Contact Email,Owner Email\n' +
+          'Name Only Ltd,Bob,Lee,bob@x.example,owner.one@pravshi.example\n' +
+          'Name Only Ltd,Cy,Lee,cy@x.example,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot({ contactEmails: new Map([['bob@x.example', 'name:name only ltd']]) }),
+    );
+    expect(p.validRows.map((r) => [r.company, r.contact])).toEqual([
+      ['POSSIBLE_DUPLICATE', 'LINK'],
+      ['POSSIBLE_DUPLICATE', 'CREATE'],
+    ]);
+    expect(p.notIncludableRows).toEqual([2]);
+  });
+
+  it('makes a contact that already belongs to another company a row error (AC-D2)', () => {
+    const csv =
+      'Company,Company Domain,Contact First Name,Contact Last Name,Contact Email,Owner Email\n';
+    const existing = buildPreview(
+      bytes(
+        csv + 'Other,other.example,Old,Contact,known@existing.example,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+    );
+    expect(existing.validRows).toEqual([]);
+    expect(existing.invalidRows[0]!.errors[0]!.reason).toBe(
+      'belongs to an existing contact under another company, or under none',
+    );
+    const inFile = buildPreview(
+      bytes(
+        csv +
+          'One,one.example,Ann,Ray,ann@x.example,owner.one@pravshi.example\n' +
+          'Two,two.example,Ann,Ray,ann@x.example,owner.one@pravshi.example\n' +
+          'One,one.example,Ann,Ray,ann@x.example,owner.one@pravshi.example\n',
+      ),
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+    );
+    expect(inFile.invalidRows.map((r) => r.rowNumber)).toEqual([3]);
+    expect(inFile.validRows.map((r) => r.contact)).toEqual(['CREATE', 'LINK']);
+  });
+
+  it('refuses a file wider than the stored import allows', () => {
+    const wide = `${Array.from({ length: 201 }, (_, i) => `C${i}`).join(',')}\n`;
+    expect(() => buildPreview(bytes(wide), REPRESENTATIVE_MAPPING, snapshot())).toThrow(
+      expect.objectContaining({ code: 'TOO_MANY_COLUMNS' }),
+    );
+    const wideRow = `Company,Owner Email\nAcme,o@x.example${',x'.repeat(200)}\n`;
+    expect(() => buildPreview(bytes(wideRow), REPRESENTATIVE_MAPPING, snapshot())).toThrow(
+      expect.objectContaining({ code: 'TOO_MANY_COLUMNS' }),
+    );
   });
 });
 

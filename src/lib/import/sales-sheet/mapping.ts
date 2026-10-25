@@ -72,6 +72,11 @@ export const REPRESENTATIVE_MAPPING: MappingSpec = {
   amountThousandsSeparator: ',',
 };
 
+/** Mappings an import may be read with, by id (crm_imports.mapping_id). THE REAL ONE IS PENDING. */
+export const MAPPINGS: Readonly<Record<string, MappingSpec>> = {
+  [REPRESENTATIVE_MAPPING.id]: REPRESENTATIVE_MAPPING,
+};
+
 const fold = (s: string) => s.trim().toLocaleLowerCase('en');
 
 export interface HeaderResolution {

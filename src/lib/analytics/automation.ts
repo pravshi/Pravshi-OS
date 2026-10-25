@@ -105,7 +105,7 @@ function buildCountSeries(
 
 // ── Metrics ──────────────────────────────────────────────────────────────────
 
-/** Job counts broken down by all 7 statuses and all 7 job types. */
+/** Job counts broken down by all 7 statuses and all 8 job types. */
 export interface JobStats {
   byStatus: Record<JobStatus, number>;
   byType: Record<JobType, number>;
@@ -114,7 +114,7 @@ export interface JobStats {
 /**
  * Job queue snapshot for the date range (date field: jobs.created_at):
  * how many jobs sit in each of the 7 lifecycle statuses, and how many of
- * each of the 7 job types were created. Every key is always present, even
+ * each of the 8 job types were created. Every key is always present, even
  * when the count is 0 — an absent key would mean "not measured", and here
  * zero is a real measurement.
  */
@@ -140,7 +140,8 @@ export async function getJobStats(
         count(*) filter (where type = 'webhook')            as t_webhook,
         count(*) filter (where type = 'cleanup')           as t_cleanup,
         count(*) filter (where type = 'notification')      as t_notification,
-        count(*) filter (where type = 'email')              as t_email
+        count(*) filter (where type = 'email')              as t_email,
+        count(*) filter (where type = 'crm_import')         as t_crm_import
       from jobs
       where org_id = ${ctx.orgId}
         and created_at >= ${start}

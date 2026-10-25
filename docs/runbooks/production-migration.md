@@ -42,8 +42,8 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** The only down-migrations in this repo are the three
-   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079 and 0080), each
+2. **Forward-fix only.** The only down-migrations in this repo are the seven
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080 and 0081), each
    run only with Nani's explicit approval as Failure doctrine (d) describes;
    none are invented at incident time. Every other failure is fixed by a new PR
    and a new or corrective migration, rehearsed again from Step 2.
@@ -69,7 +69,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 80 79 0080_organization_types
+      # expected at the current release: 81 80 0081_crm_imports
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -106,10 +106,10 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
 ## The chain as of writing
 
-The repo journal holds 77 entries (idx 0–76). Per project records, production
+The repo journal holds 81 entries (idx 0–80). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-35 migrations **idx 45–79 (0045–0080)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4576). Step 0 verifies this;
+36 migrations **idx 45–80 (0045–0081)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4580). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the journal's **order is its
@@ -119,7 +119,7 @@ ordering the history by `created_at` is not journal order, and drizzle-kit's
 rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
 skip pending entries from a database stopped inside those ranges. The runner
 does not use that rule: it verifies the history as an exact prefix and applies
-the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–79 —
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–80 —
 no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
@@ -226,22 +226,23 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 77, last applied created_at: 1791111413392
-   verified history: 45 of 77 entries match the repository (idx 0-44, through 0044_workflow_engine)
+   journal entries: 81, last applied created_at: 1791111413392
+   verified history: 45 of 81 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
    applying idx 76 0077_deal_history_and_org_identity (… statements)
    applying idx 77 0078_audit_history_truncate_guard (… statements)
    applying idx 78 0079_rate_limit_first_use (… statements)
    applying idx 79 0080_organization_types (… statements)
-   done: applied 35, total 80
+   applying idx 80 0081_crm_imports (… statements)
+   done: applied 36, total 81
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `80`, max_created_at `1791595728057`, and the
-     hash list in `id` order equal to the file-byte hashes of idx 0…76.
+     full repo state: count `81`, max_created_at `1791596728057`, and the
+     hash list in `id` order equal to the file-byte hashes of idx 0…80.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity), deal-stage history and organization identity (CRM pipelines, organizations)) run green against the branch, or in CI's equivalent
@@ -306,8 +307,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `80`, max_created_at `1791595728057`, hash list in `id` order equal to
-   the file-byte hashes of idx 0…76 (same comparison method as Step 0).
+   count `81`, max_created_at `1791596728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…80 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -397,7 +398,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the six prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079 and 0080),
+the seven prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080 and 0081),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 
@@ -446,6 +447,11 @@ invented at incident time.
   organization-type catalog or templates, no recorded type or version, and 0039's hard-coded
   default pipeline. It refuses while any organization is on anything but `generic_crm` version 1,
   keeps pipelines already seeded, and needs Nani's explicit approval and a run-record entry.
+  `scripts/db/rollback/0081_crm_imports.down.sql` restores the 0080 state — no import tables,
+  no `crm_import` job type, no `crm.import` permission, and 0057's `seed_system_roles()`. It
+  refuses while any import record, any `crm_import` job or any record grant naming
+  `crm.import` exists, keeps the CRM records imports created, and needs Nani's explicit
+  approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -455,7 +461,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–79)
+## Appendix A — The pending chain (idx 45–80)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -515,13 +521,14 @@ re-apply.
 | 77  | `0078_audit_history_truncate_guard` | 1791593728057 | `283691fcf94bda9df7290fa4d74240238d9ff4767e6cea90a49f048cda1e82b2` |
 | 78  | `0079_rate_limit_first_use` | 1791594728057 | `29fd79c1d77320849edaf43d3ef38dce96876ac73b16e647be58546fd1b41a5e` |
 | 79  | `0080_organization_types` | 1791595728057 | `b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91` |
+| 80  | `0081_crm_imports` | 1791596728057 | `16572ad4f453af52a8ac8ef4a9824e99a9fed612d43ec41f7590a0d774160a2f` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `80`,
-max_created_at `1791595728057`.
+Final expected state after a complete run: count `81`,
+max_created_at `1791596728057`.
 
 ## Appendix B — Run record template
 
@@ -552,7 +559,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 80 / max 1791595728057 / hashes): yes/no
+  - journal == repo (count 81 / max 1791596728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

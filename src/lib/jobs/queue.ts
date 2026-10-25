@@ -511,11 +511,18 @@ export async function heartbeatJob(workerId: string, jobId: string): Promise<voi
 
 // ── cancel ────────────────────────────────────────────────────────────────────
 
-/** Any non-terminal job → cancelled. Terminal (succeeded/cancelled) → throw. */
+/**
+ * Any non-terminal job → cancelled. Terminal (succeeded/cancelled) → throw. A crm_import job is
+ * never cancelled here: stopping a running import half-way would keep its committed batches. The
+ * import is cancelled through its own route, by its importer (the 0081 trigger refuses too).
+ */
 export async function cancelJob(auth: Authorization, jobId: string): Promise<void> {
   await requireJobPermission(auth, PERM_CANCEL);
   await withAuthorizedDb(auth.ctx, async (tx) => {
     const job = mapJobRow(await loadJobForUpdate(tx, auth.ctx.orgId, jobId));
+    if (job.type === 'crm_import') {
+      throw invalidRequest('a crm_import job is cancelled through its import, not directly');
+    }
     assertTransition(job, 'cancelled');
     await tx.execute(sql`
       update jobs
@@ -551,6 +558,11 @@ export async function retryJob(auth: Authorization, jobId: string): Promise<Job>
     const job = mapJobRow(await loadJobForUpdate(tx, auth.ctx.orgId, jobId));
     const fromStatus = job.status;
     const jobType = job.type;
+    // As documented: only a failed or dead-lettered job is replayed. A running job resets its
+    // claim and makes a second worker re-claim it — for a crm_import that is churn at best.
+    if (job.status !== 'failed' && job.status !== 'dead_letter') {
+      throw invalidRequest(`a ${job.status} job cannot be retried`);
+    }
     assertTransition(job, 'pending');
     const result = await tx.execute<Record<string, unknown>>(sql`
       update jobs

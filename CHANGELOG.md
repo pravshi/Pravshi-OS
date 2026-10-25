@@ -7,11 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0080 (production still pending — see the
+Database migrations: 0063–0081 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
 
+- Sales Sheet import, stored half (migration 0081, BP-06). An uploaded CSV is previewed and
+  recorded — file name, SHA-256, mapping, header and every row with its plan or errors, never
+  the raw file — and, once the importer confirms that exact preview, committed by a background
+  `crm_import` job that runs as the importer through the normal authorised path: every company,
+  contact and deal is written under the CRM's own policies and triggers, one savepoint per row,
+  so a failing row fails alone and an interrupted run resumes from the rows not yet decided.
+  New permission `crm.import` (sensitive; SUPER_ADMIN and ADMIN at GLOBAL), required with the
+  create permission of every table the file writes; confirming also needs `jobs.create`. A
+  file already imported, or being imported, is refused unless a re-import is asked for, and
+  confirmations of the same file are serialised. Audit: `crm.import.started`,
+  `crm.import.completed` and `crm.import.failed`, with ids, name, hash, counts or a reason code
+  only. An import never stays in progress without an outcome: the worker records a failure,
+  and DB maintenance fails imports whose job ended. Job errors carry no imported value. Job
+  retention keeps working: an import outlives its job. Only the importer confirms or cancels;
+  a holder of `crm.import` below GLOBAL sees only their own imports; a `crm_import` job cannot
+  be cancelled through the jobs API. API under `/api/crm/imports`.
+  The real Sales Sheet mapping is still pending: the shipped mapping is a documented stand-in.
+  Prepared rollback: `scripts/db/rollback/0081_crm_imports.down.sql`.
 - Organization types and versioned organization templates (migration 0080). Every
   organization records the operating type it was created from — `generic_crm`,
   `real_estate_crm`, `education_crm`, from a controlled catalog — and the template version
