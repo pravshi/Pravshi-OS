@@ -550,13 +550,27 @@ describe.skipIf(!ready)('workflow engine: D4 chaining bound (real engine)', () =
       // this looped unboundedly (P0-1).
       const chainedTitle = `chained-${CODE}`;
       const seedTitle = `chain-seed-${CODE}`;
+
+      // ISOLATION. The earlier tests of this file leave ACTIVE, unconditional task.created
+      // workflows in orgA (five of them), and every one of them also matches each task THIS chain
+      // creates — each creating a task of its own, which matches them all again. The chain then
+      // fans out into a tree instead of a line (observed: 47 depth-guard trips, hundreds of
+      // executions, a 90 s timeout — on a fresh database, alone; the "~95k queries observed in
+      // CI" below is the same fan-out). The guard still bounds the depth, but not the width, and
+      // "exactly 5 executions" is a statement about a single chain. So pause every other ACTIVE
+      // task.created workflow of this organization first; the assertions below are unchanged.
+      await owner.query(
+        `update public.workflows set status = 'PAUSED'
+          where org_id = $1::uuid and status = 'ACTIVE' and trigger_type = 'task.created'`,
+        [orgA],
+      );
+
       const wf = await mkWorkflow(owner, orgA, {
         name: `chain-${CODE}`,
         trigger: { type: 'task.created' },
-        // CODE-scoped condition: isolates this test from leftover ACTIVE
-        // workflows (e.g., from vitest retries or other tests) that also match
-        // task.created. Without this, multiple workflows firing on each task
-        // causes a query explosion (~95k queries observed in CI).
+        // CODE-scoped condition: keeps this workflow to the tasks of this test (the chained
+        // task's title also contains CODE, so it still matches itself). It does NOT isolate the
+        // test from other workflows — the pause above does.
         conditions: [{ field: 'task.title', operator: 'contains', value: CODE }],
         actions: [{ type: 'create_task', params: { title: chainedTitle, projectId: projectA } }],
         createdBy: alice,
