@@ -1,6 +1,10 @@
 # Sales Sheet import — permission, duplicates, retention and workflow policies
 
-**Status: PROPOSAL — pending founder confirmation.** Policies 1 and 4 match what is implemented;
+**Status: APPROVED DIRECTION** — [ADR-008](../adr/008-v1-platform-and-import-decisions.md), 2026-10-27.
+Local implementation may proceed; every hosted step still needs its own approval. Remaining
+founder inputs are listed in ADR-008 "Still open".
+
+_Original status (superseded):_ PROPOSAL — pending founder confirmation. Policies 1 and 4 match what is implemented;
 policies 2 and 3 need code that is **not** written yet, and policy 3's deletion is not to be
 built until this proposal is approved.
 
@@ -111,6 +115,10 @@ of workflow runs — emails, webhooks, tasks — in minutes, for records that ar
    committed.
 
 ## 5. Decisions requested
+
+**Decided by ADR-008 (2026-10-27):** policy 1 (I-1), policy 2 for V1 (I-2), policy 4 (I-4).
+Policy 3 (I-3): 90 days proposed; the cleanup is designed and tested but not enabled until its
+rules and exclusions are approved.
 
 | # | Decision | Recommendation | Blocks V1? |
 |---|---|---|---|

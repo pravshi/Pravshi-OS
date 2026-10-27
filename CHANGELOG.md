@@ -170,6 +170,13 @@ Database migrations: 0063–0075 (production still pending — see the
   architecture remains binding. Organization membership, provisioning, tenant tiers, the
   environment topology and the Sales Sheet import remain open decisions. Documentation only — no
   behaviour changes.
+- V1 platform administration and import decisions recorded
+  ([ADR-008](docs/architecture/adr/008-v1-platform-and-import-decisions.md)), amending ADR-007's
+  acceptance definition: platform-administrator-first bootstrap, independent of organization
+  creation; suspend and reactivate in V1, archive and restore deferred to V1.1; `crm.import` for
+  organization administrators only; duplicates resolved per company/contact with a recalculated
+  preview; 90-day import retention proposed, no cleanup enabled before approval; imported deals
+  trigger no workflows. Documentation only — no behaviour changes.
 - V1 product decisions recorded
   ([ADR-007](docs/architecture/adr/007-v1-founder-product-decisions.md)): one login belongs to
   exactly one organization; V1 includes an audited platform Super Admin organization-provisioning

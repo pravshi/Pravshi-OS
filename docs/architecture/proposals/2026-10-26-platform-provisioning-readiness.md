@@ -44,6 +44,14 @@ of the proposal. Building any of them now would pre-empt K1–K8.
 
 ## 4. Decision register
 
+> **Update 2026-10-27 — [ADR-008](../adr/008-v1-platform-and-import-decisions.md):** the platform
+> package stays in V1 at its minimum scope
+> ([design](./2026-10-27-platform-administration-v1-minimum.md)); **K8 = yes** (platform
+> administrator first); **N1 = yes**; lifecycle: suspend/reactivate in V1, archive/restore in
+> V1.1. Q1 is supplied at the hosted bootstrap. K1–K7, N2, Q2–Q5 proceed on the recommended
+> defaults below, pending explicit confirmation. Section 3's "nothing else may proceed" no
+> longer applies to local implementation.
+
 Each row is a question for the founder. "Recommended" repeats the 2026-10-16 proposal; it is not a
 decision. "Blocks" names the first package that cannot start without the answer.
 

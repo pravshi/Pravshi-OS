@@ -1,6 +1,7 @@
 # ADR-007: V1 product decisions — one organization per login, platform provisioning, one tier of capability, Sales Sheet import
 
-Status: Accepted | Date: 2026-10-16 | Deciders: Founder (Nani)
+Status: Accepted; amended by [ADR-008](008-v1-platform-and-import-decisions.md) (the GOV-03 and BP-06
+definitions of done) | Date: 2026-10-16 | Deciders: Founder (Nani)
 
 ## Context
 

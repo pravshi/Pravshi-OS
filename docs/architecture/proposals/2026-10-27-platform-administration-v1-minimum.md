@@ -1,6 +1,10 @@
 # Platform administration for V1 — the minimum complete workflow
 
-**Status: PROPOSAL — pending founder confirmation. Not implemented.** Implementation starts only
+**Status: APPROVED DIRECTION** — [ADR-008](../adr/008-v1-platform-and-import-decisions.md), 2026-10-27.
+Local implementation may proceed; every hosted step still needs its own approval. Remaining
+founder inputs are listed in ADR-008 "Still open".
+
+_Original status (superseded):_ PROPOSAL — pending founder confirmation. Not implemented. Implementation starts only
 after the founder confirms this document; AGENTS.md §1 and ADR-007 (GOV-03) require an approved
 design before any of it is built.
 
@@ -190,6 +194,11 @@ Shared files the founder approves when touched: `src/env.ts` (`DATABASE_URL_PLAT
 on Neon, migrations, the first bootstrap) each need their own approval.
 
 ## 9. Decisions requested
+
+**Decided by ADR-008 (2026-10-27):** this design as the V1 direction; K8 = platform administrator
+first; N1 = separate singleton with the one-way coupling of §3.2; L1 = suspend and reactivate in
+V1, archive and restore in V1.1. Still open: Q1 (supplied at the hosted bootstrap), the console
+pages' owner, and confirmation of the remaining defaults below — implementation proceeds on them.
 
 | # | Decision | Recommendation |
 |---|---|---|
