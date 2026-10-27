@@ -58,6 +58,19 @@ describe('production migration runbook matches the migration journal', () => {
     );
   });
 
+  it('states the journal size, the hash range operators compare and the Appendix A link', () => {
+    // The prose around the pinned values drifted once (it still said idx 0–76 at idx 80): the
+    // hash range is what an operator checks in Steps 3 and 4, so it is pinned too.
+    expect(RUNBOOK).toContain(
+      `The repo journal holds ${entries.length} entries (idx 0–${last.idx}).`,
+    );
+    expect(RUNBOOK.split(`the file-byte hashes of idx 0…${last.idx}`).length - 1).toBe(2);
+    expect(RUNBOOK).toContain(`(#appendix-a--the-pending-chain-idx-45${last.idx})`);
+    expect(RUNBOOK).toContain(`verified history: 45 of ${entries.length} entries`);
+    // The runner's own first line, as an operator sees it (scripts/migrate-ws.mjs).
+    expect(RUNBOOK).toContain(`journal entries: ${entries.length}, last applied`);
+  });
+
   it('states the pending range up to the journal tail', () => {
     expect(RUNBOOK).toContain(`## Appendix A — The pending chain (idx 45–${last.idx})`);
     expect(RUNBOOK).toContain(

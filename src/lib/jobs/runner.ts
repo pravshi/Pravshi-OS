@@ -195,6 +195,7 @@ async function main(): Promise<void> {
   (await import('./wake')).markWorkerProcess();
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
+  await import('../import/sales-sheet/job'); // crm_import
   const { runWorker, reapStaleJobs, workerNextDueAt } = await import('./worker');
   const { runDbMaintenance } = await import('./maintenance');
   const { tickScheduler } = await import('./scheduler');

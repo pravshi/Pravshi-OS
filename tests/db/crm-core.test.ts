@@ -1055,23 +1055,21 @@ describe('permission catalogue', () => {
     'pipelines.edit',
     'pipelines.delete',
     'pipeline_stages.manage',
+    // Migration 0081: the Sales Sheet import — sensitive, like the exports.
+    'crm.import',
   ];
+  const SENSITIVE = new Set(['contacts.export', 'deals.export', 'crm.import']);
 
-  it('seeds exactly the 27 crm keys with the right sensitivity flags', async () => {
+  it('seeds exactly the 28 crm keys with the right sensitivity flags', async () => {
     const rows = await owner.query<{ key: string; module: string; is_sensitive: boolean }>(
       `select key, module, is_sensitive from public.permissions where module='crm' order by key`,
     );
     expect(rows.rows.map((r) => r.key).sort()).toEqual([...EXPECTED].sort());
     const sensitive = new Map(rows.rows.map((r) => [r.key, r.is_sensitive]));
-    expect(sensitive.get('contacts.export')).toBe(true);
-    expect(sensitive.get('deals.export')).toBe(true);
-    for (const k of EXPECTED) {
-      if (k === 'contacts.export' || k === 'deals.export') continue;
-      expect(sensitive.get(k)).toBe(false);
-    }
+    for (const k of EXPECTED) expect(sensitive.get(k), k).toBe(SENSITIVE.has(k));
   });
 
-  it('SUPER_ADMIN holds GLOBAL on all 27 keys in an existing org', async () => {
+  it('SUPER_ADMIN holds GLOBAL on all 28 keys in an existing org', async () => {
     const rows = await owner.query<{ n: string }>(
       `select count(*) n
        from public.role_permissions rp
@@ -1081,7 +1079,7 @@ describe('permission catalogue', () => {
          and rp.scope = 'GLOBAL'::public.access_scope`,
       [orgA],
     );
-    expect(Number(rows.rows[0]!.n)).toBe(27);
+    expect(Number(rows.rows[0]!.n)).toBe(28);
   });
 
   it('standard roles hold the crm grants from the seed matrix', async () => {
@@ -1100,13 +1098,15 @@ describe('permission catalogue', () => {
     const have = new Set(rows.rows.map((r) => `${r.role}|${r.key}|${r.scope}`));
     // Phase 3 (migration 0037): pipeline configuration is an admin surface —
     // ADMIN holds the five pipeline keys at GLOBAL and no other role is granted
-    // pipeline keys, so the SALES_MANAGER assertion below skips them.
+    // pipeline keys, so the SALES_MANAGER assertion below skips them. The same
+    // holds for crm.import (0081): SUPER_ADMIN and ADMIN only.
     const PIPELINE_KEYS = [
       'pipelines.view',
       'pipelines.create',
       'pipelines.edit',
       'pipelines.delete',
       'pipeline_stages.manage',
+      'crm.import',
     ];
     for (const k of EXPECTED) {
       expect(have.has(`ADMIN|${k}|GLOBAL`)).toBe(true);
@@ -1133,6 +1133,10 @@ describe('permission catalogue', () => {
       'relationships.edit',
     ];
     for (const k of SALES_KEYS) expect(have.has(`SALES|${k}|SELF`)).toBe(true);
+    // crm.import is held by no sales role at any scope (AC-S4).
+    expect(
+      [...have].filter((h) => h.split('|')[1] === 'crm.import' && !h.startsWith('ADMIN|')),
+    ).toEqual([]);
     // SALES mirrors the leads.* SELF column: no delete, no export.
     for (const k of [
       'companies.delete',

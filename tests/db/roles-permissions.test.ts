@@ -309,7 +309,8 @@ describe('permission catalogue', () => {
     // new: migration 0008 already catalogued it (ungranted, module
     // 'settings'); 0057 re-homes it to the integrations module and grants it.
     // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
-    expect(Number(rows[0]!.count)).toBe(127);
+    // Plus crm.import from migration 0081 (the Sales Sheet import).
+    expect(Number(rows[0]!.count)).toBe(128);
   });
 
   it('holds every named key from each module', async () => {
@@ -455,6 +456,8 @@ describe('permission catalogue', () => {
       // 0008 row in the settings block above — 0057 re-homes and grants
       // that existing row rather than adding a second one.
       'integrations.view',
+      // Migration 0081: the Sales Sheet import.
+      'crm.import',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -486,6 +489,7 @@ describe('permission catalogue', () => {
       'compensation.edit',
       'compensation.view',
       'contacts.export',
+      'crm.import',
       'deals.export',
       'hr.sensitive.edit',
       'hr.sensitive.view',
@@ -599,9 +603,9 @@ describe('system roles', () => {
     // 1 Phase 10 integration — integrations.view; integrations.manage was already
     // among the 82 from migration 0008), minus users.impersonate
     // which is listed but granted to no role. Note: reports.view already existed from
-    // migration 0008.
-    expect(Number(rows[0]!.total)).toBe(126);
-    expect(Number(rows[0]!.global)).toBe(126);
+    // migration 0008. Plus crm.import (0081): 128 in the catalogue, 127 held.
+    expect(Number(rows[0]!.total)).toBe(127);
+    expect(Number(rows[0]!.global)).toBe(127);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants plus two Phase 8 notification grants plus the Phase 9 ai.use grant', async () => {

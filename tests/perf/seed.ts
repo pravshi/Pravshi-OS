@@ -498,6 +498,12 @@ async function ensureAuditPartitions(client: PoolClient) {
           'create policy %I on public.%I for all to app_owner using (true) with check (true)',
           v_name || '_owner_all', v_name);
         execute format('revoke all on public.%I from app_user, app_admin', v_name);
+        -- 0078 (MT-L3): every partition carries the truncate guard, as the function adds it.
+        if to_regprocedure('public.audit_history_no_truncate()') is not null then
+          execute format(
+            'create trigger audit_history_no_truncate before truncate on public.%I '
+            'for each statement execute function public.audit_history_no_truncate()', v_name);
+        end if;
       end if;
     end
     $do$`);

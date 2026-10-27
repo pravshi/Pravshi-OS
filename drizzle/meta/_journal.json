@@ -577,6 +577,54 @@
       "tag": "0076_job_schedule_principal_binding",
       "breakpoints": true,
       "hash": "3a2ebbfbaaee84a595d7e8cad516b24ef7527c2dd645b386a8a457e93c925de6"
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791592728057,
+      "tag": "0077_deal_history_and_org_identity",
+      "breakpoints": true,
+      "hash": "94ba7dcbacf4d91c46932006aa74ec51672f7925d89cb1abb42b3c564f6b8fc2"
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791593728057,
+      "tag": "0078_audit_history_truncate_guard",
+      "breakpoints": true,
+      "hash": "283691fcf94bda9df7290fa4d74240238d9ff4767e6cea90a49f048cda1e82b2"
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791594728057,
+      "tag": "0079_rate_limit_first_use",
+      "breakpoints": true,
+      "hash": "29fd79c1d77320849edaf43d3ef38dce96876ac73b16e647be58546fd1b41a5e"
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1791595728057,
+      "tag": "0080_organization_types",
+      "breakpoints": true,
+      "hash": "b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91"
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791596728057,
+      "tag": "0081_crm_imports",
+      "breakpoints": true,
+      "hash": "16572ad4f453af52a8ac8ef4a9824e99a9fed612d43ec41f7590a0d774160a2f"
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1791597728057,
+      "tag": "0082_least_privilege_cleanup",
+      "breakpoints": true,
+      "hash": "6d1199733a64e5032ad77327bfa89986282f5c232db764c11422211d51087d8d"
     }
   ]
 }

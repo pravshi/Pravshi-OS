@@ -20,6 +20,7 @@ export const JOB_TYPES = [
   'cleanup',
   'notification',
   'email',
+  'crm_import',
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
@@ -174,6 +175,13 @@ export const RetryPayloadSchema = z.strictObject({
 });
 export type RetryPayload = z.infer<typeof RetryPayloadSchema>;
 
+/** `crm_import` — the background commit of a confirmed Sales Sheet import (0081). Names the
+ *  import only: who it runs as comes from crm_import_execute_as_job(), never the payload. */
+export const CrmImportPayloadSchema = z.strictObject({
+  importId: z.string().regex(UUID, 'importId must be a uuid'),
+});
+export type CrmImportPayload = z.infer<typeof CrmImportPayloadSchema>;
+
 /** Payload schema per job type. queue.ts validates every enqueue against these. */
 export const JOB_PAYLOAD_SCHEMAS: Record<JobType, z.ZodTypeAny> = {
   workflow_run: WorkflowRunPayloadSchema,
@@ -183,6 +191,7 @@ export const JOB_PAYLOAD_SCHEMAS: Record<JobType, z.ZodTypeAny> = {
   cleanup: CleanupPayloadSchema,
   notification: NotificationPayloadSchema,
   email: EmailPayloadSchema,
+  crm_import: CrmImportPayloadSchema,
 };
 
 // ── Enqueue input ─────────────────────────────────────────────────────────────

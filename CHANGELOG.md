@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0076 (production still pending — see the
+Database migrations: 0063–0082 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -33,6 +33,34 @@ Database migrations: 0063–0076 (production still pending — see the
   health-check and restart settings before deploying this change; alerting a human (an uptime
   monitor on `/healthz`) is the recommended setup until the gap is closed.
 
+- Sales Sheet import, stored half (migration 0081, BP-06). An uploaded CSV is previewed and
+  recorded — file name, SHA-256, mapping, header and every row with its plan or errors, never
+  the raw file — and, once the importer confirms that exact preview, committed by a background
+  `crm_import` job that runs as the importer through the normal authorised path: every company,
+  contact and deal is written under the CRM's own policies and triggers, one savepoint per row,
+  so a failing row fails alone and an interrupted run resumes from the rows not yet decided.
+  New permission `crm.import` (sensitive; SUPER_ADMIN and ADMIN at GLOBAL), required with the
+  create permission of every table the file writes; confirming also needs `jobs.create`. A
+  file already imported, or being imported, is refused unless a re-import is asked for, and
+  confirmations of the same file are serialised. Audit: `crm.import.started`,
+  `crm.import.completed` and `crm.import.failed`, with ids, name, hash, counts or a reason code
+  only. An import never stays in progress without an outcome: the worker records a failure,
+  and DB maintenance fails imports whose job ended. Job errors carry no imported value. Job
+  retention keeps working: an import outlives its job. Only the importer confirms or cancels;
+  a holder of `crm.import` below GLOBAL sees only their own imports; a `crm_import` job cannot
+  be cancelled through the jobs API. API under `/api/crm/imports`.
+  The real Sales Sheet mapping is still pending: the shipped mapping is a documented stand-in.
+  Prepared rollback: `scripts/db/rollback/0081_crm_imports.down.sql`.
+- Organization types and versioned organization templates (migration 0080). Every
+  organization records the operating type it was created from — `generic_crm`,
+  `real_estate_crm`, `education_crm`, from a controlled catalog — and the template version
+  it was seeded with. A template defines the pipelines and stages an organization starts
+  with; a published version is immutable, and an upgrade to a newer version of the same
+  type only adds what the organization lacks. Existing organizations are `generic_crm`
+  version 1, which is exactly the six-stage default pipeline every organization already
+  had, so nothing changes for them or for new organizations created without a type.
+  Real Estate and Education are catalogued but disabled until their templates are
+  approved. Prepared rollback: `scripts/db/rollback/0080_organization_types.down.sql`.
 - Low-cost worker mode for the Neon Free plan (the default). Neon Free suspends
   compute only after five minutes without a query and caps a project at 100
   CU-hours a month; a worker polling every 10 seconds kept compute awake
@@ -144,6 +172,22 @@ Database migrations: 0063–0076 (production still pending — see the
   retry) fails without sending — never signed with that secret, and never sent unsigned in its
   place. Signed delivery is through a webhook subscription, which signs with its own secret; a
   URL action is sent unsigned. `WEBHOOK_SIGNING_SECRET_<REF>` is no longer read.
+- Least-privilege cleanup (migration 0082, found by the V1 acceptance review). The two
+  link-immutability trigger functions from 0036 no longer carry PUBLIC EXECUTE (the triggers
+  still fire for every role), and `app_user` no longer holds DELETE on webhook deliveries,
+  inbound events and sync checkpoints — tables with no DELETE policy, where a DELETE used to
+  match no row and is now refused with 42501. Connections and subscriptions keep the DELETE
+  their disconnect and delete flows need; retention still purges through its definer.
+  Prepared rollback: `scripts/db/rollback/0082_least_privilege_cleanup.down.sql`.
+- Audit history cannot be truncated (migration 0078, Phase 3 MT-L3). `audit_logs` — the
+  parent and every partition, including partitions created later — `login_events` and
+  `engagement_events` refuse TRUNCATE, so a TRUNCATE … CASCADE reaching them is refused as a
+  whole. Row triggers already refused UPDATE and DELETE; a statement trigger on the
+  partitioned parent is not inherited by its partitions, hence one per partition.
+- Rate-limit buckets count concurrent first uses (migration 0079, FU-3 / F-MFA-5).
+  `authz.check_rate_limit()` is a single upsert, so simultaneous first requests on a key are
+  each counted instead of one failing with a unique violation — which callers turned into a
+  spurious refusal and an alert. Counting semantics are unchanged.
 - A job or schedule can only run as the person who created it, enforced in the database
   (migration 0076). A workflow job runs with the permissions of the person who enqueued it and a
   scheduled run with those of the schedule's creator; at the SQL level, a member allowed to
@@ -216,6 +260,16 @@ Database migrations: 0063–0076 (production still pending — see the
   ordinary rejection. Nothing is cancelled — the work resumes when the
   organization is active again. A job already running when the organization is
   suspended finishes, or is recovered if its worker dies.
+- Deal-stage history can no longer be forged (migration 0077, Phase 3 MT-L6).
+  Its rows are written only by the trigger that records a deal's stage change,
+  in the same transaction and with the real actor. The runtime role lost the
+  direct INSERT path (policy and grant) that let SQL-level access insert rows
+  naming another organization's stages or people, another person as the actor,
+  or any date — rows that fed the CRM lead and velocity reports and the
+  deduplication of workflow and webhook events.
+- An organization's id and slug are fixed once it is created (migration 0077,
+  Phase 3 MT-L1): a trigger refuses any change to either. Name, status and
+  deletion stay changeable. A prepared rollback restores the 0076 state.
 
 ### Changed
 

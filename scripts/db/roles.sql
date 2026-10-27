@@ -111,6 +111,10 @@ alter schema public owner to app_owner;
 grant usage on schema public, authz to app_user, app_admin;
 
 -- app_user gets DML only. Never DDL, never ownership.
+-- NOTE: re-running this file re-grants select, insert, update on EVERY existing table, which
+-- undoes table-level revokes made by migrations (0002: organizations, people; 0077:
+-- deal_stage_history). RLS policies are the durable control on those tables — a revoke is
+-- belt-and-braces only. Rehearsed: after a re-run the grant returns and RLS still refuses.
 grant select, insert, update on all tables in schema public to app_user;
 grant usage, select on all sequences in schema public to app_user;
 

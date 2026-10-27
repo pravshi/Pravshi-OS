@@ -283,6 +283,7 @@ export const JOB_TYPE_LABELS: Record<JobType, string> = {
   cleanup: 'Cleanup',
   notification: 'Notification',
   email: 'Email',
+  crm_import: 'CRM import',
 };
 
 export function jobStatusBadgeClass(status: JobStatus): string {

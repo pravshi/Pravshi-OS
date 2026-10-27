@@ -203,8 +203,9 @@ describe('the matrix as written', () => {
       'FINANCE',
       'EMPLOYEE',
     ]);
-    expect(matrix.rows).toHaveLength(86);
-    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(86);
+    // 0081 adds crm.import (SUPER_ADMIN and ADMIN at G).
+    expect(matrix.rows).toHaveLength(87);
+    expect(new Set(matrix.rows.map((r) => r.permission)).size).toBe(87);
   });
 
   it('names only permissions in the catalogue', () => {

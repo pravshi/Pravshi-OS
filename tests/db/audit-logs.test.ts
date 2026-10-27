@@ -621,15 +621,21 @@ describe('append-only', () => {
   });
 
   it('clones the append-only triggers onto every partition', async () => {
-    const { rows } = await owner.query<{ relname: string; n: string }>(
-      `select c.relname, count(*) n
+    // Each partition carries the two cloned row triggers (no update, no delete) and, since
+    // 0078 (MT-L3), its own statement-level truncate guard — three triggers, by name.
+    const { rows } = await owner.query<{ relname: string; triggers: string }>(
+      `select c.relname, string_agg(t.tgname, ',' order by t.tgname) triggers
        from pg_trigger t join pg_class c on c.oid=t.tgrelid
        join pg_namespace nsp on nsp.oid=c.relnamespace
        where nsp.nspname='public' and c.relname like 'audit_logs_2%' and not t.tgisinternal
        group by c.relname`,
     );
     expect(rows.length).toBeGreaterThanOrEqual(13);
-    for (const r of rows) expect(Number(r.n), r.relname).toBe(2);
+    for (const r of rows) {
+      expect(r.triggers, r.relname).toBe(
+        'audit_history_no_truncate,audit_logs_no_delete,audit_logs_no_update',
+      );
+    }
   });
 
   it('cannot be circumvented by writing to a partition directly', async () => {
@@ -955,8 +961,8 @@ describe('the rest of the model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(105);
-    expect(Number(rows[0]!.with_scope)).toBe(22);
+    expect(Number(rows[0]!.n)).toBe(111); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
+    expect(Number(rows[0]!.with_scope)).toBe(26); // 0081 adds four scope-driven crm_imports(/_rows) select/update policies
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {

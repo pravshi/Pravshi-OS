@@ -1,0 +1,12 @@
+﻿Company,Company Domain,Industry,City,Country,Contact First Name,Contact Last Name,Contact Email,Contact Phone,Deal Title,Deal Value,Currency,Stage,Probability,Expected Close,Owner Email,Notes Column
+Acme Traders,acme.example,Retail,Pune,IN,Asha,Rao,asha@acme.example,+91 98000 00001,Acme annual contract,"1,25,000.50",INR,proposal,50%,2026-12-31,owner.one@pravshi.example,ignored
+Acme Traders,acme.example,Retail,Pune,IN,Vikram,Shah,vikram@acme.example,,Acme add-on,40000,INR,QUALIFIED,25,2027-01-15,owner.one@pravshi.example,
+Existing Co,existing.example,Services,Mumbai,IN,Old,Contact,known@existing.example,,,,,,,,owner.two@pravshi.example,
+Name Only Ltd,,Manufacturing,Delhi,IN,,,,,,,,,,,owner.one@pravshi.example,
+"Quoted, Comma Pvt",quoted.example,"Multi
+line industry",Chennai,in,Meera,Iyer,meera@quoted.example,,"Deal with ""quotes""",1000,usd,NEW,0,,owner.one@pravshi.example,
+Bad Date Co,baddate.example,,,IN,,,,,Bad date deal,500,INR,NEW,10,03/04/2026,owner.one@pravshi.example,
+Bad Stage Co,badstage.example,,,IN,,,,,Bad stage deal,500,INR,MAYBE,10,,owner.one@pravshi.example,
+Unknown Owner Co,unknown.example,,,IN,,,,,,,,,,,stranger@elsewhere.example,
+=HYPERLINK("http://x"),formula.example,,,IN,,,,,,,,,,,owner.one@pravshi.example,
+Too Likely Co,toolikely.example,,,IN,,,,,Too likely,10,INR,NEW,120%,,owner.one@pravshi.example,

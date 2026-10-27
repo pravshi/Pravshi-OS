@@ -158,8 +158,8 @@ Applying the pending chain to production is its own gated procedure — **do not
 it from this page.** Follow
 [docs/runbooks/production-migration.md](docs/runbooks/production-migration.md): verify the
 current production journal state read-only, freeze and snapshot, rehearse the full chain
-on the snapshot branch, then apply and verify. Migrations are forward-fix only. The two
-exceptions are prepared rollback scripts in `scripts/db/rollback/` (for 0073 and 0075); the
+on the snapshot branch, then apply and verify. Migrations are forward-fix only. The seven
+exceptions are prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080 and 0081); the
 runbook says when each may be used, and each needs the founder's explicit approval for that
 step. Executing the runbook requires founder approval (gate HG-2).
 
