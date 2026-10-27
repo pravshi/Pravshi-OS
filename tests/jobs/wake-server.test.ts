@@ -98,6 +98,42 @@ describe('wake endpoint', () => {
     expect(latch.rings).toBe(0);
   });
 
+  describe('GET /healthz reports the worker loop’s liveness (REL-11)', () => {
+    const health = async (base: string) => {
+      const res = await fetch(`${base}/healthz`);
+      return { status: res.status, body: await res.text(), headers: res.headers };
+    };
+
+    it('ok → 200 "ok"; degraded → 200 "degraded"; stalled → 503 "stalled", all without a token', async () => {
+      let status: 'ok' | 'degraded' | 'stalled' = 'ok';
+      const { latch, base } = await start({ liveness: () => status });
+      expect(await health(base)).toMatchObject({ status: 200, body: 'ok' });
+      status = 'degraded';
+      expect(await health(base)).toMatchObject({ status: 200, body: 'degraded' });
+      status = 'stalled';
+      expect(await health(base)).toMatchObject({ status: 503, body: 'stalled' });
+      status = 'ok';
+      expect(await health(base)).toMatchObject({ status: 200, body: 'ok' });
+      expect(latch.rings).toBe(0); // a health check never wakes the loop
+    });
+
+    it('answers with the status word alone: no detail, no caching, and /wake is unchanged', async () => {
+      const { base } = await start({ liveness: () => 'stalled' });
+      const res = await health(base);
+      expect(res.body).toMatch(/^(ok|degraded|stalled)$/);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+      // The token-guarded wake endpoint behaves exactly as before.
+      expect((await wake(base)).status).toBe(202);
+      expect((await wake(base, {})).status).toBe(401);
+    });
+
+    it('without a liveness source it still answers 200 "ok", as before REL-11', async () => {
+      const { base } = await start();
+      expect(await health(base)).toMatchObject({ status: 200, body: 'ok' });
+    });
+  });
+
   it('never logs the token', async () => {
     const logged: string[] = [];
     for (const level of ['log', 'warn', 'error', 'info'] as const) {

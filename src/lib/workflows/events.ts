@@ -58,7 +58,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/observability/report';
 import { env } from '@/env';
 import type { Authorization } from '../authz/require-permission';
 // Implemented by A8 (Execution Orchestrator): the real pipeline

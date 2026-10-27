@@ -73,6 +73,7 @@ import { sweepRetryableJobs } from './retry-sweeper';
 import { sweepDueTaskReminders } from './reminder-sweep';
 import { runDbMaintenance, sqlstateOf } from './maintenance';
 import { WakeLatch } from './wake-latch';
+import type { LivenessReporter } from './liveness';
 import { backoffDelayMs, classifyError } from './retry';
 import { JOB_TYPE_SET, type Job, type JobType } from './types';
 
@@ -170,6 +171,12 @@ export interface WorkerConfig {
   /** Observability: the loop went active (start, wake) / went to deep sleep. */
   onActive?: (at: number) => void;
   onDeepSleep?: (at: number, sleepMs: number) => void;
+  /**
+   * REL-11: told before every wait what the loop is about to wait for, so a watchdog
+   * (liveness.ts) can tell a stalled loop from a slow one. Reporting only — it never changes
+   * what the loop does. Absent: nothing is reported.
+   */
+  liveness?: LivenessReporter;
 }
 
 /** deep-sleep never sleeps longer than a day: maintenance must run at least daily. */
@@ -433,6 +440,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
   );
   const schedulerTickIntervalMs = config.schedulerTickIntervalMs ?? 60000;
   const latch = config.wakeLatch ?? new WakeLatch();
+  const lv = config.liveness;
   if (deepSleep && typeof config.nextDueAt !== 'function') {
     return Promise.reject(new Error("INVALID_REQUEST: idleMode 'deep-sleep' requires nextDueAt"));
   }
@@ -526,12 +534,14 @@ export function runWorker(config: WorkerConfig): Promise<void> {
       while (!state.shuttingDown) {
         if (deepSleep && config.schedulerTick && Date.now() >= nextSchedulerTickMs) {
           nextSchedulerTickMs = Date.now() + schedulerTickIntervalMs;
+          lv?.expect('scheduler');
           await config.schedulerTick().catch(() => undefined);
         }
         if (retrySweepIntervalMs > 0 && Date.now() >= nextRetrySweepMs) {
           // Automatic retry: re-drive retryable 'failed' jobs whose backoff
           // elapsed back to 'pending'. A DB blip must never kill the worker.
           nextRetrySweepMs = Date.now() + retrySweepIntervalMs;
+          lv?.expect('retry-sweep');
           await sweepRetryableJobs().catch(() => undefined);
         }
         if (reapIntervalMs > 0 && Date.now() >= nextReapMs) {
@@ -539,6 +549,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // 'pending' (the abandoned attempt counts). Same failure posture
           // as the retry sweep — a DB blip must never kill the worker.
           nextReapMs = Date.now() + reapIntervalMs;
+          lv?.expect('reap');
           await reapStaleJobs().catch(() => undefined);
         }
         if (reminderSweepIntervalMs > 0 && Date.now() >= nextReminderSweepMs) {
@@ -548,6 +559,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // kill the worker; per-reminder errors are isolated inside the
           // sweep itself.
           nextReminderSweepMs = Date.now() + reminderSweepIntervalMs;
+          lv?.expect('reminder-sweep');
           await sweepDueTaskReminders().catch(() => undefined);
         }
         if (maintenanceIntervalMs > 0 && Date.now() >= nextMaintenanceMs) {
@@ -555,12 +567,15 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // never throws and logs its own failures; the catch is belt and
           // braces — a maintenance problem must never kill the worker.
           nextMaintenanceMs = Date.now() + maintenanceIntervalMs;
+          lv?.expect('maintenance');
           await runDbMaintenance().catch(() => undefined);
         }
         let job: Job | null = null;
         let claimFailed = false;
         try {
+          lv?.expect('claim');
           job = await claimJob(workerId, types);
+          lv?.recovered('database-unavailable');
         } catch {
           // A claim failure (DB blip, privilege path hiccup) must never kill
           // the worker — back off and keep polling. Queue state is unknown
@@ -571,10 +586,13 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           // is not answering.
           claimFailed = true;
           idleSleepMs = pollIntervalMs;
+          lv?.degraded('database-unavailable');
         }
         if (job === null) {
           if (!deepSleep || Date.now() < activeUntil) {
-            const outcome = await latch.sleep(claimFailed ? pollIntervalMs : idleSleepMs);
+            const idleMs = claimFailed ? pollIntervalMs : idleSleepMs;
+            lv?.expect('idle', idleMs);
+            const outcome = await latch.sleep(idleMs);
             if (outcome === 'woken' && deepSleep && !state.shuttingDown) becomeActive();
             else if (!claimFailed) idleSleepMs = Math.min(idleSleepMs * 2, maxIdleSleepMs);
             continue;
@@ -584,8 +602,10 @@ export function runWorker(config: WorkerConfig): Promise<void> {
           let sleepMs: number;
           let lookup: { ok: true; dueAt: Date | null } | { ok: false };
           try {
+            lv?.expect('next-due');
             lookup = { ok: true, dueAt: await config.nextDueAt!() };
             errorBackoffMs = firstBackoffMs;
+            lv?.recovered('database-unavailable');
           } catch (error) {
             // Database unavailable (suspended, quota, network). Never crash and never
             // spin: back off, doubling up to maxSleepMs. Queued work stays in Postgres.
@@ -594,6 +614,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
               sqlstate: sqlstateOf(error),
             });
             lookup = { ok: false };
+            lv?.degraded('database-unavailable');
           }
           if (!lookup.ok) {
             sleepMs = errorBackoffMs;
@@ -604,6 +625,7 @@ export function runWorker(config: WorkerConfig): Promise<void> {
             if (dueAt === null) {
               sleepMs = maxSleepMs;
               lastPastDue = null;
+              lv?.recovered('overdue-work');
             } else if (dueAt.getTime() <= now) {
               // Overdue. The wake passes just ran, so a due item that is still due
               // will not clear by itself (a type no handler takes, a pass that keeps
@@ -619,20 +641,24 @@ export function runWorker(config: WorkerConfig): Promise<void> {
                 dueAt: dueAt.toISOString(),
                 backoffMs: stuckBackoffMs,
               });
+              lv?.degraded('overdue-work');
               sleepMs = stuckBackoffMs;
               stuckBackoffMs = Math.min(stuckBackoffMs * 2, maxSleepMs);
             } else {
               lastPastDue = null;
+              lv?.recovered('overdue-work');
               sleepMs = Math.min(dueAt.getTime() - now, maxSleepMs);
             }
           }
           config.onDeepSleep?.(Date.now(), sleepMs);
+          lv?.expect('deep-sleep', sleepMs);
           await latch.sleep(sleepMs);
           if (!state.shuttingDown) becomeActive();
           continue;
         }
         idleSleepMs = pollIntervalMs;
         activeUntil = Date.now() + activeWindowMs;
+        lv?.expect('job', undefined, job.type);
         await executeJob(workerId, heartbeatIntervalMs, job, state);
       }
     } finally {

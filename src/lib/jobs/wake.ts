@@ -21,7 +21,10 @@
  *   - Inside the worker process it does nothing: the worker is already awake.
  */
 import { env } from '@/env';
+import { isWorkerProcess, markWorkerProcess } from './process-context';
 import { WAKE_TOKEN_HEADER } from './wake-server';
+
+export { isWorkerProcess, markWorkerProcess };
 
 export type WakeResult = 'sent' | 'disabled' | 'skipped' | 'debounced' | 'backoff' | 'failed';
 
@@ -31,16 +34,7 @@ export const WAKE_FAILURE_BACKOFF_MS = 30_000;
 
 let lastSentAt = Number.NEGATIVE_INFINITY;
 let lastFailedAt = Number.NEGATIVE_INFINITY;
-let insideWorker = false;
 let warnedInsecure = false;
-
-/**
- * runner.ts calls this at worker start-up: inside the worker, work enqueued by a handler is
- * picked up by the running loop, so no wake is sent over the network.
- */
-export function markWorkerProcess(value = true): void {
-  insideWorker = value;
-}
 
 /** Test hook: forget the last delivered and the last failed wake. */
 export function resetWakeDebounce(): void {
@@ -54,7 +48,7 @@ export async function requestWorkerWake(
   const url = env.WORKER_WAKE_URL;
   const token = env.WORKER_WAKE_TOKEN;
   if (!url || !token) return 'disabled';
-  if (insideWorker) return 'skipped';
+  if (isWorkerProcess()) return 'skipped';
   if (env.NODE_ENV === 'production' && !url.startsWith('https://')) {
     if (!warnedInsecure) {
       warnedInsecure = true;

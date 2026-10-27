@@ -22,7 +22,7 @@
  * Types come from `./schema` (A2: TriggerConfig, ConditionNode, ActionConfig)
  * and `./events` (A4: WorkflowEvent) — never redefined here.
  */
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/observability/report';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAuthorizedDb } from '../db/authorized';

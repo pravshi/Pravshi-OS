@@ -240,6 +240,13 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     // The pool releases idle clients after 10 s.
     await sleep(12_000);
     expect(await workerConnections()).toBe(0);
+    // REL-11, through the real runner: the sleeping worker reports itself healthy on
+    // /healthz, and answering opens no database connection.
+    const health = await fetch(`http://127.0.0.1:${PORT}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.text()).toBe('ok');
+    expect(await workerConnections()).toBe(0);
+    expect(logs).toContain('[worker] liveness budgets');
   }, 30_000);
 
   it('2. a wake gets a committed job claimed and finished within seconds', async () => {

@@ -282,8 +282,10 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 
 - **Wake endpoint:** with `WORKER_WAKE_TOKEN` set the worker listens on `PORT`:
   `POST /wake` (header `x-pravshi-worker-token`; 202, no body read, no database touched,
-  capped at 60 accepted wakes and 30 refused attempts a minute) and `GET /healthz` (200,
-  unauthenticated, no database — use it for the platform's health check). The web app
+  capped at 60 accepted wakes and 30 refused attempts a minute) and `GET /healthz`
+  (unauthenticated, no database: 200 `ok`, 200 `degraded`, or 503 `stalled` — see
+  [Worker liveness](#worker-liveness-rel-11) before wiring it to anything that restarts the
+  worker). The web app
   needs `WORKER_WAKE_URL` (`https://<worker-host>/wake`) and the same token. Without the
   pair the worker still works; work just waits for its next scheduled wake. If the worker
   is down or refuses a wake, each web instance stops sending wakes for 30 s, so an outage
@@ -329,6 +331,79 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 
   The deployment checklist below carries "worker running and claiming" as a gate item;
   both parts must be verified, not assumed.
+
+### Worker liveness (REL-11)
+
+A job's lease renewal (every 15 s) proves the worker **process** is alive, not that its loop
+is getting anywhere: a handler that never returns keeps renewing its lease, so the reaper never
+frees the job and nothing else notices. The worker therefore runs an in-process watchdog
+(`src/lib/jobs/liveness.ts`). Before every wait the loop says what it waits for; a deep or
+idle sleep is held to the exact length it chose, a pass or a job to the budget below. The
+watchdog reads only a monotonic clock — **no database query, ever** (a health check that
+touched the database would keep Neon awake; `tests/guards/no-keepalive.test.ts` enforces
+this) — and calls the loop **stalled** after two consecutive overdue checks, 15 s apart.
+
+`GET /healthz` on the wake endpoint answers with one word and nothing else:
+
+| Answer         | Meaning                                                                                                                                                                     | Restart helps?                 |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 200 `ok`       | the loop is making progress                                                                                                                                                 | —                              |
+| 200 `degraded` | the database is not answering, or due work a full pass did not clear (a pass that keeps failing, a job type this worker does not take): the loop is backing off as designed | No                             |
+| 503 `stalled`  | a wait has run past its allowance: the loop is stuck                                                                                                                        | Possibly — read the logs first |
+| no answer      | the process or its event loop is blocked or gone                                                                                                                            | Yes                            |
+
+Transitions are logged once each — `[worker] liveness: stalled|degraded|ok` with the phase,
+how far overdue, the job **type** (never its id or payload) and the degraded reasons — and a
+blocked event loop is logged after the fact as `[worker] liveness: event loop was blocked`.
+On a graceful shutdown the worker logs `[worker] liveness summary`, the longest wait per phase:
+the figures to compare the budgets with.
+
+- **`WORKER_PASS_STALL_MS`** — a sweep, reap, claim, next-due lookup or scheduler tick.
+  Default 300000 (5 min). Evidence: connection establishment is bounded (`worker-pool.ts`:
+  10 s timeout × 4 attempts + 1.75 s back-off ≈ 41.75 s); on local CI-shaped Postgres the
+  longest pass took 57 ms and the longest scheduler tick 390 ms (3 runs). Uncertainty: there is
+  no statement timeout, so a query has no upper bound; not measured on Neon (cold starts) or
+  at production volume.
+- **`WORKER_MAINTENANCE_STALL_MS`** — partitions and retention. Default 900000 (15 min).
+  Evidence: retention deletes at most 5000 rows per target per pass (`maintenance.ts`); locally
+  the longest pass took 142 ms. Uncertainty: its duration at production volume is unknown.
+- **`WORKER_JOB_STALL_MS`** — one job. Default 900000 (15 min) — a **chosen** value, not a
+  derived bound, because no handler has a total deadline. A webhook makes at most 3 requests
+  (2 redirects), each with a socket **inactivity** timeout of at most 30 s (`types.ts` caps
+  `timeoutMs` at 30000; `handlers.ts` uses `req.setTimeout`), so an endpoint that keeps
+  trickling bytes can hold a job — and the one-job-at-a-time loop — indefinitely (pre-existing;
+  the watchdog now reports it; flagged for a security review). An email goes through the
+  Resend SDK, which passes no abort signal, so only Node's fetch default timers bound it, and
+  they are idle timers too. `workflow_run`, `scheduled_trigger`, `notification` and `cleanup`
+  are database-only (workflow actions enqueue jobs; at most 20 actions). 15 minutes is far
+  beyond a healthy external call and short enough to surface a hung one within the hour.
+  Uncertainty: not measured — no job ran in the local measurement.
+- **`WORKER_STALL_GRACE_MS`** — added to every allowance. Default 60000: the reaper's own
+  staleness threshold, and above the worst-case connection establishment.
+
+A stall is therefore reported, at the earliest, budget + grace + up to two 15 s checks after a
+wait began. Every value is configurable on the worker host; raise a budget if the summary shows
+legitimate waits approaching it, and record why.
+
+**What it does not do.** It never aborts a job, never exits and changes no retry, reap or
+dead-letter behaviour. Restarting is a human decision, and **the platform's restart-on-failure
+behaviour has not been verified** for any worker host (OPS-02). Before letting a platform
+restart the worker on a 503, know this **known gap** (pinned by
+`tests/serial/worker-stalled-job-reclaim.test.ts`). A **graceful** restart (SIGTERM) aborts
+the job, waits 30 s for a handler that ignores the abort, then releases its claim: the job is
+`pending` again with `attempts` **unchanged** (`jobs_release_claim`, 0050). A **hard** stop
+(SIGKILL, a crash, an out-of-memory kill, or a platform grace period under 30 s) leaves the
+lease to lapse; the reaper then returns the job with `attempts + 1` and never dead-letters
+(0049). Either way the next worker claims it again, because the claim ignores `attempts`
+(0068) — so a job that hangs on **every** attempt is retried for as long as something keeps
+restarting the worker, and graceful restarts do not even count the attempts. A job that fails
+(throws) is bounded: it dead-letters at `max_attempts`. Closing the gap needs the release and
+reap paths (or the claim) to respect `max_attempts` — a migration, separately approved. Until
+then, alert a human — point an uptime monitor at `/healthz` (REL-10) — rather than restarting
+automatically, and cancel a job that stalls twice (incident-response runbook).
+
+In `WORKER_IDLE_MODE=poll` there is no wake endpoint: the log lines are the only signal there,
+and the scheduler's own interval timer is outside the watchdog.
 
 ## Rollback
 
@@ -391,8 +466,9 @@ Before any deployment, confirm:
       shows `[worker] starting … idleMode=deep-sleep … wakeEndpoint=on`
 - [ ] `WORKER_WAKE_TOKEN` set on **both** the web app and the worker, **identical**, 32+
       characters; `WORKER_WAKE_URL` on the web app is `https://<worker-host>/wake`
-- [ ] `GET https://<worker-host>/healthz` answers 200 (no auth, no database) and is the
-      worker's platform health check
+- [ ] `GET https://<worker-host>/healthz` answers 200 `ok` (no auth, no database); an uptime
+      monitor alerts a human on a 503 or a timeout, and whether the host also restarts on it
+      is a recorded decision ([Worker liveness](#worker-liveness-rel-11))
 - [ ] A test wake is accepted: `POST /wake` with the token answers 202 and a
       `[worker] deep sleep` line follows within about a minute; without the token it answers 401
 - [ ] `SCHEDULE_MIN_INTERVAL_MINUTES` left at its default (60) while on Neon Free

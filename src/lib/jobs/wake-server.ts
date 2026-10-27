@@ -2,8 +2,15 @@
  * The worker's wake endpoint (WP-W, low-cost worker mode).
  *
  *   POST /wake     header x-pravshi-worker-token: <WORKER_WAKE_TOKEN>  → 202, rings the latch
- *   GET  /healthz  no auth, no database                               → 200 "ok"
+ *   GET  /healthz  no auth, no database → 200 "ok" | 200 "degraded" | 503 "stalled"
  *   anything else                                                     → 404
+ *
+ * /healthz (REL-11) reports the worker loop's liveness (liveness.ts): 503 only when the loop
+ * has stopped making progress; a database outage or work that will not clear is "degraded" and
+ * stays 200, because restarting the worker fixes neither. The body is that one word and nothing
+ * else — no job, organization, phase, timing or error detail ever leaves through this
+ * unauthenticated endpoint (the worker's logs carry the detail). Without a liveness source it
+ * answers 200 "ok", as before.
  *
  * The web app calls /wake right after it commits new work (src/lib/jobs/wake.ts), so a
  * worker sleeping without polling picks the work up within seconds instead of at its next
@@ -21,6 +28,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { WakeLatch } from './wake-latch';
+import type { LivenessStatus } from './liveness';
 
 export const WAKE_TOKEN_HEADER = 'x-pravshi-worker-token';
 export const WAKE_TOKEN_MIN_LENGTH = 32;
@@ -36,6 +44,8 @@ export interface WakeServerOptions {
   maxRejectsPerMinute?: number;
   /** Injectable clock for the rate-limit windows. */
   now?: () => number;
+  /** REL-11: the worker loop's liveness, read on every GET /healthz. Default: always 'ok'. */
+  liveness?: () => LivenessStatus;
 }
 
 export interface WakeServer {
@@ -89,7 +99,11 @@ export function startWakeServer(options: WakeServerOptions): Promise<WakeServer>
     req.resume();
     const path = (req.url ?? '/').split('?')[0];
 
-    if (path === '/healthz' && req.method === 'GET') return reply(res, 200, 'ok');
+    if (path === '/healthz' && req.method === 'GET') {
+      const status = options.liveness?.() ?? 'ok';
+      if (status === 'stalled') return reply(res, 503, 'stalled');
+      return reply(res, 200, status === 'degraded' ? 'degraded' : 'ok');
+    }
     if (path !== '/wake') return reply(res, 404);
     if (req.method !== 'POST') return reply(res, 405);
     if (Number(req.headers['content-length'] ?? 0) > MAX_BODY_BYTES) return reply(res, 413);

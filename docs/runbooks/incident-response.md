@@ -27,6 +27,29 @@ the database, the async plane, or someone else's outage.
    [DEPLOYMENT.md](../../DEPLOYMENT.md) ("The worker plane"): supervisor says running,
    and claim heartbeats (`max(heartbeat_at)`) are fresh.
 
+   **Worker `/healthz` answers 503 `stalled`** (or the monitor alerts on it): the worker loop
+   has stopped making progress ([DEPLOYMENT.md](../../DEPLOYMENT.md), "Worker liveness").
+   Read the `[worker] liveness: stalled` log line first — it names the phase (`job`, `claim`,
+   `maintenance`, …), how far overdue it is and, for a job, its type. A `job` stall is one
+   handler that never returned; anything else is the loop itself waiting on the database or
+   the scheduler. Act within the hour: the stuck job's lease is renewed every 15 s, which keeps
+   the Neon compute awake (and spends CU-hours) for as long as the stall lasts.
+
+   - _Find the job._ The log gives only its type. With database access:
+     `select id, org_id, claimed_by, claimed_at from public.jobs where status in ('claimed',
+     'running') and type = '<type>' order by claimed_at;` — the stuck one has the oldest
+     `claimed_at` and the stalled worker's id in `claimed_by`.
+   - _Restart once._ A graceful restart frees it (the worker releases the claim after 30 s:
+     `pending` again, attempts unchanged); a hard stop leaves it to the reaper (`pending`,
+     attempts + 1).
+   - _If the same job stalls again, stop restarting._ A job that hangs on every attempt is
+     never dead-lettered automatically. Cancel it (the jobs API, `jobs.cancel`, allowed from
+     `running`); a handler that ignores the abort still occupies the loop, so restart the worker
+     once more after cancelling. Keep the stall logs and raise the defect.
+
+   `200 degraded` means the database is not answering or due work a full pass did not clear —
+   restarting fixes neither; check the provider (step 5) and the job counts above.
+
 5. **Provider outage?** Neon status and Vercel status. If the incident is theirs, the job
    is communication and waiting — do not "fix" a provider outage with application changes.
 

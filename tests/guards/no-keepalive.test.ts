@@ -52,4 +52,51 @@ describe('nothing defeats Neon autosuspend', () => {
     expect(health).not.toMatch(/lib\/db/);
     expect(existsSync('src/app/health/db/route.ts')).toBe(true);
   });
+
+  // REL-11: the worker's liveness watchdog runs on a timer for as long as the worker lives, and
+  // GET /healthz is polled by uptime monitors. Neither may reach the database, or the watchdog
+  // and every monitor poll would keep Neon compute awake. Each file's complete import list is
+  // pinned below, so a new dependency — in any import form — fails here and must be reviewed.
+  const LIVENESS_PATH_IMPORTS: Record<string, string[]> = {
+    'src/lib/jobs/liveness.ts': [],
+    'src/lib/jobs/wake-latch.ts': [],
+    'src/lib/jobs/wake-server.ts': ['./liveness', './wake-latch', 'node:crypto', 'node:http'],
+  };
+  /** Every module specifier in `code`: static, side-effect, dynamic, re-export and require. */
+  const specifiersOf = (code: string): string[] => {
+    const forms = [
+      /\bimport\s[^'"`;]*?\bfrom\s*(['"])([^'"]+)\1/g, // import x from 'y' (also `import type`)
+      /\bimport\s*(['"])([^'"]+)\1/g, // import 'y'
+      /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g, // import('y')
+      /\bexport\s[^'"`;]*?\bfrom\s*(['"])([^'"]+)\1/g, // export … from 'y'
+      /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g, // require('y')
+    ];
+    return [...new Set(forms.flatMap((re) => [...code.matchAll(re)].map((m) => m[2]!)))].sort();
+  };
+
+  it('finds every import form (the scanner itself is tested)', () => {
+    const sample = [
+      `import a from 'one';`,
+      `import type { B } from "two";`,
+      `import 'three';`,
+      `const c = await import("four");`,
+      `export { d } from 'five';`,
+      `const e = require('six');`,
+    ].join('\n');
+    expect(specifiersOf(sample)).toEqual(['five', 'four', 'one', 'six', 'three', 'two']);
+  });
+
+  it('keeps the worker liveness watchdog and the worker /healthz free of database access', () => {
+    for (const [file, allowed] of Object.entries(LIVENESS_PATH_IMPORTS)) {
+      const source = readFileSync(file, 'utf8');
+      const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+      expect(
+        specifiersOf(code),
+        `${file}: the liveness path must not touch the database — review any new import`,
+      ).toEqual(allowed);
+      expect(code, `${file} must not call the database`).not.toMatch(
+        /withWorkerDb|withAuthorizedDb|connectWithWake|connectWorkerWithWake|\bpool\.|drizzle/,
+      );
+    }
+  });
 });
