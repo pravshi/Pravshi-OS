@@ -1285,7 +1285,9 @@ describe.skipIf(!DB_READY)('Sales Sheet import persistence (0081, live DB)', () 
     expect(careful.audit.length).toBeGreaterThan(0);
     expect(careful.shape.some((r) => r.history > 0)).toBe(true);
     sameDecisions(fast, careful);
-  });
+    // The row-by-row half is the slow path itself (150 rows at ~190 ms): alone this test took
+    // 28.6-29.4 s, and it timed out at the 30 s default once in three full runs. Hence the limit.
+  }, 120_000);
 
   it('decides a batch row by row when one of its rows is refused, with the same results (commit fast path)', async () => {
     const email = `colleague.${RUN}@pravshi.example`;
