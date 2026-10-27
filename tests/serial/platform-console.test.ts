@@ -747,12 +747,19 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       else expect(r.status).toBe(404);
     }
     expect(limited).toBe(true);
+    // Further refusals in the same window are answered, not recorded again (review R-2).
+    for (let i = 0; i < 3; i += 1) {
+      const again = await call('suspend', 'POST', {
+        cookie: adminCookie,
+        path: `/api/platform/organizations/${randomUUID()}/suspend`,
+        body: { reason: 'Rate limit probe' },
+      });
+      expect(again.status).toBe(429);
+    }
     const rows = (await auditRows()).filter((r) => r.reason_code === 'RATE_LIMITED');
-    expect(rows[0]).toEqual({
-      action: 'platform.organization.suspend',
-      result: 'DENIED',
-      reason_code: 'RATE_LIMITED',
-    });
+    expect(rows).toEqual([
+      { action: 'platform.organization.suspend', result: 'DENIED', reason_code: 'RATE_LIMITED' },
+    ]);
   });
 
   it('break-glass recovery invalidates the old password and factor at once', async () => {

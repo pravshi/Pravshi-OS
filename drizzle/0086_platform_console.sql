@@ -14,7 +14,8 @@
 -- The acting administrator is bound to a live session (security review S-CONSOLE-1):
 -- platform.current_admin() (0083) trusted the administrator id and aal the caller set. It now
 -- also requires app.platform_session_id to name an aal2 session of that administrator's own
--- login, unexpired and within the 12-hour / 30-minute limits, checked in SQL.
+-- login, with app.platform_session_token_sha256 the SHA-256 of its bearer token, unexpired and
+-- within the 12-hour / 30-minute limits, checked in SQL.
 -- CREATE OR REPLACE keeps both functions' grants.
 -- ═════════════════════════════════════════════════════════════════════════════
 
@@ -97,6 +98,7 @@ as $$
 declare
   v_raw text := current_setting('app.platform_admin_id', true);
   v_session text := current_setting('app.platform_session_id', true);
+  v_token_sha256 text := current_setting('app.platform_session_token_sha256', true);
   v_id uuid;
 begin
   if session_user <> 'app_platform'::name then
@@ -111,9 +113,15 @@ begin
   v_id := v_raw::uuid;
   -- 0086 (S-CONSOLE-1): the claim is bound to a live session in the database, not only to the
   -- settings. app.platform_session_id must name a session of THIS administrator's own login,
-  -- created with a second factor (aal2), unexpired, within the platform's 12-hour absolute and
-  -- 30-minute idle limits. Holding the app_platform credential alone acts as nobody.
+  -- and app.platform_session_token_sha256 must be the SHA-256 of that session's bearer token
+  -- (an id alone is not a credential: Better Auth shows session ids to the browser). The
+  -- session was created with a second factor (aal2), is unexpired, and is within the
+  -- platform's 12-hour absolute and 30-minute idle limits. The app_platform credential alone,
+  -- or with a session id, acts as nobody.
   if v_session is null or v_session !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    return null;
+  end if;
+  if v_token_sha256 is null or v_token_sha256 !~ '^[0-9a-f]{64}$' then
     return null;
   end if;
   if not exists (
@@ -121,6 +129,7 @@ begin
     from platform.admins a
     join auth.auth_sessions s on s.user_id = a.auth_user_id
     where a.id = v_id and s.id = v_session::uuid and s.aal = 'aal2'
+      and encode(sha256(convert_to(s.token, 'UTF8')), 'hex') = v_token_sha256
       and s.expires_at > now()
       and s.created_at > now() - interval '12 hours'
       and s.updated_at > now() - interval '30 minutes'

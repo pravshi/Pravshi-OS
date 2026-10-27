@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
@@ -25,6 +26,11 @@ export const PLATFORM_STEP_UP_MS = 10 * 60 * 1000;
 export interface PlatformSession {
   authUserId: string;
   sessionId: string;
+  /**
+   * Hex SHA-256 of the session's bearer token. The database binds the platform actor to it
+   * (0086): an id alone is not a credential — Better Auth shows session ids to the browser.
+   */
+  tokenSha256: string;
   aal: 'aal1' | 'aal2';
   /** Created within PLATFORM_STEP_UP_MS, with a second factor: may perform sensitive actions. */
   fresh: boolean;
@@ -35,14 +41,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The request's live Better Auth session, before any platform question is asked. */
 export async function readRequestSession(
   headers: Headers,
-): Promise<{ authUserId: string; sessionId: string } | null> {
+): Promise<{ authUserId: string; sessionId: string; tokenSha256: string } | null> {
   const session = await auth.api.getSession({ headers });
   const userId = session?.user?.id;
   const sessionId = session?.session?.id;
-  if (typeof userId !== 'string' || typeof sessionId !== 'string' || !UUID.test(userId)) {
+  const token = session?.session?.token;
+  if (
+    typeof userId !== 'string' ||
+    typeof sessionId !== 'string' ||
+    typeof token !== 'string' ||
+    token.length === 0 ||
+    !UUID.test(userId)
+  ) {
     return null;
   }
-  return { authUserId: userId, sessionId };
+  const tokenSha256 = createHash('sha256').update(token, 'utf8').digest('hex');
+  return { authUserId: userId, sessionId, tokenSha256 };
 }
 
 /**
@@ -55,8 +69,9 @@ export async function readRequestSession(
 export async function enforcePlatformSessionLimits(current: {
   authUserId: string;
   sessionId: string;
+  tokenSha256: string;
 }): Promise<PlatformSession | null> {
-  const { authUserId: userId, sessionId } = current;
+  const { authUserId: userId, sessionId, tokenSha256 } = current;
 
   const rows = await authDb.execute<{
     created_at: Date;
@@ -90,6 +105,7 @@ export async function enforcePlatformSessionLimits(current: {
   return {
     authUserId: userId,
     sessionId,
+    tokenSha256,
     aal,
     fresh: aal === 'aal2' && now - created <= PLATFORM_STEP_UP_MS,
   };

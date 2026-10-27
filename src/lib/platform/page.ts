@@ -48,6 +48,7 @@ export async function requirePlatformPage(): Promise<PlatformPageContext> {
           adminId: actor.adminId,
           aal: actor.session.aal,
           sessionId: actor.session.sessionId,
+          sessionTokenSha256: actor.session.tokenSha256,
         },
       });
     } catch (e) {

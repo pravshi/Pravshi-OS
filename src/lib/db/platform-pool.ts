@@ -111,6 +111,8 @@ export interface PlatformActorSettings {
   aal: 'aal1' | 'aal2';
   /** The administrator's own session: the database requires it to be live and aal2 (0086). */
   sessionId: string;
+  /** Hex SHA-256 of that session's bearer token: the database requires both to match (0086). */
+  sessionTokenSha256: string;
 }
 
 /**
@@ -129,7 +131,8 @@ export async function withPlatformTx<T>(
       await tx.execute(sql`
         select set_config('app.platform_admin_id', ${actor?.adminId ?? ''}, true),
                set_config('app.platform_aal', ${actor?.aal ?? ''}, true),
-               set_config('app.platform_session_id', ${actor?.sessionId ?? ''}, true)
+               set_config('app.platform_session_id', ${actor?.sessionId ?? ''}, true),
+               set_config('app.platform_session_token_sha256', ${actor?.sessionTokenSha256 ?? ''}, true)
       `);
       return fn(tx);
     });

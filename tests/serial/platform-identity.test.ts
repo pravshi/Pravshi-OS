@@ -94,21 +94,25 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
    * the actor to one). `ageMinutes` backdates it; an administrator with no login gets an id that
    * names no session.
    */
+  type Session = { id: string; tokenSha256: string };
+  const sha256Hex = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
   const sessionFor = async (
     adminId: string | null,
     aal: 'aal1' | 'aal2',
     age: { createdMinutesAgo?: number; idleMinutes?: number } = {},
-  ): Promise<string> => {
-    if (!adminId || !/^[0-9a-f-]{36}$/.test(adminId)) return randomUUID();
+  ): Promise<Session> => {
+    const token = newToken();
+    const none = { id: randomUUID(), tokenSha256: sha256Hex(token) };
+    if (!adminId || !/^[0-9a-f-]{36}$/.test(adminId)) return none;
     const res = await owner.query<{ id: string }>(
       `insert into auth.auth_sessions (user_id, token, expires_at, aal, created_at, updated_at)
        select a.auth_user_id, $2, now() + interval '1 day', $3,
               now() - make_interval(mins => $4), now() - make_interval(mins => $5)
        from platform.admins a where a.id = $1 and a.auth_user_id is not null
        returning id`,
-      [adminId, newToken(), aal, age.createdMinutesAgo ?? 0, age.idleMinutes ?? 0],
+      [adminId, token, aal, age.createdMinutesAgo ?? 0, age.idleMinutes ?? 0],
     );
-    return res.rows[0]?.id ?? randomUUID();
+    return res.rows[0] ? { id: res.rows[0].id, tokenSha256: sha256Hex(token) } : none;
   };
 
   /**
@@ -120,16 +124,17 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
     aal: string,
     text: string,
     params: unknown[] = [],
-    session?: string,
+    session?: Session,
   ) => {
-    const sessionId = session ?? (await sessionFor(adminId, aal === 'aal2' ? 'aal2' : 'aal1'));
+    const s = session ?? (await sessionFor(adminId, aal === 'aal2' ? 'aal2' : 'aal1'));
     const c: PoolClient = await platform.connect();
     try {
       await c.query('begin');
       await c.query(
         `select set_config('app.platform_admin_id', $1, true), set_config('app.platform_aal', $2, true),
-                set_config('app.platform_session_id', $3, true)`,
-        [adminId ?? '', aal, sessionId],
+                set_config('app.platform_session_id', $3, true),
+                set_config('app.platform_session_token_sha256', $4, true)`,
+        [adminId ?? '', aal, s.id, s.tokenSha256],
       );
       const res = await c.query<T>(text, params);
       await c.query('commit');
@@ -422,9 +427,25 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
     expect(me.rows[0]!.permissions).toHaveLength(7);
 
     // 0086 (S-CONSOLE-1): the settings alone act as nobody. The actor needs a live aal2 session
-    // of their own login, within the platform's 12-hour and 30-minute limits.
-    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], ''))).toBe('42501');
-    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], randomUUID()))).toBe('42501');
+    // of their own login — its id AND the hash of its bearer token — within the platform's
+    // 12-hour and 30-minute limits.
+    const live0 = await sessionFor(firstAdmin, 'aal2');
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], { id: '', tokenSha256: '' }))).toBe(
+      '42501',
+    );
+    expect(
+      await stateOf(asAdmin(firstAdmin, 'aal2', who, [], { ...live0, id: randomUUID() })),
+    ).toBe('42501');
+    // The right session id without its token (R-1): an id is not a credential.
+    expect(
+      await stateOf(
+        asAdmin(firstAdmin, 'aal2', who, [], { ...live0, tokenSha256: sha256Hex(newToken()) }),
+      ),
+    ).toBe('42501');
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], { ...live0, tokenSha256: '' }))).toBe(
+      '42501',
+    );
+    expect((await asAdmin(firstAdmin, 'aal2', who, [], live0)).rows).toHaveLength(1);
     const aal1Session = await sessionFor(firstAdmin, 'aal1');
     expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], aal1Session))).toBe('42501');
     const idle = await sessionFor(firstAdmin, 'aal2', { idleMinutes: 31 });
@@ -434,14 +455,16 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
     const live = await sessionFor(firstAdmin, 'aal2', { createdMinutesAgo: 60, idleMinutes: 29 });
     expect((await asAdmin(firstAdmin, 'aal2', who, [], live)).rows).toHaveLength(1);
     // Another login's live aal2 session does not make this administrator an actor.
+    const otherToken = newToken();
     const others = await owner.query<{ id: string }>(
       `insert into auth.auth_sessions (user_id, token, expires_at, aal)
        select id, $1, now() + interval '1 day', 'aal2' from auth.auth_users
        where id <> $2 limit 1 returning id`,
-      [newToken(), firstLogin],
+      [otherToken, firstLogin],
     );
     if (others.rows[0]) {
-      expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], others.rows[0].id))).toBe('42501');
+      const other = { id: others.rows[0].id, tokenSha256: sha256Hex(otherToken) };
+      expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], other))).toBe('42501');
     }
 
     const forLogin = await platform.query('select * from platform.admin_for_login($1)', [

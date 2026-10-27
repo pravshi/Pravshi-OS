@@ -74,6 +74,7 @@ const settingsOf = (actor: PlatformActor): PlatformActorSettings => ({
   adminId: actor.adminId,
   aal: actor.session.aal,
   sessionId: actor.session.sessionId,
+  sessionTokenSha256: actor.session.tokenSha256,
 });
 
 /** Records a DENIED / ERROR platform audit entry. Never throws: the answer is already decided. */
@@ -138,7 +139,9 @@ async function gate_(req: Request, gate: PlatformGate): Promise<PlatformRequest 
   }
   const settings = settingsOf(actor);
 
-  // Limited before anything is recorded, so refusals cannot flood the audit trail.
+  // Limited before the permission and step-up checks record anything. A limited caller's refusal
+  // is recorded once per window, not once per request (review R-2), so the limit itself cannot
+  // be used to flood the trail. Reads are not limited; only an aal2 administrator reaches here.
   if (gate.rateLimit) {
     const { max, windowSeconds } = gate.rateLimit;
     const byAdmin = await checkIpRateLimit(
@@ -152,7 +155,14 @@ async function gate_(req: Request, gate: PlatformGate): Promise<PlatformRequest 
       windowSeconds,
     );
     if (!byAdmin || !byIp) {
-      await recordPlatformFailure(actor, gate.operation, 'DENIED', 'RATE_LIMITED', requestId);
+      const firstInWindow = await checkIpRateLimit(
+        `${gate.operation}:admin:${actor.adminId}:limited-recorded`,
+        1,
+        windowSeconds,
+      );
+      if (firstInWindow) {
+        await recordPlatformFailure(actor, gate.operation, 'DENIED', 'RATE_LIMITED', requestId);
+      }
       return json(429, { error: 'RATE_LIMITED' });
     }
   }

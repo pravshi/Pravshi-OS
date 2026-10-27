@@ -110,6 +110,9 @@ describe('there is exactly one path to Postgres', () => {
     // The administrator is set transaction-locally, never for the session.
     expect(src).toMatch(/set_config\('app\.platform_admin_id', [^)]+, true\)/);
     expect(src).toMatch(/set_config\('app\.platform_aal', [^)]+, true\)/);
+    // And the session the database binds the actor to (0086): its id and its token's hash.
+    expect(src).toMatch(/set_config\('app\.platform_session_id', [^)]+, true\)/);
+    expect(src).toMatch(/set_config\('app\.platform_session_token_sha256', [^)]+, true\)/);
   });
 
   it('the worker plane imports nothing from the authentication plane directly', () => {
