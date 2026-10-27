@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Node 22 LTS.** `.nvmrc` pins `22`; `package.json` requires `>=22.12`.
+- **Node 22 LTS.** `.nvmrc` pins `22`; `package.json` requires `>=22.12 <23`: the worker needs Node 22 (DEPLOYMENT.md).
 - **pnpm 12.3.4**, pinned via `packageManager`. Run `corepack enable` and let it resolve the
   pinned version rather than installing pnpm globally.
 - Access to the **development** Neon project — never the production project.
