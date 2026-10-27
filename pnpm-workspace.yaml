@@ -2,16 +2,31 @@ allowBuilds:
   '@sentry/cli': true
   esbuild: true
   unrs-resolver: true
+# Security floors. Each `pkg@<fixed: fixed` rewrites only resolutions below the first patched
+# release; a resolution already at or above it is left alone (exact pins held postcss,
+# brace-expansion and the MCP SDK at vulnerable versions). A consumer that WAS below it gets
+# exactly `fixed` (peer ranges included) and stays there until the override is edited — e.g.
+# postcss resolves to 8.5.23 and 8.5.28, zod to 4.6.6 and 4.6.7. The selectors have no lower
+# bound, so a future consumer of an older major would be lifted across it (see zod below).
+# Today every consumer stays inside its own declared range: zod 3 left the graph with shadcn
+# 4.22, and the MCP SDK declares zod ^3.25 || ^4.0.
 overrides:
   proxy-addr: 2.0.8
-  brace-expansion@1: 1.1.20
-  brace-expansion@4: 5.0.11
-  brace-expansion@5: 5.0.11
+  brace-expansion@1: 1.1.21 # GHSA-q2hr-2g5m-vwhr
+  brace-expansion@4: 5.0.12 # GHSA-q2hr-2g5m-vwhr
+  brace-expansion@5: 5.0.12 # GHSA-q2hr-2g5m-vwhr
   source-map-js: 1.2.2
-  postcss: 8.5.18
-  '@modelcontextprotocol/sdk': 1.31.0
+  postcss@<8.5.23: 8.5.23 # GHSA-fxqj-rqcc-2cmp
+  '@modelcontextprotocol/sdk@<1.32.1': 1.32.1 # GHSA-22jm-h49p-29qw, GHSA-46jr-4wx8-v453, GHSA-6prh-2h8m-c8cw, GHSA-rvq5-wwqv-78pq
+  vite@<8.2.4: 8.2.4 # GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw
+  hono@<4.13.11: 4.13.11 # GHSA-5r4p-p66f-jhc7
+  ip-address@<10.7.1: 10.7.1 # GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw
+  fast-uri@<3.1.8: 3.1.8 # GHSA-hrr3-gc8f-f4qj
+  body-parser@<2.4.0: 2.4.0 # GHSA-27r3-jxmh-p828 (via shadcn > MCP SDK > express)
+  undici@<7.30.1: 7.30.1 # GHSA-xjj6-f33q-929c (via shadcn > dotenvx)
+  zod@<4.6.6: 4.6.6 # GHSA-mrhx-c7xc-m3w5 (zod 3 has no patch; shadcn >= 4.22.0 depends on zod 4, so none remains — do not lift a zod 3 consumer by override: shadcn 4.21 breaks on it, verified)
 
 auditConfig:
   ignoreGhsas:
-    - GHSA-vfj7-8cjw-p6xm # braces: no patch available, dev-only via eslint
-    - GHSA-wq5f-xc86-pv6w # sharp: CVE-2026-96889 in librsvg, build-time only via @sentry/webpack-plugin image optimization; fixed in sharp>=0.35.5 but pinned by sentry 10.x, will resolve with deferred #52 sentry major bump
+    - GHSA-vfj7-8cjw-p6xm # braces <=3.0.3: advisory WITHDRAWN by GitHub, no patched release; braces 3.0.3 comes in through micromatch/fast-glob from eslint-config-next and the shadcn CLI (@shadcn/registry, ts-morph), tooling the app does not run
+    - GHSA-wq5f-xc86-pv6w # sharp <0.35.5 (CVE-2026-96889, librsvg): the app's own sharp (via next) is 0.35.5, patched; 0.35.4 remains only as the peer of minimizer-webpack-plugin under @sentry/webpack-plugin, at build time. Its peer range accepts any version, but an override does not move it (tried `sharp@>=0.35 <0.35.5` and `sharp`: still 0.35.4) — removing it needs a wider lockfile re-resolution
