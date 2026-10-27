@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
 import { mfaEnrollmentRequired } from '@/lib/auth/mfa-enforcement';
+import { checkRequestRateLimit } from '@/lib/auth/rate-limit';
+import { reportAuthFailure } from '@/lib/auth/safe-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +28,18 @@ export const dynamic = 'force-dynamic';
  * indistinguishable to the client.
  *
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts: this route
- * establishes identity, so it cannot require one. Rate limiting rides along with the
- * delegated call: /sign-in/email is limited to ten attempts a minute per address.
+ * establishes identity, so it cannot require one.
+ *
+ * Rate limiting is this route's own (Phase 3, A1). Better Auth applies its
+ * /sign-in/email limit in its HTTP router only; auth.api.signInEmail() is a direct
+ * call that never passes through it, so the delegated call is NOT limited. The
+ * route therefore throttles each client address itself — the same ten attempts a
+ * minute — before the credential check. The answer depends only on the address,
+ * never on the account. When the limiter itself cannot answer, the attempt is
+ * refused with the generic credentials error and an alert: guessing is never
+ * unbounded because the limiter is down.
  */
+const LOGIN_RATE_LIMIT = { max: 10, windowSeconds: 60 } as const;
 
 const MAX_BODY_CHARS = 4096;
 const Body = z.strictObject({
@@ -76,6 +87,20 @@ export async function POST(req: Request) {
   } catch {
     return reply(400, { error: 'INVALID_REQUEST' });
   }
+
+  let allowed: boolean;
+  try {
+    allowed = await checkRequestRateLimit(
+      req,
+      'login',
+      LOGIN_RATE_LIMIT.max,
+      LOGIN_RATE_LIMIT.windowSeconds,
+    );
+  } catch (e) {
+    reportAuthFailure('auth.login.rate_limit_check_failed', e);
+    return reply(401, { error: 'INVALID_CREDENTIALS' });
+  }
+  if (!allowed) return reply(429, { error: 'RATE_LIMITED' });
 
   let res: Response;
   try {

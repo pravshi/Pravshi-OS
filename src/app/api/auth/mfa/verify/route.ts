@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { env } from '@/env';
 import { auth } from '@/lib/auth/server';
 import { clientIp, recordLoginEvent, resolveLoginOrg } from '@/lib/auth/login-events';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
+import { reportAuthFailure } from '@/lib/auth/safe-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +27,22 @@ export const dynamic = 'force-dynamic';
  *
  * Pre-auth allow-listed in tests/guards/require-permission-first.test.ts: the session
  * does not exist yet — creating it is the point.
+ *
+ * Rate limiting (Phase 3, F-B1-7). Better Auth limits /two-factor/* in its HTTP router
+ * only; auth.api.verifyTOTP() / verifyBackupCode() are direct calls that never pass
+ * through it. The route therefore throttles each client address itself, before the
+ * factor check. The library's own limits still apply underneath and stay the tight
+ * per-account bound: five attempts per pending challenge, and a lockout after
+ * consecutive failures. This limit is deliberately wider than the library's router
+ * rule (3 per 10 s) so a user mistyping a code, or colleagues behind one office
+ * address, are not shut out; what it adds is a ceiling on one address working through
+ * many challenges or accounts. Throttled requests are not recorded as MFA_FAILURE —
+ * they verify nothing, and recording each one would let a flood fill login_events —
+ * but throttling raises the bounded auth alert, so it is visible when it fires.
+ * When the limiter itself cannot answer, the attempt is refused with the route's
+ * generic INVALID_CODE and an alert.
  */
+const MFA_RATE_LIMIT = { max: 10, windowSeconds: 60 } as const;
 
 const MAX_BODY_CHARS = 4096;
 const Body = z.strictObject({
@@ -77,6 +94,25 @@ export async function POST(req: Request) {
   }
 
   const ip = clientIp(req);
+
+  let allowed: boolean;
+  try {
+    allowed = await checkIpRateLimit(
+      ipRateLimitKey('mfa:verify', ip),
+      MFA_RATE_LIMIT.max,
+      MFA_RATE_LIMIT.windowSeconds,
+    );
+  } catch (e) {
+    reportAuthFailure('auth.mfa.rate_limit_check_failed', e);
+    return reply(401, { error: 'INVALID_CODE' });
+  }
+  if (!allowed) {
+    // A bounded signal that throttling is firing (the alert limiter admits a few per
+    // window, not one per request). It carries no code, email or address.
+    reportAuthFailure('auth.mfa.rate_limited', new Error('mfa verify rate limited'));
+    return reply(429, { error: 'RATE_LIMITED' });
+  }
+
   const userAgent = req.headers.get('user-agent');
   const viaBackupCode = body.method === 'backup-code';
 
