@@ -770,13 +770,19 @@ describe('secret and recovery material', () => {
     // structurally, not just today: the only audit trigger on the auth schema is
     // the deliberate TOTP-lifecycle one from 0027, which records action and ids
     // only — the secret and backup codes never reach audit_logs (asserted above).
+    // The one other trigger, 0085's, lower-cases the login's own address in place
+    // and writes nowhere else (LOCK-1).
     const triggers = await owner.query(
       `select t.tgname name, c.relname tbl
        from pg_trigger t join pg_class c on c.oid=t.tgrelid
        join pg_namespace n on n.oid=c.relnamespace
-       where n.nspname='auth' and not t.tgisinternal`,
+       where n.nspname='auth' and not t.tgisinternal
+       order by t.tgname`,
     );
-    expect(triggers.rows).toEqual([{ name: 'audit_two_factor_change', tbl: 'auth_two_factors' }]);
+    expect(triggers.rows).toEqual([
+      { name: 'audit_two_factor_change', tbl: 'auth_two_factors' },
+      { name: 'auth_users_normalize_email', tbl: 'auth_users' },
+    ]);
   });
 
   it('gives the authentication role (app_auth, 0072/0073) the minimum it needs on the factor table, and nobody else any', async () => {

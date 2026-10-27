@@ -110,9 +110,10 @@ jobs:
           echo "::add-mask::$SECRET"
           echo "BETTER_AUTH_SECRET=$SECRET" >> "$GITHUB_ENV"
 
-      # Per-run passwords for the four roles CI logs in as (app_owner, app_user, the worker's
-      # app_worker, migration 0070, and the authentication plane's app_auth, migrations
-      # 0072/0073). Generated here, masked, and gone with the job:
+      # Per-run passwords for the five roles CI logs in as (app_owner, app_user, the worker's
+      # app_worker, migration 0070, the authentication plane's app_auth, migrations
+      # 0072/0073, and the platform plane's app_platform, migration 0083). Generated here,
+      # masked, and gone with the job:
       # no database credential exists anywhere outside this run.
       #
       # The hostnames are never resolved — scripts/ci/neon-local.mjs sends every connection
@@ -124,19 +125,23 @@ jobs:
           USER_PW=$(openssl rand -hex 24)
           WORKER_PW=$(openssl rand -hex 24)
           AUTH_PW=$(openssl rand -hex 24)
+          PLATFORM_PW=$(openssl rand -hex 24)
           echo "::add-mask::$OWNER_PW"
           echo "::add-mask::$USER_PW"
           echo "::add-mask::$WORKER_PW"
           echo "::add-mask::$AUTH_PW"
+          echo "::add-mask::$PLATFORM_PW"
           {
             echo "CI_OWNER_PW=$OWNER_PW"
             echo "CI_USER_PW=$USER_PW"
             echo "CI_WORKER_PW=$WORKER_PW"
             echo "CI_AUTH_PW=$AUTH_PW"
+            echo "CI_PLATFORM_PW=$PLATFORM_PW"
             echo "DATABASE_URL=postgresql://app_user:${USER_PW}@ci-pooler.local/neondb"
             echo "DATABASE_URL_TEST=postgresql://app_user:${USER_PW}@ci-pooler.local/neondb"
             echo "DATABASE_URL_WORKER=postgresql://app_worker:${WORKER_PW}@ci-pooler.local/neondb"
             echo "DATABASE_URL_AUTH=postgresql://app_auth:${AUTH_PW}@ci-auth-pooler.local/neondb"
+            echo "DATABASE_URL_PLATFORM=postgresql://app_platform:${PLATFORM_PW}@ci-pooler.local/neondb"
             echo "DATABASE_URL_MIGRATE=postgresql://app_owner:${OWNER_PW}@ci.local/neondb"
           } >> "$GITHUB_ENV"
 
@@ -173,11 +178,12 @@ jobs:
           PGDATABASE: neondb
         run: |
           psql -v ON_ERROR_STOP=1 -q -f scripts/db/roles.sql
-          psql -v ON_ERROR_STOP=1 -q -v owner_pw="$CI_OWNER_PW" -v user_pw="$CI_USER_PW" -v worker_pw="$CI_WORKER_PW" -v auth_pw="$CI_AUTH_PW" <<'SQL'
+          psql -v ON_ERROR_STOP=1 -q -v owner_pw="$CI_OWNER_PW" -v user_pw="$CI_USER_PW" -v worker_pw="$CI_WORKER_PW" -v auth_pw="$CI_AUTH_PW" -v platform_pw="$CI_PLATFORM_PW" <<'SQL'
           alter role app_owner password :'owner_pw';
           alter role app_user password :'user_pw';
           alter role app_worker password :'worker_pw';
           alter role app_auth password :'auth_pw';
+          alter role app_platform password :'platform_pw';
           SQL
 
       # tests/serial/migration-runner-history.test.ts runs the real migration runner against
@@ -202,6 +208,25 @@ jobs:
             echo "DATABASE_URL_MIGRATION_TEST_B=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_runner_b"
           } >> "$GITHUB_ENV"
 
+      # tests/serial/platform-identity.test.ts: the platform bootstrap is permanent by design and
+      # closes the organization bootstrap in its database, so that suite runs against an empty
+      # database of its own, migrated from zero by the real runner. Gone with the job.
+      # tests/serial/platform-console.test.ts bootstraps the platform too, so it gets a third.
+      - name: Provision the platform test databases
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: neondb
+        run: |
+          psql -v ON_ERROR_STOP=1 -q -c "create database pravshi_platform_test"
+          psql -v ON_ERROR_STOP=1 -q -d pravshi_platform_test -f scripts/db/roles.sql
+          echo "DATABASE_URL_PLATFORM_TEST=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_platform_test" >> "$GITHUB_ENV"
+          psql -v ON_ERROR_STOP=1 -q -c "create database pravshi_console_test"
+          psql -v ON_ERROR_STOP=1 -q -d pravshi_console_test -f scripts/db/roles.sql
+          echo "DATABASE_URL_CONSOLE_TEST=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_console_test" >> "$GITHUB_ENV"
+
       # Proves the plumbing before anything depends on it: through the proxy, each URL
       # must log in as its own role, and the runtime role must be unable to bypass RLS.
       # If the proxy ever connected as a superuser instead, this stops the run here.
@@ -210,7 +235,7 @@ jobs:
           node --input-type=module -e "
           import './scripts/ci/neon-local.mjs';
           import { Pool } from '@neondatabase/serverless';
-          for (const [name, want] of [['DATABASE_URL','app_user'],['DATABASE_URL_MIGRATE','app_owner'],['DATABASE_URL_WORKER','app_worker'],['DATABASE_URL_AUTH','app_auth']]) {
+          for (const [name, want] of [['DATABASE_URL','app_user'],['DATABASE_URL_MIGRATE','app_owner'],['DATABASE_URL_WORKER','app_worker'],['DATABASE_URL_AUTH','app_auth'],['DATABASE_URL_PLATFORM','app_platform']]) {
             const pool = new Pool({ connectionString: process.env[name] });
             const { rows: [r] } = await pool.query(
               'select current_user as u, (select rolsuper or rolbypassrls from pg_roles where rolname = current_user) as bypass');

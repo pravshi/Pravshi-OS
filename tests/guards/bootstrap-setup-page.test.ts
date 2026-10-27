@@ -59,9 +59,14 @@ describe('setup token handling', () => {
   });
 
   it('form posts token and password in the body, then routes to /login on success', () => {
-    expect(FORM).toMatch(/fetch\(['"]\/api\/bootstrap\/complete['"]/);
+    // The form serves three setup links (bootstrap, platform administrator, first organization
+    // administrator); the bootstrap variant posts here and signs in at /login.
+    expect(FORM).toMatch(/endpoint: ['"]\/api\/bootstrap\/complete['"]/);
+    expect(FORM).toMatch(/fetch\(copy\.endpoint,/);
+    expect(FORM).toMatch(/variant = ['"]bootstrap['"]/);
     expect(FORM).toMatch(/JSON\.stringify\(\{ token, password \}\)/);
-    expect(FORM).toMatch(/router\.push\(['"]\/login['"]\)/);
+    expect(FORM).toMatch(/signIn: ['"]\/login['"]/);
+    expect(FORM).toMatch(/router\.push\(copy\.signIn\)/);
   });
 
   it('form never logs the token', () => {

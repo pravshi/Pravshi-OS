@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0082 (production still pending — see the
+Database migrations: 0063–0086 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -33,6 +33,59 @@ Database migrations: 0063–0082 (production still pending — see the
   health-check and restart settings before deploying this change; alerting a human (an uptime
   monitor on `/healthz`) is the recommended setup until the gap is closed.
 
+- Platform hardening (migration 0086, security findings S-CONSOLE-3/6/7/9/10, F-CONSOLE-11):
+  a revoked platform administrator can no longer sign in by any path; an administrator's session
+  past the platform's limits (12 hours, 30 idle minutes) is ended on Better Auth's own routes
+  too, never a tenant user's; only same-site activity extends the idle clock; where the console
+  is not configured it answers 404 like any unknown path; a pending first administrator's email
+  is fixed until their setup completes; administrator invitations are idempotent, and an unused
+  one can be re-issued from the console. **Deploy order:** apply 0086 before deploying this
+  code — every sign-in asks the database a question 0086 adds, and refuses when it cannot.
+- Platform administrator console (ADR-008, migration 0086). `/platform` for platform
+  administrators only: the organizations (metadata only), provisioning with type selection and
+  a one-time setup link for the first administrator, re-issuing that link, suspend and
+  reactivate with a reason, platform administrators (invite with no more than the inviter's
+  own permissions, revoke — which ends their sessions), and the platform audit trail. Every
+  action goes through `/api/platform/*` on its own database login (`DATABASE_URL_PLATFORM`,
+  `app_platform`, no fallback): a tenant user of any role, SUPER_ADMIN included, gets 404; an
+  administrator without an enrolled authenticator can only enrol one; sensitive actions need a
+  sign-in from the last 10 minutes; platform sessions end after 30 idle minutes or 12 hours;
+  sensitive actions are rate limited; an administrator's refused or failed operations are
+  audited (DENIED / ERROR). The acting administrator is bound in the database to a live aal2
+  session of their own login (0086), so the console's database credential alone acts as nobody. The setup links
+  `/platform/setup` and `/setup/organization` set a first password under the full password
+  policy. The operator CLI `scripts/bootstrap/platform.mjs` creates the first platform
+  administrator, re-issues a pending administrator's link, and performs audited break-glass
+  recovery that invalidates the old password and second factor at once. Migration 0086 adds
+  `platform.list_admins()`. Prepared rollback: `scripts/db/rollback/0086_platform_console.down.sql`.
+- Organization provisioning by the platform, database layer (migration 0084, ADR-008). In one
+  transaction a platform administrator creates an organization from an available type (today
+  `generic_crm`; Real Estate and Education stay disabled) and its latest published template,
+  its Executive department and its first administrator with SUPER_ADMIN, plus a 72-hour setup
+  link for that administrator — who then creates their own login, never adopting an existing
+  one. Requests are idempotent by key. Platform administrators can re-issue the setup link
+  until it is used, and suspend or reactivate an organization with a reason: while suspended,
+  its members are refused and its background work waits. Archive and restore are deferred to
+  V1.1 (ADR-008). Every change writes one platform audit entry. Reachable from the platform
+  console (above). Prepared rollback: `scripts/db/rollback/0084_platform_provisioning.down.sql`.
+- Platform administrator plane, database layer (migration 0083, ADR-008). A separate
+  authority from every organization: platform administrators with their own permission
+  catalogue, an append-only platform audit trail, and a new database login `app_platform`
+  that holds no table privilege anywhere and reaches the platform only through its functions.
+  The first administrator is created by a once-per-database operator bootstrap, independent of
+  the organization bootstrap — which it then closes, so every later organization is provisioned
+  by the platform. Setup creates the administrator's own login (never adopting an existing one);
+  a login is a platform administrator or a tenant person, never both. Administrators can invite
+  (least privilege) and revoke administrators (never themselves; revocation ends their
+  sessions) and grant only permissions they hold themselves. Every platform action needs an
+  administrator whose login has an enrolled second factor; the aal2 claim alone is not enough.
+  A break-glass operator recovery resets a lost factor and clears the whole old credential
+  (password, sessions, factors, reset links), and nothing created during the recovery window
+  survives it; the web password reset never reaches a platform login. The protected-role genesis
+  grant now names exactly the logins allowed to perform it (`app_admin`, `app_owner`,
+  `app_platform`). Not yet reachable from the application: the platform API, console and
+  organization provisioning follow. Requires `scripts/db/roles.sql` to create `app_platform`
+  before 0083 (runbook). Prepared rollback: `scripts/db/rollback/0083_platform_identity.down.sql`.
 - Sales Sheet import, stored half (migration 0081, BP-06). An uploaded CSV is previewed and
   recorded — file name, SHA-256, mapping, header and every row with its plan or errors, never
   the raw file — and, once the importer confirms that exact preview, committed by a background
@@ -172,6 +225,15 @@ Database migrations: 0063–0082 (production still pending — see the
   retry) fails without sending — never signed with that secret, and never sent unsigned in its
   place. Signed delivery is through a webhook subscription, which signs with its own secret; a
   URL action is sent unsigned. `WEBHOOK_SIGNING_SECRET_<REF>` is no longer read.
+- Sign-in lockout reaches every account whatever the case of its address (migration 0085,
+  LOCK-1). Accounts created by invitation or bootstrap kept the address as typed, and the lockout
+  looked logins up case-sensitively, so an account stored with capital letters was never locked
+  out and a password-reset request did not find it. Every login address is now stored
+  lower-cased: existing ones are normalised (a case-only duplicate cannot exist — the address
+  was already unique regardless of case — and the migration refuses rather than merge if it ever
+  did), and every writer is normalised by a trigger and a CHECK. The organization lookup before
+  sign-in compares case-insensitively. Rate limits were never keyed by address and are
+  unchanged. Prepared rollback: `scripts/db/rollback/0085_login_email_case.down.sql`.
 - Least-privilege cleanup (migration 0082, found by the V1 acceptance review). The two
   link-immutability trigger functions from 0036 no longer carry PUBLIC EXECUTE (the triggers
   still fire for every role), and `app_user` no longer holds DELETE on webhook deliveries,

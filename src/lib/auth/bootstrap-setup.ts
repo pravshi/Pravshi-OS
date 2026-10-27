@@ -82,8 +82,45 @@ export async function isBootstrapSetupPending(): Promise<boolean> {
   return r.rows[0]?.pending === true;
 }
 
+export type SetupPasswordRefusal = Extract<
+  BootstrapSetupResult,
+  {
+    reason:
+      'PASSWORD_TOO_SHORT' | 'PASSWORD_TOO_LONG' | 'PASSWORD_TOO_COMMON' | 'PASSWORD_BREACHED';
+  }
+>;
+
+/**
+ * The full shared policy (F-11-07) — length, common-password list, breach check — run before
+ * the database is asked anything. The bounds ride along on the length refusals because the
+ * setup forms render them; the other two reasons stand alone. null: the password is acceptable.
+ * Shared by every one-time setup (bootstrap, platform administrator, provisioned first admin).
+ */
+export async function setupPasswordRefusal(password: string): Promise<SetupPasswordRefusal | null> {
+  const context = await auth.$context;
+  const { minPasswordLength, maxPasswordLength } = context.password.config;
+  try {
+    await validateNewPasswordPolicy(password);
+    return null;
+  } catch (e) {
+    if (e instanceof PasswordResetError && e.code === 'WEAK_PASSWORD' && e.reason) {
+      if (e.reason === 'TOO_SHORT') {
+        return { ok: false, reason: 'PASSWORD_TOO_SHORT', minPasswordLength, maxPasswordLength };
+      }
+      if (e.reason === 'TOO_LONG') {
+        return { ok: false, reason: 'PASSWORD_TOO_LONG', minPasswordLength, maxPasswordLength };
+      }
+      return {
+        ok: false,
+        reason: e.reason === 'TOO_COMMON' ? 'PASSWORD_TOO_COMMON' : 'PASSWORD_BREACHED',
+      };
+    }
+    throw e;
+  }
+}
+
 /** drizzle wraps the driver error, so the SQLSTATE may be on the error or on its cause. */
-function sqlstateOf(e: unknown): string | null {
+export function sqlstateOf(e: unknown): string | null {
   for (const candidate of [e, (e as { cause?: unknown } | null)?.cause]) {
     const code = (candidate as { code?: unknown } | null | undefined)?.code;
     if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
@@ -113,28 +150,8 @@ export async function completeBootstrapSetup(input: {
   if (!SETUP_TOKEN_PATTERN.test(token)) return { ok: false, reason: 'SETUP_TOKEN_INVALID' };
 
   const context = await auth.$context;
-  const { minPasswordLength, maxPasswordLength } = context.password.config;
-  // The full shared policy (F-11-07) — length, common-password list, breach
-  // check — run before the database is asked anything, exactly as the length
-  // checks it replaces were. The bounds ride along on the length refusals
-  // because the setup form renders them; the other two reasons stand alone.
-  try {
-    await validateNewPasswordPolicy(password);
-  } catch (e) {
-    if (e instanceof PasswordResetError && e.code === 'WEAK_PASSWORD' && e.reason) {
-      if (e.reason === 'TOO_SHORT') {
-        return { ok: false, reason: 'PASSWORD_TOO_SHORT', minPasswordLength, maxPasswordLength };
-      }
-      if (e.reason === 'TOO_LONG') {
-        return { ok: false, reason: 'PASSWORD_TOO_LONG', minPasswordLength, maxPasswordLength };
-      }
-      return {
-        ok: false,
-        reason: e.reason === 'TOO_COMMON' ? 'PASSWORD_TOO_COMMON' : 'PASSWORD_BREACHED',
-      };
-    }
-    throw e;
-  }
+  const refused = await setupPasswordRefusal(password);
+  if (refused) return refused;
 
   const digest = hashSetupToken(token);
   try {

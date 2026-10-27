@@ -52,7 +52,19 @@ const PRE_AUTH_ROUTES = [
   // (contract §4.4) and answers one uniform, unrevealing shape to unknown
   // keys and refused deliveries alike.
   'src/app/api/integrations/inbound/[endpointKey]/route.ts',
+  // ADR-008: the platform's two one-time setup links. The setup token is the credential;
+  // no session exists yet (as for /api/bootstrap/complete).
+  'src/app/api/platform/setup/complete/route.ts',
+  'src/app/api/setup/organization/complete/route.ts',
 ] as const;
+
+/**
+ * ADR-008: the platform console's routes are not tenant routes and do not use the tenant
+ * authorization engine. Each is gated by platformRoute() (src/lib/platform/http.ts) — the
+ * platform session, the administrator, MFA, the platform permission, step-up — and nothing
+ * else. Exactly the routes under this prefix, and no other, are built that way.
+ */
+const PLATFORM_ROUTE_PREFIX = 'src/app/api/platform/';
 
 const METHODS = 'GET|HEAD|OPTIONS|POST|PUT|PATCH|DELETE';
 
@@ -70,23 +82,31 @@ function walk(dir: string): string[] {
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-/** Problems with a Route Handler file, or none. */
-export function analyseRoute(source: string): string[] {
+/** Problems with a Route Handler file, or none. `wrapper`: the gate every method must use. */
+export function analyseRoute(
+  source: string,
+  wrapper: 'withPermission' | 'platformRoute' = 'withPermission',
+): string[] {
   const code = stripComments(source);
   const problems: string[] = [];
   for (const m of code.matchAll(
     new RegExp(`export\\s+(?:async\\s+)?function\\s*\\*?\\s*(${METHODS})\\b`, 'g'),
   )) {
-    problems.push(
-      `${m[1]} is declared as a function; use export const ${m[1]} = withPermission(...)`,
-    );
+    problems.push(`${m[1]} is declared as a function; use export const ${m[1]} = ${wrapper}(...)`);
   }
+  const built = new RegExp(`^${wrapper}\\s*(?:<[^>]*>\\s*)?\\(`);
   for (const m of code.matchAll(
     new RegExp(`export\\s+(const|let|var)\\s+(${METHODS})\\b\\s*(?::[^=]*)?=\\s*([^;]{0,80})`, 'g'),
   )) {
-    if (m[1] !== 'const' || !/^withPermission\s*(?:<[^>]*>\s*)?\(/.test(m[3] ?? '')) {
-      problems.push(`${m[2]} is not built as export const ${m[2]} = withPermission(...)`);
+    if (m[1] !== 'const' || !built.test(m[3] ?? '')) {
+      problems.push(`${m[2]} is not built as export const ${m[2]} = ${wrapper}(...)`);
     }
+  }
+  // Each plane's gate stays in its own tree: no tenant authorization in a platform route, no
+  // platform gate in a tenant route.
+  const other = wrapper === 'withPermission' ? 'platformRoute' : 'withPermission';
+  if (new RegExp(`\\b${other}\\b`).test(code)) {
+    problems.push(`uses ${other}, which belongs to the other plane's routes`);
   }
   if (new RegExp(`export\\s*\\{[^}]*\\b(${METHODS})\\b[^}]*\\}`).test(code)) {
     problems.push('HTTP methods are re-exported, which this guard cannot verify');
@@ -281,7 +301,7 @@ describe('the analysers themselves', () => {
 
 describe('every protected entry point authorizes first', () => {
   it('keeps the pre-authentication allow-list exact, and every entry real', () => {
-    expect(PRE_AUTH_ROUTES).toHaveLength(11);
+    expect(PRE_AUTH_ROUTES).toHaveLength(13);
     for (const file of PRE_AUTH_ROUTES) expect(existsSync(file), file).toBe(true);
   });
 
@@ -289,11 +309,30 @@ describe('every protected entry point authorizes first', () => {
     const routes = sources.filter(
       ({ file }) =>
         /\/route\.(ts|tsx|js|jsx|mjs)$/.test(file) &&
+        !file.startsWith(PLATFORM_ROUTE_PREFIX) &&
         !(PRE_AUTH_ROUTES as readonly string[]).includes(file),
     );
     for (const { file, source } of routes) {
       expect(analyseRoute(source), file).toEqual([]);
     }
+  });
+
+  it('builds every platform console Route Handler with platformRoute()', () => {
+    const routes = sources.filter(
+      ({ file }) =>
+        /\/route\.(ts|tsx|js|jsx|mjs)$/.test(file) &&
+        file.startsWith(PLATFORM_ROUTE_PREFIX) &&
+        !(PRE_AUTH_ROUTES as readonly string[]).includes(file),
+    );
+    expect(routes.length).toBeGreaterThan(0);
+    for (const { file, source } of routes) {
+      expect(analyseRoute(source, 'platformRoute'), file).toEqual([]);
+    }
+    // Not built with its plane's gate, and naming the other plane's: two problems each.
+    expect(analyseRoute(`export const GET = withPermission(a, b);`, 'platformRoute')).toHaveLength(
+      2,
+    );
+    expect(analyseRoute(`export const GET = platformRoute(a, b);`)).toHaveLength(2);
   });
 
   it('opens every Server Action with requirePermission()', () => {

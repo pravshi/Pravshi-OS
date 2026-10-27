@@ -58,6 +58,63 @@ async function isBreachedPassword(password: string): Promise<boolean> {
   }
 }
 
+/**
+ * The three one-time setup links share this form; only the endpoint and the copy differ.
+ *   bootstrap       scripts/bootstrap/run.mjs — the installation owner (/setup)
+ *   platform-admin  a platform administrator: bootstrapped, invited or recovered (/platform/setup)
+ *   org-admin       the first administrator of a provisioned organization (/setup/organization)
+ */
+export type SetupVariant = 'bootstrap' | 'platform-admin' | 'org-admin';
+
+const COPY: Record<
+  SetupVariant,
+  {
+    endpoint: string;
+    title: string;
+    intro: string;
+    label: string;
+    submit: string;
+    doneText: string;
+    signIn: string;
+    askWho: string;
+  }
+> = {
+  bootstrap: {
+    endpoint: '/api/bootstrap/complete',
+    title: 'Set up Pravshi OS',
+    intro:
+      'Create the owner password for this installation. This link is single-use and expires one hour after the bootstrap ran.',
+    label: 'Owner password',
+    submit: 'Create owner login',
+    doneText: 'Your owner login is ready. Sign in, then enrol two-factor authentication.',
+    signIn: '/login',
+    askWho: 'Ask the operator to check the bootstrap state.',
+  },
+  'platform-admin': {
+    endpoint: '/api/platform/setup/complete',
+    title: 'Platform administrator setup',
+    intro:
+      'Create your platform administrator password. This link is single-use; a link from the operator expires after 60 minutes, an invitation after 72 hours.',
+    label: 'Password',
+    submit: 'Set password',
+    doneText:
+      'Your password is set. Sign in, then enrol two-factor authentication — the console requires it for every action.',
+    signIn: '/login?next=%2Fplatform',
+    askWho: 'Ask a platform administrator (or the operator) for a new link.',
+  },
+  'org-admin': {
+    endpoint: '/api/setup/organization/complete',
+    title: 'Set up your organization',
+    intro:
+      'You are the first administrator of your organization. Create your password. This link is single-use and expires 72 hours after it was issued.',
+    label: 'Password',
+    submit: 'Create login',
+    doneText: 'Your login is ready. Sign in, then enrol two-factor authentication.',
+    signIn: '/login',
+    askWho: 'Ask the Pravshi platform team for a new link.',
+  },
+};
+
 function readFragmentToken(): string {
   const hash = window.location.hash;
   if (!hash.startsWith('#')) return '';
@@ -68,10 +125,13 @@ function readFragmentToken(): string {
 export function SetupForm({
   minPasswordLength,
   maxPasswordLength,
+  variant = 'bootstrap',
 }: {
   minPasswordLength: number;
   maxPasswordLength: number;
+  variant?: SetupVariant;
 }) {
+  const copy = COPY[variant];
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [password, setPassword] = useState('');
@@ -83,6 +143,8 @@ export function SetupForm({
 
   useEffect(() => {
     setToken(readFragmentToken());
+    // The token has been read: take it out of the address bar and the history entry.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }, []);
 
   async function checkPassword(pw: string): Promise<WeakReason | null> {
@@ -99,7 +161,7 @@ export function SetupForm({
     setWeakReason(null);
 
     if (!token) {
-      setError('This setup link is missing its token. Use the link the bootstrap script printed.');
+      setError(`This setup link is missing its token. ${copy.askWho}`);
       return;
     }
     if (password !== confirm) {
@@ -115,7 +177,7 @@ export function SetupForm({
         return;
       }
 
-      const res = await fetch('/api/bootstrap/complete', {
+      const res = await fetch(copy.endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token, password }),
@@ -128,19 +190,19 @@ export function SetupForm({
 
       if (!res.ok || !data) {
         if (data?.error === 'SETUP_TOKEN_INVALID') {
-          setError(
-            'This setup link is invalid, expired, or already used. ' +
-              'Ask the operator to check the bootstrap state.',
-          );
+          setError(`This setup link is invalid, expired, or already used. ${copy.askWho}`);
         } else if (data?.error === 'SETUP_CANNOT_COMPLETE') {
-          setError(
-            'Setup could not be completed for this installation. ' +
-              'Ask the operator to check the bootstrap state.',
-          );
+          setError(`Setup could not be completed. ${copy.askWho}`);
         } else if (data?.error === 'PASSWORD_TOO_SHORT') {
           setWeakReason('TOO_SHORT');
         } else if (data?.error === 'PASSWORD_TOO_LONG') {
           setWeakReason('TOO_LONG');
+        } else if (data?.error === 'PASSWORD_TOO_COMMON') {
+          setWeakReason('TOO_COMMON');
+        } else if (data?.error === 'PASSWORD_BREACHED') {
+          setWeakReason('BREACHED');
+        } else if (data?.error === 'RATE_LIMITED') {
+          setError('Too many attempts. Wait a minute and try again.');
         } else {
           setError('Something went wrong. Please try again.');
         }
@@ -163,10 +225,8 @@ export function SetupForm({
     return (
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Setup complete</h1>
-        <p className="mt-2 text-sm text-ink-muted">
-          Your owner login is ready. Sign in, then enrol two-factor authentication.
-        </p>
-        <Button className="mt-6 w-full" onClick={() => router.push('/login')}>
+        <p className="mt-2 text-sm text-ink-muted">{copy.doneText}</p>
+        <Button className="mt-6 w-full" onClick={() => router.push(copy.signIn)}>
           Go to sign in
         </Button>
       </div>
@@ -175,15 +235,14 @@ export function SetupForm({
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Set up Pravshi OS</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{copy.title}</h1>
       <p className="mt-2 text-sm text-ink-muted">
-        Create the owner password for this installation. Minimum {minPasswordLength} characters.
-        This link is single-use and expires one hour after the bootstrap ran.
+        {copy.intro} Minimum {minPasswordLength} characters.
       </p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="password">Owner password</Label>
+          <Label htmlFor="password">{copy.label}</Label>
           <Input
             id="password"
             type="password"
@@ -219,7 +278,7 @@ export function SetupForm({
         )}
 
         <Button type="submit" className="w-full" disabled={pending || !token}>
-          {pending ? 'Creating login…' : 'Create owner login'}
+          {pending ? 'Saving…' : copy.submit}
         </Button>
       </form>
     </div>

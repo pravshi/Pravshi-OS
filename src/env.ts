@@ -41,6 +41,19 @@ const runtimeSchema = z.object({
       message: 'DATABASE_URL_AUTH must use the pooled Neon endpoint (host contains "-pooler")',
     })
     .optional(),
+  /**
+   * The platform administrator plane's own connection (role app_platform, migrations
+   * 0083-0086, ADR-008). Only where the platform console runs; optional, and the platform
+   * module refuses to act without it (src/lib/db/platform-pool.ts). It must name its own login:
+   * never DATABASE_URL's or DATABASE_URL_AUTH's.
+   */
+  DATABASE_URL_PLATFORM: z
+    .string()
+    .url()
+    .refine((u) => u.includes('-pooler.'), {
+      message: 'DATABASE_URL_PLATFORM must use the pooled Neon endpoint (host contains "-pooler")',
+    })
+    .optional(),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
@@ -219,6 +232,16 @@ export function parseRuntimeEnv(raw: Record<string, unknown>): RuntimeEnv {
     throw new Error(
       'DATABASE_URL_AUTH must not be the same connection string as DATABASE_URL: authentication ' +
         'runs on its own login, app_auth.',
+    );
+  }
+  if (
+    present(raw.DATABASE_URL_PLATFORM) &&
+    (raw.DATABASE_URL_PLATFORM === raw.DATABASE_URL ||
+      raw.DATABASE_URL_PLATFORM === raw.DATABASE_URL_AUTH)
+  ) {
+    throw new Error(
+      'DATABASE_URL_PLATFORM must not be the same connection string as DATABASE_URL or ' +
+        'DATABASE_URL_AUTH: the platform runs on its own login, app_platform.',
     );
   }
   const r = runtimeSchema.safeParse(withoutBlanks(raw));

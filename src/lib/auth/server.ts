@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
 import { loginPersonActive } from './login-person-check';
+import { endStaleAdminSession, loginMaySignIn } from './platform-login';
 import { forwardedIp, recordLoginEvent, resolveLoginOrg } from './login-events';
 import { isLockedOut, noteLoginFailure, noteLoginSuccess } from './login-lockout';
 import { env } from '@/env';
@@ -369,6 +370,11 @@ export const auth = betterAuth({
           if (typeof userId !== 'string' || !(await loginPersonActive(userId))) {
             return false;
           }
+          // S-CONSOLE-3 (0086): a revoked platform administrator's login gets no session
+          // from any path either.
+          if (!(await loginMaySignIn(userId))) {
+            return false;
+          }
           return {
             data: { ...session, aal: sessionAssuranceFor(ctx?.path) },
           };
@@ -429,6 +435,21 @@ export const auth = betterAuth({
      * auth endpoints included) → rejected".
      */
     before: createAuthMiddleware(async (ctx) => {
+      /**
+       * S-CONSOLE-6 (0086): a platform administrator's session past the platform's own limits
+       * (12 hours from creation, 30 minutes without platform activity) is ended here, before
+       * any endpoint reads it — so Better Auth's self-service endpoints (sessions, two-factor,
+       * profile) apply the same policy as the console. The question is the database's, and it
+       * never touches a tenant user's session; this request then simply has no session.
+       */
+      const sessionToken = await ctx.getSignedCookie(
+        ctx.context.authCookies.sessionToken.name,
+        ctx.context.secret,
+      );
+      if (typeof sessionToken === 'string' && sessionToken.length > 0) {
+        await endStaleAdminSession(sessionToken);
+      }
+
       if (ctx.path === '/sign-up/email') {
         throw new APIError('FORBIDDEN', {
           message:

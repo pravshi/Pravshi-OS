@@ -625,6 +625,38 @@
       "tag": "0082_least_privilege_cleanup",
       "breakpoints": true,
       "hash": "6d1199733a64e5032ad77327bfa89986282f5c232db764c11422211d51087d8d"
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1791598728057,
+      "tag": "0083_platform_identity",
+      "breakpoints": true,
+      "hash": "9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18"
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1791599728057,
+      "tag": "0084_platform_provisioning",
+      "breakpoints": true,
+      "hash": "a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415"
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791600728057,
+      "tag": "0085_login_email_case",
+      "breakpoints": true,
+      "hash": "37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2"
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1791601728057,
+      "tag": "0086_platform_console",
+      "breakpoints": true,
+      "hash": "f24234a2bec9e79964680bcec0c14d9fec893742020121613402ce15d83a3b15"
     }
   ]
 }
