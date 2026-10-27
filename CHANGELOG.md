@@ -230,6 +230,11 @@ Database migrations: 0063–0076 (production still pending — see the
 - Deployment, environment and development documentation describe the current
   setup: no `staging` branch exists yet, and development uses its own Neon
   project, separate from production.
+- Navigation permissions are read once per request instead of once per navigation
+  component: `heldNavPermissions()` is memoised with React `cache()`, scoped to a
+  single server render and never shared across requests or viewers. The sidebar,
+  mobile tab bar and home page each used to make their own session lookup and
+  database transaction. Results and the `/login` redirect are unchanged.
 
 ### Tests
 
