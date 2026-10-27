@@ -1,4 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
+import { assertTestDatabaseTargets, nextProductionEnv } from './tests/db-target-guard';
+
+// The specs seed through DATABASE_URL_MIGRATE and the webServer reads .env on its own, so
+// neither passes through tests/setup.ts. Refuse here — before the server starts or a spec
+// seeds anything — if any DATABASE_URL* the run would use is not an approved test target.
+assertTestDatabaseTargets(nextProductionEnv(process.cwd(), process.env));
 
 const PORT = 3100;
 const baseURL = `http://127.0.0.1:${PORT}`;
