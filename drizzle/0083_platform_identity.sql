@@ -679,8 +679,10 @@ begin
       raise exception 'platform setup: a login already exists for this email and will not be adopted'
         using errcode = '55000';
     end if;
+    -- Stored lower-cased: the sign-in lockout (0027) looks logins up by lower(email) with a
+    -- case-sensitive comparison, so a mixed-case stored address would never be locked out.
     insert into auth.auth_users (name, email, email_verified)
-    values (v_admin.full_name, v_admin.email, false)
+    values (v_admin.full_name, lower(v_admin.email::text)::public.citext, false)
     returning id into v_auth_user_id;
     insert into auth.auth_accounts (user_id, account_id, provider_id, password)
     values (v_auth_user_id, v_auth_user_id::text, 'credential', p_password_hash);
@@ -818,9 +820,10 @@ begin
   if v_unknown is not null then
     raise exception 'platform: unknown permission requested' using errcode = '22023';
   end if;
-  -- No administrator can grant more than they hold.
+  -- No administrator can grant more than they hold — the default view permissions included.
   if exists (
-    select 1 from unnest(coalesce(p_permissions, '{}'::text[])) k
+    select 1 from unnest(array['platform.organizations.view', 'platform.audit.view']
+                         || coalesce(p_permissions, '{}'::text[])) k
     where not exists (select 1 from platform.admin_permissions ap
                       where ap.admin_id = v_actor and ap.permission_key = k)
   ) then

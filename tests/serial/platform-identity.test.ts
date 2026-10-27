@@ -149,6 +149,12 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
       )
     ).rows;
 
+  // A dropped idle connection must surface as a handled error: an unhandled pool 'error' event
+  // makes vitest serialise the client object — connection parameters included — into its report.
+  for (const pool of [shared, owner, platform, auth, user, worker]) {
+    pool.on('error', () => undefined);
+  }
+
   beforeAll(async () => {
     const sharedDb = (await shared.query<{ d: string }>('select current_database() d')).rows[0]!.d;
     const isoDb = (await owner.query<{ d: string }>('select current_database() d')).rows[0]!.d;
@@ -544,6 +550,17 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
       null,
     ]);
     expect(ok.rows).toHaveLength(1);
+
+    // The default view permissions count too: a manager who lacks audit.view cannot hand it out.
+    await owner.query(
+      `delete from platform.admin_permissions where admin_id = $1 and permission_key = 'platform.audit.view'`,
+      [manager],
+    );
+    expect(
+      await stateOf(
+        asAdmin(manager, 'aal2', invite, [target(), 'T', [], sha256(newToken()), null]),
+      ),
+    ).toBe('42501');
   });
 
   it('revocation ends the administrator and every session of their login, once', async () => {
@@ -1123,6 +1140,16 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
         ])
       ).rows[0]!.v,
     ).toBe(false);
+    // Nor can its setup link be re-issued while it is suspended.
+    expect(
+      await stateOf(
+        asAdmin(firstAdmin, 'aal2', 'select platform.reissue_org_admin_setup($1, $2, $3)', [
+          orgB,
+          sha256(newToken()),
+          null,
+        ]),
+      ),
+    ).toBe('55000');
     expect(
       await stateOf(
         auth.query('select * from platform.complete_org_admin_setup($1, $2)', [
@@ -1145,5 +1172,40 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
       { org_id: orgA, status: 'ACTIVE', first_admin_setup_pending: false },
       { org_id: orgB, status: 'SUSPENDED', first_admin_setup_pending: true },
     ]);
+  });
+
+  it('a login created by setup is stored lower-cased, so the sign-in lockout reaches it', async () => {
+    const key = `prov-${randomUUID()}`;
+    const mixed = `Mixed.Admin.${randomUUID().slice(0, 8)}@Tenant.Example`;
+    await asAdmin(
+      firstAdmin,
+      'aal2',
+      provision,
+      orgArgs(key, `prov-c-${randomUUID().slice(0, 8)}`, mixed),
+    );
+    const done = await auth.query<{ linked_auth_user_id: string }>(
+      'select * from platform.complete_org_admin_setup($1, $2)',
+      [sha256(`setup-${key}`), fakePasswordHash()],
+    );
+    const login = done.rows[0]!.linked_auth_user_id;
+    const stored = await owner.query<{ email: string }>(
+      'select email::text from auth.auth_users where id = $1',
+      [login],
+    );
+    expect(stored.rows[0]!.email).toBe(mixed.toLowerCase());
+    // Five failures through the authentication plane lock the login, as for every other login.
+    let crossed = 0;
+    for (let n = 1; n <= 5; n++) {
+      const r = await auth.query<{ c: boolean }>(
+        `select authz.record_login_failure($1, '127.0.0.1'::inet, 'test') c`,
+        [mixed],
+      );
+      if (r.rows[0]!.c && !crossed) crossed = n;
+    }
+    expect(crossed).toBe(5);
+    expect(
+      (await auth.query<{ l: boolean }>('select authz.check_login_lockout($1) l', [mixed])).rows[0]!
+        .l,
+    ).toBe(true);
   });
 });

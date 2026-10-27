@@ -550,8 +550,8 @@ re-apply.
 | 79  | `0080_organization_types` | 1791595728057 | `b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91` |
 | 80  | `0081_crm_imports` | 1791596728057 | `16572ad4f453af52a8ac8ef4a9824e99a9fed612d43ec41f7590a0d774160a2f` |
 | 81  | `0082_least_privilege_cleanup` | 1791597728057 | `6d1199733a64e5032ad77327bfa89986282f5c232db764c11422211d51087d8d` |
-| 82  | `0083_platform_identity` | 1791598728057 | `5d9fee181574291c277df09f6d35546119940e69395903720ba62f4ee32e263b` |
-| 83  | `0084_platform_provisioning` | 1791599728057 | `8566ea931aad2b1522c9c18ed24e60d8cd6485684cc77290e183a7befbc66f9e` |
+| 82  | `0083_platform_identity` | 1791598728057 | `9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18` |
+| 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

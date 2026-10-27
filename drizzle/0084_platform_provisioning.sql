@@ -234,6 +234,11 @@ begin
     raise exception 'provisioning: administrator email is not a valid address' using errcode = '22023';
   end if;
 
+  -- Concurrent provisionings for the same address serialise here, so the second sees the first's
+  -- committed person and is refused below instead of stranding an organization whose first
+  -- administrator could never complete setup.
+  perform pg_advisory_xact_lock(hashtext('platform.provision.email:' || lower(p_admin_email)));
+
   -- GOV-02: the first administrator gets a login this path creates; an address that already
   -- has one (any organization's person, or a platform administrator) is refused. The message
   -- is platform-only and names no organization.
@@ -340,6 +345,10 @@ begin
   if not found then
     raise exception 'platform: this organization was not provisioned by the platform' using errcode = 'P0002';
   end if;
+  if not exists (select 1 from public.organizations o
+                  where o.id = p_org_id and o.status = 'ACTIVE' and o.deleted_at is null) then
+    raise exception 'platform: the organization is not active' using errcode = '55000';
+  end if;
   -- Only while the first administrator has no login: once they have one, the organization
   -- administers itself.
   if v_setup.consumed_at is not null
@@ -403,8 +412,12 @@ begin
   if not found or v_setup.consumed_at is not null or v_setup.expires_at <= v_now then
     raise exception 'setup token is invalid, expired or already used' using errcode = '28000';
   end if;
-  if not exists (select 1 from public.organizations o
-                  where o.id = v_setup.org_id and o.status = 'ACTIVE' and o.deleted_at is null) then
+  -- FOR SHARE: a concurrent suspension waits until this completion commits, and a completion
+  -- that comes second sees the suspension.
+  perform 1 from public.organizations o
+  where o.id = v_setup.org_id and o.status = 'ACTIVE' and o.deleted_at is null
+  for share;
+  if not found then
     raise exception 'setup token is invalid, expired or already used' using errcode = '28000';
   end if;
 
@@ -424,8 +437,10 @@ begin
     raise exception 'setup: a login already exists for this email and will not be adopted' using errcode = '55000';
   end if;
 
+  -- Stored lower-cased: the sign-in lockout (0027) looks logins up by lower(email) with a
+  -- case-sensitive comparison, so a mixed-case stored address would never be locked out.
   insert into auth.auth_users (name, email, email_verified)
-  values (v_person.full_legal_name, v_person.work_email, false)
+  values (v_person.full_legal_name, lower(v_person.work_email::text)::public.citext, false)
   returning id into v_auth_user_id;
   insert into auth.auth_accounts (user_id, account_id, provider_id, password)
   values (v_auth_user_id, v_auth_user_id::text, 'credential', p_password_hash);
@@ -561,15 +576,15 @@ begin
     raise exception '0084: platform table without forced RLS: %', v_bad;
   end if;
 
-  select string_agg(distinct r.rolname || ' on ' || c.relname, ', ') into v_bad
+  select string_agg(distinct coalesce(r.rolname, 'PUBLIC') || ' on ' || c.relname || ':' || x.privilege_type, ', ')
+    into v_bad
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'platform'
   cross join lateral aclexplode(c.relacl) x
-  join pg_roles r on r.oid = x.grantee
-  where c.relkind in ('r', 'p')
-    and r.rolname in ('app_user', 'app_worker', 'app_auth', 'app_admin', 'app_platform');
+  left join pg_roles r on r.oid = x.grantee
+  where c.relkind in ('r', 'p') and coalesce(r.rolname, 'PUBLIC') <> 'app_owner';
   if v_bad is not null then
-    raise exception '0084: runtime login holds a platform table privilege: %', v_bad;
+    raise exception '0084: a platform table privilege is held by a non-owner: %', v_bad;
   end if;
 
   select string_agg(p.proname, ', ') into v_bad
