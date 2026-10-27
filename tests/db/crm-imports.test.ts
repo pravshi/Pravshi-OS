@@ -1136,4 +1136,187 @@ describe.skipIf(!DB_READY)('Sales Sheet import persistence (0081, live DB)', () 
         .rows[0],
     ).toEqual({ status: 'running', claimed_by: 'w-noretry' });
   });
+
+  // ── The commit's set-based fast path against the row-by-row path ─────────────────────────
+
+  /**
+   * Imports one generated file as `importer` — careful (row by row) or not — and returns what it
+   * decided in a form free of ids: each record named by the first row that referenced it. The
+   * file: two linking rows (existing company and contact; a declined possible duplicate), then
+   * `rows` rows — companies shared by key in threes, a contact repeated, rows without contact or
+   * deal, WON and QUALIFIED stages, owners alternating between the importer and another person
+   * (or always the importer) — and, when asked, one row the commit refuses (its contact is created
+   * under another company after the preview).
+   */
+  const diffRun = async (
+    tag: string,
+    careful: boolean,
+    opts: { importer: string; email: string; rows: number; onlyMe?: boolean; refuse?: boolean },
+  ) => {
+    const { importer: me } = opts;
+    const existing = (
+      await owner.query<{ id: string }>(
+        `insert into public.companies (org_id, owner_person_id, name, domain)
+         values ($1, $2, $3, $4) returning id`,
+        [orgA, colleague, `Diff Existing ${tag}`, `existing-${tag}.example`],
+      )
+    ).rows[0]!.id;
+    const contactAt = (email: string) =>
+      owner.query(
+        `insert into public.contacts (org_id, owner_person_id, company_id, first_name, last_name, email)
+         values ($1, $2, $3, 'Known', 'Person', $4)`,
+        [orgA, colleague, existing, email],
+      );
+    await contactAt(`known@existing-${tag}.example`);
+    const lines = [
+      `Diff Existing ${tag},existing-${tag}.example,Known,Person,known@existing-${tag}.example,,,,${opts.email}`,
+      `Name Only Ltd,,,,,,,,${opts.email}`,
+    ];
+    if (opts.refuse) {
+      lines.push(
+        `Diff ${tag} Refused,refused-${tag}.example,Tak,En,taken@existing-${tag}.example,,,,${opts.email}`,
+      );
+    }
+    for (let i = 0; i < opts.rows; i++) {
+      const g = Math.floor(i / 3);
+      const email = `p${i % 3 === 1 ? i - 1 : i}@co${g}-${tag}.example`;
+      const contact = i % 10 === 0 ? ',,' : `Ann,Row${i},${email}`;
+      const deal =
+        i % 4 === 0 ? ',,' : `Deal ${tag} ${i},${1000 + i},${i % 3 ? 'QUALIFIED' : 'WON'}`;
+      const ownerEmail = i % 2 || opts.onlyMe ? opts.email : 'owner.one@pravshi.example';
+      lines.push(`Diff ${tag} Co ${g},co${g}-${tag}.example,${contact},${deal},${ownerEmail}`);
+    }
+    const csv =
+      'Company,Company Domain,Contact First Name,Contact Last Name,Contact Email,Deal Title,Deal Value,Stage,Owner Email\n' +
+      lines.join('\n') +
+      '\n';
+    const q = await queue(me, `diff-${tag}.csv`, csv);
+    // After the preview, as a concurrent change: the commit, not the preview, refuses the row.
+    if (opts.refuse) await contactAt(`taken@existing-${tag}.example`);
+    const paths: string[] = [];
+    await commit.runImportCommit(ctxOf(orgA, me), q.id, randomUUID(), undefined, {
+      careful,
+      onBatch: (path) => paths.push(path),
+    });
+    const rows = await owner.query<{
+      row_number: number;
+      status: string;
+      errors: unknown;
+      company_id: string | null;
+      contact_id: string | null;
+      deal_id: string | null;
+      company_owner: string | null;
+      contact_owner: string | null;
+      deal_owner: string | null;
+      contact_company: string | null;
+      deal_closed: boolean | null;
+      created_by: string | null;
+      history: number;
+    }>(
+      `select r.row_number, r.status, r.errors, r.company_id, r.contact_id, r.deal_id,
+              co.owner_person_id company_owner, ct.owner_person_id contact_owner,
+              d.owner_person_id deal_owner, ct.company_id contact_company,
+              d.closed_at is not null deal_closed, co.created_by,
+              (select count(*)::int from public.deal_stage_history h where h.deal_id = r.deal_id) history
+       from public.crm_import_rows r
+       left join public.companies co on co.id = r.company_id
+       left join public.contacts ct on ct.id = r.contact_id
+       left join public.deals d on d.id = r.deal_id
+       where r.import_id = $1 order by r.row_number`,
+      [q.id],
+    );
+    const names = new Map<string, string>([[existing, 'existing']]);
+    const name = (id: string | null, row: number) => {
+      if (id === null) return null;
+      if (!names.has(id)) names.set(id, `row${row}`);
+      return names.get(id)!;
+    };
+    const person = (id: string | null) =>
+      id === null ? null : id === me ? 'me' : id === ownerOne ? 'one' : id;
+    const shape = rows.rows.map((r) => ({
+      row: r.row_number,
+      status: r.status,
+      errors: r.errors,
+      company: name(r.company_id, r.row_number),
+      contact: name(r.contact_id, r.row_number),
+      deal: name(r.deal_id, r.row_number),
+      owners: [person(r.company_owner), person(r.contact_owner), person(r.deal_owner)],
+      contactCompany: name(r.contact_company, r.row_number),
+      closed: r.deal_closed,
+      history: r.history,
+      createdBy: person(r.created_by),
+    }));
+    const ids = rows.rows.flatMap((r) => [r.company_id, r.contact_id, r.deal_id]);
+    const audit = await owner.query<{ entity_type: string; action: string; n: number }>(
+      `select entity_type, action, count(*)::int n from public.audit_logs
+       where org_id = $1 and entity_id = any($2::uuid[]) group by 1, 2 order by 1, 2`,
+      [orgA, [...new Set(ids.filter((x) => x !== null))]],
+    );
+    const done = await svc.getImport(authOf(orgA, me), q.id);
+    return { shape, audit: audit.rows, result: done.result, status: done.status, paths };
+  };
+  const sameDecisions = (
+    fast: Awaited<ReturnType<typeof diffRun>>,
+    careful: Awaited<ReturnType<typeof diffRun>>,
+  ) =>
+    expect(fast).toMatchObject({
+      shape: careful.shape,
+      audit: careful.audit,
+      result: careful.result,
+      status: careful.status,
+    });
+
+  it('decides a batch set-based exactly as row by row (commit fast path)', async () => {
+    const email = `colleague.${RUN}@pravshi.example`;
+    await setWorkEmail(colleague, email);
+    const opts = { importer: colleague, email, rows: 148 };
+    const careful = await diffRun(`c${RUN}`, true, opts);
+    const fast = await diffRun(`f${RUN}`, false, opts);
+    expect(careful.paths).toEqual(['CAREFUL', 'CAREFUL']);
+    expect(fast.paths).toEqual(['FAST', 'FAST']);
+    expect(careful.status).toBe('COMPLETED');
+    expect(careful.result).toMatchObject({ created: 133, linked: 16, skipped: 1, failed: 0 });
+    expect(careful.shape[0]).toMatchObject({
+      row: 2,
+      status: 'LINKED',
+      company: 'existing',
+      owners: ['me', 'me', null],
+    });
+    expect(careful.audit.length).toBeGreaterThan(0);
+    expect(careful.shape.some((r) => r.history > 0)).toBe(true);
+    sameDecisions(fast, careful);
+  });
+
+  it('decides a batch row by row when one of its rows is refused, with the same results (commit fast path)', async () => {
+    const email = `colleague.${RUN}@pravshi.example`;
+    await setWorkEmail(colleague, email);
+    const opts = { importer: colleague, email, rows: 20, refuse: true };
+    const careful = await diffRun(`cr${RUN}`, true, opts);
+    const fast = await diffRun(`fr${RUN}`, false, opts);
+    expect(careful.result.failed).toBe(1);
+    expect(careful.shape[2]).toMatchObject({ row: 4, status: 'FAILED' });
+    expect(fast.paths).toEqual(['CAREFUL']); // the attempt was declined and rolled back whole
+    sameDecisions(fast, careful);
+  });
+
+  it('refuses a record the importer may create but not see, as row by row does (commit fast path)', async () => {
+    // Owned by the importer itself, nothing is handed over: only RETURNING reads the deal back.
+    const blind = await mkPerson(owner, orgA, 'NoDealView');
+    const email = `nodealview.${RUN}@pravshi.example`;
+    await setWorkEmail(blind, email);
+    const role = await mkCustomRole(
+      owner,
+      orgA,
+      `IMPV_${RUN.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`,
+      IMPORTER_GRANTS.filter(([k]) => k !== 'deals.view'),
+    );
+    await assignRoleId(owner, blind, orgA, role);
+    const opts = { importer: blind, email, rows: 8, onlyMe: true };
+    const careful = await diffRun(`cv${RUN}`, true, opts);
+    const fast = await diffRun(`fv${RUN}`, false, opts);
+    expect(careful.result.failed).toBeGreaterThan(0);
+    expect(careful.shape.every((r) => r.deal === null)).toBe(true);
+    expect(fast.paths).toEqual(['CAREFUL']);
+    sameDecisions(fast, careful);
+  });
 });
