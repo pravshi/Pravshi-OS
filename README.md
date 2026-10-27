@@ -7,7 +7,11 @@ single authorization model that the database enforces, not the application layer
 **V1 scope** is this Business OS, as decided on 2026-10-16 in
 [ADR-006](docs/architecture/adr/006-v1-scope-business-os.md). The original HR and operations
 blueprint (people, HR documents, policies, recruitment, onboarding and offboarding) is preserved
-as a deferred, separate future product scope; it is not part of V1.
+as a deferred, separate future product scope; it is not part of V1. The V1 product decisions on
+organization membership, provisioning, trial and paid tenants and the Sales Sheet import are in
+[ADR-007](docs/architecture/adr/007-v1-founder-product-decisions.md), amended by
+[ADR-008](docs/architecture/adr/008-v1-platform-and-import-decisions.md) (platform administration and
+import decisions, and the V1 acceptance definition).
 
 **Internal use only. No public signup exists.**
 

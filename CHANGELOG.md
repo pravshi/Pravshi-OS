@@ -341,6 +341,21 @@ Database migrations: 0063–0086 (production still pending — see the
   architecture remains binding. Organization membership, provisioning, tenant tiers, the
   environment topology and the Sales Sheet import remain open decisions. Documentation only — no
   behaviour changes.
+- V1 platform administration and import decisions recorded
+  ([ADR-008](docs/architecture/adr/008-v1-platform-and-import-decisions.md)), amending ADR-007's
+  acceptance definition: platform-administrator-first bootstrap, independent of organization
+  creation; suspend and reactivate in V1, archive and restore deferred to V1.1; `crm.import` for
+  organization administrators only; duplicates resolved per company/contact with a recalculated
+  preview; 90-day import retention proposed, no cleanup enabled before approval; imported deals
+  trigger no workflows. Documentation only — no behaviour changes.
+- V1 product decisions recorded
+  ([ADR-007](docs/architecture/adr/007-v1-founder-product-decisions.md)): one login belongs to
+  exactly one organization; V1 includes an audited platform Super Admin organization-provisioning
+  system; free-trial and paid organizations share the same capabilities and the same isolation and
+  security guarantees, with plans, entitlements, billing and usage limits deferred; the Sales Sheet
+  import is in the V1 launch scope. The provisioning architecture and the import requirements are
+  proposals pending founder review (`docs/architecture/proposals/`). The environment topology
+  remains open. Documentation only — no behaviour changes.
 - The production migration runbook targets the current journal (0064), and a
   guard test fails CI whenever a migration lands without the runbook following.
 - Deployment, environment and development documentation describe the current
