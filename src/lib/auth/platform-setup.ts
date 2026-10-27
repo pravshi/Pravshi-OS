@@ -46,17 +46,19 @@ export async function completePlatformSetup(
   }
   if (!SETUP_TOKEN_PATTERN.test(token)) return { ok: false, reason: 'SETUP_TOKEN_INVALID' };
 
-  const refused = await setupPasswordRefusal(password);
-  if (refused) return refused;
-
   const digest = hashSetupToken(token);
   try {
+    // The token first: a dead token costs one indexed lookup and never reaches the password
+    // policy, whose breach check calls out to an external service (review S-CONSOLE-5).
     const live = await authDb.execute<{ valid: boolean }>(
       kind === 'platform-admin'
         ? sql`select platform.setup_token_is_valid(decode(${digest}, 'hex')) as valid`
         : sql`select platform.org_admin_setup_token_is_valid(decode(${digest}, 'hex')) as valid`,
     );
     if (live.rows[0]?.valid !== true) return { ok: false, reason: 'SETUP_TOKEN_INVALID' };
+
+    const refused = await setupPasswordRefusal(password);
+    if (refused) return refused;
 
     const context = await auth.$context;
     const passwordHash = await context.password.hash(password);

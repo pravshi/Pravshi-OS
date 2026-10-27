@@ -3,7 +3,9 @@ import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
 import { PlatformUnavailableError } from '@/lib/db/platform-pool';
 import { resolvePlatformAccess, type PlatformActor } from './identity';
-import { whoami, type WhoAmI } from './service';
+import { sqlstateOf } from '@/lib/auth/bootstrap-setup';
+import { loginPathForNext } from '@/lib/auth/next-path';
+import { PlatformError, whoami, type WhoAmI } from './service';
 
 /**
  * The server-side gate of the console's pages (/platform/**, except /platform/setup), the
@@ -29,21 +31,41 @@ export async function requirePlatformPage(): Promise<PlatformPageContext> {
     access = await resolvePlatformAccess(h);
   } catch (e) {
     if (e instanceof PlatformUnavailableError) return { unavailable: true };
-    throw e;
+    throw sanitised(e);
   }
-  if (access.kind === 'none') redirect(`/login?next=${encodeURIComponent(path)}`);
+  if (access.kind === 'none') redirect(loginPathForNext(path));
   if (access.kind === 'not-admin') notFound();
 
   const { actor } = access;
-  const enrolled = actor.status === 'ACTIVE' && actor.session.aal === 'aal2';
-  if (!enrolled) {
-    if (path !== '/platform/security') redirect('/platform/security');
-    return { unavailable: false, actor, me: null, enrolled };
+  let enrolled = actor.status === 'ACTIVE' && actor.session.aal === 'aal2';
+  let me: WhoAmI | null = null;
+  if (enrolled) {
+    try {
+      me = await whoami({
+        actor,
+        requestId: randomUUID(),
+        settings: {
+          adminId: actor.adminId,
+          aal: actor.session.aal,
+          sessionId: actor.session.sessionId,
+        },
+      });
+    } catch (e) {
+      // The database no longer accepts this session as an actor (e.g. the factor was removed).
+      if (!(e instanceof PlatformError && e.code === 'MFA_REQUIRED')) throw sanitised(e);
+      enrolled = false;
+    }
   }
-  const me = await whoami({
-    actor,
-    requestId: randomUUID(),
-    settings: { adminId: actor.adminId, aal: 'aal2' },
-  });
+  if (!enrolled && path !== '/platform/security') redirect('/platform/security');
   return { unavailable: false, actor, me, enrolled };
+}
+
+/** A driver error's message carries the query's parameters: pages rethrow name and SQLSTATE only. */
+function sanitised(e: unknown): Error {
+  const sqlstate = sqlstateOf(e);
+  console.error('[platform] page gate failed', {
+    name: e instanceof Error ? e.name : typeof e,
+    sqlstate,
+  });
+  return new Error(`platform page unavailable (${sqlstate ?? 'no sqlstate'})`);
 }

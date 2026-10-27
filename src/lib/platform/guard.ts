@@ -2,8 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 import { clientIp } from '@/lib/auth/login-events';
-import { PlatformUnavailableError, withPlatformTx } from '@/lib/db/platform-pool';
-import { resolvePlatformAccess, type PlatformAccess, type PlatformActor } from './identity';
+import { sqlstateOf } from '@/lib/auth/bootstrap-setup';
+import {
+  PlatformUnavailableError,
+  withPlatformTx,
+  type PlatformActorSettings,
+} from '@/lib/db/platform-pool';
+import { resolvePlatformAccess, type PlatformActor } from './identity';
 
 /**
  * The gate every platform API route passes first (ADR-008, design §5). In order:
@@ -39,7 +44,8 @@ export type PlatformOperation =
   | 'platform.organization.suspend'
   | 'platform.organization.reactivate'
   | 'platform.organization.list'
-  | 'platform.audit.list';
+  | 'platform.audit.list'
+  | 'platform.admin.list';
 
 export interface PlatformGate {
   operation: PlatformOperation;
@@ -54,8 +60,8 @@ export interface PlatformGate {
 export interface PlatformRequest {
   actor: PlatformActor;
   requestId: string;
-  /** For the database calls: the acting administrator at aal2. */
-  settings: { adminId: string; aal: 'aal2' };
+  /** For the database calls: the acting administrator, on this aal2 session. */
+  settings: PlatformActorSettings;
 }
 
 export const json = (status: number, body: unknown) =>
@@ -63,6 +69,12 @@ export const json = (status: number, body: unknown) =>
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
+
+const settingsOf = (actor: PlatformActor): PlatformActorSettings => ({
+  adminId: actor.adminId,
+  aal: actor.session.aal,
+  sessionId: actor.session.sessionId,
+});
 
 /** Records a DENIED / ERROR platform audit entry. Never throws: the answer is already decided. */
 export async function recordPlatformFailure(
@@ -74,7 +86,7 @@ export async function recordPlatformFailure(
   targetOrgId: string | null = null,
 ): Promise<void> {
   try {
-    await withPlatformTx({ adminId: actor.adminId, aal: actor.session.aal }, (tx) =>
+    await withPlatformTx(settingsOf(actor), (tx) =>
       tx.execute(sql`
         select platform.record_failure(${operation}, ${result}, ${reasonCode},
                                        ${targetOrgId}::uuid, ${requestId}::uuid)
@@ -84,46 +96,49 @@ export async function recordPlatformFailure(
     console.error('[platform] failure audit not recorded', {
       operation,
       name: e instanceof Error ? e.name : typeof e,
+      sqlstate: sqlstateOf(e),
     });
   }
 }
 
-/** The gate. Returns the request context, or the Response that refuses it. */
+/**
+ * The gate. Returns the request context, or the Response that refuses it. Never throws: a
+ * failure inside it is answered here and logged by name and SQLSTATE only — a driver error's
+ * message carries the query's parameters (session id, login id, client IP).
+ */
 export async function gatePlatformRequest(
   req: Request,
   gate: PlatformGate,
 ): Promise<PlatformRequest | Response> {
-  const requestId = randomUUID();
-  let access: PlatformAccess;
   try {
-    access = await resolvePlatformAccess(req.headers);
+    return await gate_(req, gate);
   } catch (e) {
     if (e instanceof PlatformUnavailableError) return json(503, { error: 'PLATFORM_UNAVAILABLE' });
-    throw e;
+    const sqlstate = sqlstateOf(e);
+    // The database no longer accepts this administrator as an actor (their factor was removed,
+    // or the session went past a limit, after the checks above): treat as not enrolled.
+    if (sqlstate === '42501') return json(403, { error: 'MFA_REQUIRED' });
+    console.error('[platform] gate failed', {
+      name: e instanceof Error ? e.name : typeof e,
+      sqlstate,
+    });
+    return json(500, { error: 'INTERNAL', message: 'Something went wrong. Nothing was changed.' });
   }
-  // Neither answer says anything about the platform: a tenant user sees what any unknown
-  // path would show them.
+}
+
+async function gate_(req: Request, gate: PlatformGate): Promise<PlatformRequest | Response> {
+  const requestId = randomUUID();
+  const access = await resolvePlatformAccess(req.headers);
+  // A tenant user gets the answer of any unknown API path; nothing platform-side runs for them.
   if (access.kind === 'none') return json(401, { error: 'UNAUTHENTICATED' });
   if (access.kind === 'not-admin') return json(404, { error: 'NOT_FOUND' });
   const { actor } = access;
   if (actor.status !== 'ACTIVE' || actor.session.aal !== 'aal2') {
     return json(403, { error: 'MFA_REQUIRED' });
   }
-  const settings = { adminId: actor.adminId, aal: 'aal2' as const };
+  const settings = settingsOf(actor);
 
-  if (gate.permission) {
-    const held = await withPlatformTx(settings, (tx) =>
-      tx.execute<{ permissions: string[] }>(sql`select permissions from platform.whoami()`),
-    );
-    if (!(held.rows[0]?.permissions ?? []).includes(gate.permission)) {
-      await recordPlatformFailure(actor, gate.operation, 'DENIED', 'NO_PERMISSION', requestId);
-      return json(403, { error: 'FORBIDDEN' });
-    }
-  }
-  if (gate.stepUp && !actor.session.fresh) {
-    await recordPlatformFailure(actor, gate.operation, 'DENIED', 'STEP_UP_REQUIRED', requestId);
-    return json(403, { error: 'STEP_UP_REQUIRED' });
-  }
+  // Limited before anything is recorded, so refusals cannot flood the audit trail.
   if (gate.rateLimit) {
     const { max, windowSeconds } = gate.rateLimit;
     const byAdmin = await checkIpRateLimit(
@@ -140,6 +155,19 @@ export async function gatePlatformRequest(
       await recordPlatformFailure(actor, gate.operation, 'DENIED', 'RATE_LIMITED', requestId);
       return json(429, { error: 'RATE_LIMITED' });
     }
+  }
+  if (gate.permission) {
+    const held = await withPlatformTx(settings, (tx) =>
+      tx.execute<{ permissions: string[] }>(sql`select permissions from platform.whoami()`),
+    );
+    if (!(held.rows[0]?.permissions ?? []).includes(gate.permission)) {
+      await recordPlatformFailure(actor, gate.operation, 'DENIED', 'NO_PERMISSION', requestId);
+      return json(403, { error: 'FORBIDDEN' });
+    }
+  }
+  if (gate.stepUp && !actor.session.fresh) {
+    await recordPlatformFailure(actor, gate.operation, 'DENIED', 'STEP_UP_REQUIRED', requestId);
+    return json(403, { error: 'STEP_UP_REQUIRED' });
   }
   return { actor, requestId, settings };
 }

@@ -89,19 +89,47 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
   let firstAdmin = '';
   let firstLogin = '';
 
-  /** Runs SQL as app_platform with the given acting administrator and assurance level. */
+  /**
+   * A session of the administrator's own login, as Better Auth would have created it (0086 binds
+   * the actor to one). `ageMinutes` backdates it; an administrator with no login gets an id that
+   * names no session.
+   */
+  const sessionFor = async (
+    adminId: string | null,
+    aal: 'aal1' | 'aal2',
+    age: { createdMinutesAgo?: number; idleMinutes?: number } = {},
+  ): Promise<string> => {
+    if (!adminId || !/^[0-9a-f-]{36}$/.test(adminId)) return randomUUID();
+    const res = await owner.query<{ id: string }>(
+      `insert into auth.auth_sessions (user_id, token, expires_at, aal, created_at, updated_at)
+       select a.auth_user_id, $2, now() + interval '1 day', $3,
+              now() - make_interval(mins => $4), now() - make_interval(mins => $5)
+       from platform.admins a where a.id = $1 and a.auth_user_id is not null
+       returning id`,
+      [adminId, newToken(), aal, age.createdMinutesAgo ?? 0, age.idleMinutes ?? 0],
+    );
+    return res.rows[0]?.id ?? randomUUID();
+  };
+
+  /**
+   * Runs SQL as app_platform with the given acting administrator and assurance level, on a live
+   * session of that administrator's login with the same assurance (or `session`, when given).
+   */
   const asAdmin = async <T extends Record<string, unknown>>(
     adminId: string | null,
     aal: string,
     text: string,
     params: unknown[] = [],
+    session?: string,
   ) => {
+    const sessionId = session ?? (await sessionFor(adminId, aal === 'aal2' ? 'aal2' : 'aal1'));
     const c: PoolClient = await platform.connect();
     try {
       await c.query('begin');
       await c.query(
-        `select set_config('app.platform_admin_id', $1, true), set_config('app.platform_aal', $2, true)`,
-        [adminId ?? '', aal],
+        `select set_config('app.platform_admin_id', $1, true), set_config('app.platform_aal', $2, true),
+                set_config('app.platform_session_id', $3, true)`,
+        [adminId ?? '', aal, sessionId],
       );
       const res = await c.query<T>(text, params);
       await c.query('commit');
@@ -392,6 +420,29 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
     const me = await asAdmin<{ admin_id: string; permissions: string[] }>(firstAdmin, 'aal2', who);
     expect(me.rows[0]!.admin_id).toBe(firstAdmin);
     expect(me.rows[0]!.permissions).toHaveLength(7);
+
+    // 0086 (S-CONSOLE-1): the settings alone act as nobody. The actor needs a live aal2 session
+    // of their own login, within the platform's 12-hour and 30-minute limits.
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], ''))).toBe('42501');
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], randomUUID()))).toBe('42501');
+    const aal1Session = await sessionFor(firstAdmin, 'aal1');
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], aal1Session))).toBe('42501');
+    const idle = await sessionFor(firstAdmin, 'aal2', { idleMinutes: 31 });
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], idle))).toBe('42501');
+    const old = await sessionFor(firstAdmin, 'aal2', { createdMinutesAgo: 12 * 60 + 1 });
+    expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], old))).toBe('42501');
+    const live = await sessionFor(firstAdmin, 'aal2', { createdMinutesAgo: 60, idleMinutes: 29 });
+    expect((await asAdmin(firstAdmin, 'aal2', who, [], live)).rows).toHaveLength(1);
+    // Another login's live aal2 session does not make this administrator an actor.
+    const others = await owner.query<{ id: string }>(
+      `insert into auth.auth_sessions (user_id, token, expires_at, aal)
+       select id, $1, now() + interval '1 day', 'aal2' from auth.auth_users
+       where id <> $2 limit 1 returning id`,
+      [newToken(), firstLogin],
+    );
+    if (others.rows[0]) {
+      expect(await stateOf(asAdmin(firstAdmin, 'aal2', who, [], others.rows[0].id))).toBe('42501');
+    }
 
     const forLogin = await platform.query('select * from platform.admin_for_login($1)', [
       firstLogin,

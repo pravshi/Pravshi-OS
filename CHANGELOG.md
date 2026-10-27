@@ -21,7 +21,9 @@ Database migrations: 0063–0086 (production still pending — see the
   `app_platform`, no fallback): a tenant user of any role, SUPER_ADMIN included, gets 404; an
   administrator without an enrolled authenticator can only enrol one; sensitive actions need a
   sign-in from the last 10 minutes; platform sessions end after 30 idle minutes or 12 hours;
-  sensitive actions are rate limited; refusals are audited. The setup links
+  sensitive actions are rate limited; an administrator's refused or failed operations are
+  audited (DENIED / ERROR). The acting administrator is bound in the database to a live aal2
+  session of their own login (0086), so the console's database credential alone acts as nobody. The setup links
   `/platform/setup` and `/setup/organization` set a first password under the full password
   policy. The operator CLI `scripts/bootstrap/platform.mjs` creates the first platform
   administrator, re-issues a pending administrator's link, and performs audited break-glass

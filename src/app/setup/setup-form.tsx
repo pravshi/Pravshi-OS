@@ -143,6 +143,8 @@ export function SetupForm({
 
   useEffect(() => {
     setToken(readFragmentToken());
+    // The token has been read: take it out of the address bar and the history entry.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }, []);
 
   async function checkPassword(pw: string): Promise<WeakReason | null> {

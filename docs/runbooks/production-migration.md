@@ -485,8 +485,12 @@ invented at incident time.
   in mixed case afterwards (addresses already lower-cased stay so), refuses unless the database
   is at 0085, and needs Nani's explicit approval and a run-record entry.
   `scripts/db/rollback/0086_platform_console.down.sql` drops the console's administrator list
-  function; it re-opens nothing, refuses unless the database is at 0086, and needs Nani's
-  explicit approval and a run-record entry.
+  function and restores `platform.record_failure` and `platform.current_admin` verbatim from
+  0083. It re-opens one thing: the platform actor is again trusted from the transaction settings
+  without a live session (0086 binds it to an aal2 session of the administrator's own login,
+  within 12 hours and 30 idle minutes); the application still works against it, minus the
+  administrator list. It refuses unless the database is at 0086, and needs Nani's explicit
+  approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -561,7 +565,7 @@ re-apply.
 | 82  | `0083_platform_identity` | 1791598728057 | `9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18` |
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
-| 85  | `0086_platform_console` | 1791601728057 | `348f296899b928189d0f62c0f3a7c32746a97f9cb797eb501fb7f92c3bb233ea` |
+| 85  | `0086_platform_console` | 1791601728057 | `cc474620bf7d48ab4d520dad8569535639c33e726e32693b8683e445d692186c` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

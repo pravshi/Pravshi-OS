@@ -161,6 +161,39 @@ describe('DATABASE_URL_AUTH — the authentication plane’s own login (0072/007
   });
 });
 
+describe('DATABASE_URL_PLATFORM — the platform console’s own login (0083–0086, ADR-008)', () => {
+  const AUTH = 'postgresql://u:p@ep-x-auth-pooler.ap-southeast-1.aws.neon.tech/db';
+  const PLATFORM = 'postgresql://u:p@ep-x-platform-pooler.ap-southeast-1.aws.neon.tech/db';
+  const base = {
+    DATABASE_URL: POOLED,
+    DATABASE_URL_AUTH: AUTH,
+    APP_URL: 'https://os.pravshi.com',
+    NODE_ENV: 'production',
+    BETTER_AUTH_SECRET: SECRET,
+  };
+
+  it('is optional: without it the console is unavailable, and nothing else changes', () => {
+    expect(parseRuntimeEnv(base).DATABASE_URL_PLATFORM).toBeUndefined();
+    expect(
+      parseRuntimeEnv({ ...base, DATABASE_URL_PLATFORM: PLATFORM }).DATABASE_URL_PLATFORM,
+    ).toBe(PLATFORM);
+  });
+
+  it('never borrows another login: the business or the authentication URL is refused', () => {
+    for (const same of [POOLED, AUTH]) {
+      expect(() => parseRuntimeEnv({ ...base, DATABASE_URL_PLATFORM: same })).toThrow(
+        /DATABASE_URL_PLATFORM must not be the same connection string/,
+      );
+    }
+  });
+
+  it('must use the pooled endpoint', () => {
+    expect(() => parseRuntimeEnv({ ...base, DATABASE_URL_PLATFORM: DIRECT })).toThrow(
+      /DATABASE_URL_PLATFORM must use the pooled/,
+    );
+  });
+});
+
 describe('parseToolingEnv', () => {
   it('rejects a pooled URL for migrations', () => {
     expect(() => parseToolingEnv({ DATABASE_URL_MIGRATE: POOLED })).toThrow(

@@ -87,7 +87,9 @@ describe('there is exactly one path to Postgres', () => {
   it('only the platform module (src/lib/platform) uses the app_platform pool', () => {
     // platform-pool.ts connects as app_platform: the login that provisions, suspends and
     // reactivates organizations. Only the platform module, behind its gate, may reach it.
-    const hits = grep(`-lE "db/platform-pool'" -- src ":!src/lib/platform/*" ":!src/lib/db/*"`);
+    const hits = grep(
+      `-lE "db/platform-pool'" -- src ":!src/lib/platform/*" ":!src/lib/db/platform-pool.ts"`,
+    );
     expect(hits, `app_platform pool imported outside src/lib/platform, in:\n${hits}`).toBe('');
   });
 

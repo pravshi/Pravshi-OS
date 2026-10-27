@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 /** GET /api/platform/admins — every platform administrator (platform.admins.manage). */
 export const GET = platformRoute(
-  { operation: 'platform.admin.invite', permission: 'platform.admins.manage' },
+  { operation: 'platform.admin.list', permission: 'platform.admins.manage' },
   async (_req, ctx) => json(200, { admins: await listAdmins(ctx) }),
 );
 

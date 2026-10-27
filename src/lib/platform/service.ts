@@ -3,7 +3,12 @@ import { sql } from 'drizzle-orm';
 import { hashSetupToken, sqlstateOf } from '@/lib/auth/bootstrap-setup';
 import { withPlatformTx } from '@/lib/db/platform-pool';
 import type { Tx } from '@/lib/db/authorized';
-import { recordPlatformFailure, type PlatformOperation, type PlatformRequest } from './guard';
+import {
+  recordPlatformFailure,
+  type PlatformOperation,
+  type PlatformPermission,
+  type PlatformRequest,
+} from './guard';
 
 /**
  * The platform console's operations (ADR-008). Each is one app_platform transaction calling
@@ -36,18 +41,51 @@ const COMMON: Refusals = {
   P0002: { status: 404, code: 'NOT_FOUND', message: 'It no longer exists.' },
 };
 
+const NOT_AN_ACTOR = {
+  status: 403,
+  code: 'MFA_REQUIRED',
+  message: 'Your session no longer qualifies (second factor or session). Sign in again.',
+};
+
+/**
+ * 42501 means several things: the actor is no longer accepted (factor removed, session past a
+ * limit), the permission is gone, or — for some operations — a business rule (an administrator
+ * cannot revoke themselves). An operation's own 42501 answer is used only after a fresh check
+ * shows the actor is still accepted and still holds `permission` (review F-CONSOLE-3).
+ */
+async function classify42501(
+  req: PlatformRequest,
+  refusals: Refusals,
+  permission: PlatformPermission | undefined,
+) {
+  try {
+    const held = await withPlatformTx(req.settings, (tx) =>
+      tx.execute<{ permissions: string[] }>(sql`select permissions from platform.whoami()`),
+    );
+    const permissions = held.rows[0]?.permissions ?? [];
+    if (permission && !permissions.includes(permission)) return COMMON['42501']!;
+    return refusals['42501'] ?? COMMON['42501']!;
+  } catch {
+    return NOT_AN_ACTOR;
+  }
+}
+
 async function run<T>(
   req: PlatformRequest,
   operation: PlatformOperation,
   refusals: Refusals,
   fn: (tx: Tx) => Promise<T>,
-  targetOrgId: string | null = null,
+  opts: { targetOrgId?: string; permission?: PlatformPermission } = {},
 ): Promise<T> {
+  const targetOrgId = opts.targetOrgId ?? null;
   try {
     return await withPlatformTx(req.settings, fn);
   } catch (e) {
     const sqlstate = sqlstateOf(e);
-    const known = (sqlstate && (refusals[sqlstate] ?? COMMON[sqlstate])) || null;
+    const known =
+      sqlstate === '42501'
+        ? await classify42501(req, refusals, opts.permission)
+        : (sqlstate && (refusals[sqlstate] ?? COMMON[sqlstate])) || null;
     await recordPlatformFailure(
       req.actor,
       operation,
@@ -77,13 +115,22 @@ export interface WhoAmI {
 }
 
 export async function whoami(req: PlatformRequest): Promise<WhoAmI> {
-  const rows = await withPlatformTx(req.settings, (tx) =>
-    tx.execute<{ admin_id: string; email: string; full_name: string; permissions: string[] }>(
-      sql`select admin_id, email::text as email, full_name, permissions from platform.whoami()`,
-    ),
-  );
+  let rows;
+  try {
+    rows = await withPlatformTx(req.settings, (tx) =>
+      tx.execute<{ admin_id: string; email: string; full_name: string; permissions: string[] }>(
+        sql`select admin_id, email::text as email, full_name, permissions from platform.whoami()`,
+      ),
+    );
+  } catch (e) {
+    // whoami() refuses only a caller the database no longer accepts as an actor.
+    if (sqlstateOf(e) === '42501') {
+      throw new PlatformError(NOT_AN_ACTOR.status, NOT_AN_ACTOR.code, NOT_AN_ACTOR.message);
+    }
+    throw e;
+  }
   const r = rows.rows[0];
-  if (!r) throw new PlatformError(403, 'FORBIDDEN', 'You are not allowed to do this.');
+  if (!r) throw new PlatformError(NOT_AN_ACTOR.status, NOT_AN_ACTOR.code, NOT_AN_ACTOR.message);
   return { adminId: r.admin_id, email: r.email, fullName: r.full_name, permissions: r.permissions };
 }
 
@@ -238,7 +285,7 @@ export async function reissueOrgAdminSetup(
         select platform.reissue_org_admin_setup(${orgId}::uuid, decode(${digest}, 'hex'),
                                                 ${req.requestId}::uuid) as expires_at
       `),
-    orgId,
+    { targetOrgId: orgId, permission: 'platform.organizations.assign_initial_admin' },
   );
   const expires = rows.rows[0]?.expires_at;
   if (!expires)
@@ -272,7 +319,11 @@ export async function setOrganizationStatus(
         select platform.set_organization_status(${orgId}::uuid, ${to}, ${reason},
                                                 ${req.requestId}::uuid) as result
       `),
-    orgId,
+    {
+      targetOrgId: orgId,
+      permission:
+        to === 'SUSPENDED' ? 'platform.organizations.suspend' : 'platform.organizations.reactivate',
+    },
   );
   return rows.rows[0]?.result ?? 'UNCHANGED';
 }
@@ -292,7 +343,7 @@ export interface AdminRow {
 }
 
 export async function listAdmins(req: PlatformRequest): Promise<AdminRow[]> {
-  const rows = await withPlatformTx(req.settings, (tx) =>
+  const rows = await run(req, 'platform.admin.list', {}, (tx) =>
     tx.execute<{
       admin_id: string;
       email: string;
@@ -308,12 +359,7 @@ export async function listAdmins(req: PlatformRequest): Promise<AdminRow[]> {
              revoked_at, has_login, permissions
       from platform.list_admins()
     `),
-  ).catch((e: unknown) => {
-    if (sqlstateOf(e) === '42501') {
-      throw new PlatformError(403, 'FORBIDDEN', 'You are not allowed to do this.');
-    }
-    throw e;
-  });
+  );
   return rows.rows.map((r) => ({
     adminId: r.admin_id,
     email: r.email,
@@ -369,6 +415,7 @@ export async function inviteAdmin(
                                    ${permissions}, decode(${digest}, 'hex'),
                                    ${req.requestId}::uuid)
       `),
+    { permission: 'platform.admins.manage' },
   );
   const r = rows.rows[0];
   if (!r) throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
@@ -404,6 +451,7 @@ export async function revokeAdmin(
       tx.execute(sql`
         select platform.revoke_admin(${adminId}::uuid, ${reason}, ${req.requestId}::uuid)
       `),
+    { permission: 'platform.admins.manage' },
   );
 }
 

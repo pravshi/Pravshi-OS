@@ -93,7 +93,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
   const RUN = randomUUID().slice(0, 8);
   const PASSWORD = `Platform!Console-${RUN}-pass`;
   const ORG_ADMIN_PASSWORD = `Org!Admin-${RUN}-pass`;
-  const FIRST_EMAIL = `first.${RUN}@platform.example`;
+  /** Whichever contender wins the concurrent bootstrap (first test). */
+  let FIRST_EMAIL = `first.${RUN}@platform.example`;
 
   // Application modules, imported only after the URLs point at the isolated database.
   let routes: Record<string, Record<string, Handler>> = {};
@@ -262,10 +263,23 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
   let orgAdminEmail = '';
 
   it('the operator bootstraps the first administrator; the setup link sets a password, once', async () => {
-    const link = await operator('first-admin', {
-      email: FIRST_EMAIL,
-      name: 'First Platform Admin',
-    });
+    // Two operators at once: exactly one bootstrap takes effect; the other is refused and leaves
+    // nothing (Priority 3: concurrent bootstrap).
+    const contenders = [FIRST_EMAIL, `rival.${RUN}@platform.example`];
+    const results = await Promise.allSettled(
+      contenders.map((email, i) => operator('first-admin', { email, name: `Contender ${i}` })),
+    );
+    const winners = results.flatMap((r, i) => (r.status === 'fulfilled' ? [i] : []));
+    expect(winners).toHaveLength(1);
+    const loser = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(['55000', '23505']).toContain((loser.reason as { code?: string }).code);
+    FIRST_EMAIL = contenders[winners[0]!]!;
+    const link = (results[winners[0]!] as PromiseFulfilledResult<string>).value;
+    const counts = await owner.query<{ admins: number; gate: number }>(
+      `select (select count(*)::int from platform.admins) admins,
+              (select count(*)::int from platform.bootstrap_state) gate`,
+    );
+    expect(counts.rows[0]).toEqual({ admins: 1, gate: 1 });
     expect(link.startsWith(`${ORIGIN}/platform/setup#token=`)).toBe(true);
     const token = tokenOf(link);
 
@@ -375,6 +389,42 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(conflict).toMatchObject({ status: 409, body: { error: 'CONFLICT' } });
 
+    // A state change must come from this origin; a missing Origin is refused too.
+    for (const origin of [null, 'https://evil.example']) {
+      const refused = await call('/api/platform/organizations', 'POST', {
+        cookie: adminCookie,
+        body: request,
+        origin,
+      });
+      expect(refused, String(origin)).toMatchObject({
+        status: 403,
+        body: { error: 'FORBIDDEN_ORIGIN' },
+      });
+    }
+
+    // The same request twice at once (a double click, a retry racing the first): one
+    // organization, one link; the other answer is the replay (Priority 3: concurrency).
+    const raced = {
+      ...request,
+      idempotencyKey: `console-${RUN}-race`,
+      name: `Raced Org ${RUN}`,
+      slug: `raced-${RUN}`,
+      adminEmail: `raced.${RUN}@tenant.example`,
+    };
+    const both = await Promise.all([
+      call('/api/platform/organizations', 'POST', { cookie: adminCookie, body: raced }),
+      call('/api/platform/organizations', 'POST', { cookie: adminCookie, body: raced }),
+    ]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 201]);
+    expect(both.filter((r) => r.body.setupLink)).toHaveLength(1);
+    expect(
+      (
+        await owner.query(`select count(*)::int n from public.organizations where slug = $1`, [
+          raced.slug,
+        ])
+      ).rows[0],
+    ).toEqual({ n: 1 });
+
     const orgs = await call('/api/platform/organizations', 'GET', { cookie: adminCookie });
     const mine = (
       orgs.body.organizations as {
@@ -403,6 +453,26 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     expect(reissued.status).toBe(200);
     const oldToken = orgSetupToken;
     orgSetupToken = tokenOf(reissued.body.setupLink as string);
+
+    // An expired link is refused like any dead one; a re-issue replaces it (Priority 3).
+    await owner.query(
+      `update platform.org_admin_setup
+       set issued_at = now() - interval '73 hours', expires_at = now() - interval '1 hour'
+       where org_id = $1`,
+      [orgId],
+    );
+    const expired = await call('/api/setup/organization/complete', 'POST', {
+      body: { token: orgSetupToken, password: ORG_ADMIN_PASSWORD },
+    });
+    expect(expired).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    const renewed = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${orgId}/admin-setup`,
+    });
+    expect(renewed.status).toBe(200);
+    const expiredToken = orgSetupToken;
+    orgSetupToken = tokenOf(renewed.body.setupLink as string);
+    expect(orgSetupToken).not.toBe(expiredToken);
 
     const stale = await call('/api/setup/organization/complete', 'POST', {
       body: { token: oldToken, password: ORG_ADMIN_PASSWORD },
@@ -435,13 +505,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
 
   it('a tenant user — even the organization SUPER_ADMIN — gets 404 from every console route, and their session is untouched', async () => {
     const tenantCookie = await signIn(orgAdminEmail, ORG_ADMIN_PASSWORD);
-    const token = tenantCookie.match(/session_token=([^;]+)/)?.[1] ?? '';
+    const token = decodeURIComponent(tenantCookie.match(/session_token=([^;.]+)/)?.[1] ?? '');
+    expect(token).not.toBe('');
     // Idle by the platform's measure (30 minutes) but not by the tenant's.
-    await owner.query(
-      `update auth.auth_sessions set updated_at = now() - interval '31 minutes'
-       where user_id = (select id from auth.auth_users where email = $1)`,
-      [orgAdminEmail],
+    const stamped = await owner.query<{ updated_at: string }>(
+      `update auth.auth_sessions set updated_at = now() - interval '31 minutes' where token = $1
+       returning updated_at::text`,
+      [token],
     );
+    expect(stamped.rowCount).toBe(1);
     for (const [route, method] of [
       ['/api/platform/me', 'GET'],
       ['/api/platform/organizations', 'GET'],
@@ -455,13 +527,12 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       body: { idempotencyKey: `tenant-${RUN}-x` },
     });
     expect(provision.status).toBe(404);
-    expect(token).not.toBe('');
-    const sessions = await owner.query<{ n: number }>(
-      `select count(*)::int n from auth.auth_sessions
-       where user_id = (select id from auth.auth_users where email = $1)`,
-      [orgAdminEmail],
+    // This very session: neither deleted nor stamped by the platform's limits.
+    const after = await owner.query<{ updated_at: string }>(
+      `select updated_at::text from auth.auth_sessions where token = $1`,
+      [token],
     );
-    expect(sessions.rows[0]!.n, 'the tenant sessions were not deleted').toBeGreaterThan(0);
+    expect(after.rows, 'the tenant session still exists, unstamped').toEqual(stamped.rows);
   });
 
   it('suspends and reactivates, with a reason, idempotently, audited', async () => {
@@ -537,6 +608,18 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     expect((await call('/api/platform/me', 'GET', { cookie: idle })).status).toBe(401);
     const left = await owner.query(`select 1 from auth.auth_sessions where token = $1`, [token]);
     expect(left.rowCount).toBe(0);
+
+    // And 12 hours after its creation, however active it was.
+    const old = await signIn(FIRST_EMAIL, PASSWORD, firstAdminSecret);
+    const oldToken = decodeURIComponent(old.match(/session_token=([^;.]+)/)?.[1] ?? '');
+    await owner.query(
+      `update auth.auth_sessions set created_at = now() - interval '12 hours 1 minute' where token = $1`,
+      [oldToken],
+    );
+    expect((await call('/api/platform/me', 'GET', { cookie: old })).status).toBe(401);
+    expect(
+      (await owner.query(`select 1 from auth.auth_sessions where token = $1`, [oldToken])).rowCount,
+    ).toBe(0);
   });
 
   it('invites an administrator with only permissions the inviter holds; revocation ends their sessions', async () => {
@@ -570,8 +653,45 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       ].sort(),
     );
 
-    // The second administrator signs in (aal1: no factor yet) — then is revoked.
-    const secondCookie = await signIn(email, PASSWORD);
+    // The second administrator enrols a factor and signs in at aal2: what they lack is refused
+    // with 403 and a DENIED entry under the operation's own name.
+    const { auth } = await import('@/lib/auth/server');
+    const enrolCookie = await signIn(email, PASSWORD);
+    const enabled = await auth.api.enableTwoFactor({
+      body: { password: PASSWORD },
+      headers: new Headers({ cookie: enrolCookie }),
+    });
+    if (enabled.method !== 'totp') throw new Error('expected a TOTP enrolment');
+    const secondSecret = new URL(enabled.totpURI).searchParams.get('secret')!;
+    const verified = (await auth.api.verifyTOTP({
+      body: { code: totpAt(secondSecret) },
+      headers: new Headers({ cookie: enrolCookie }),
+      asResponse: true,
+    })) as Response;
+    expect(verified.ok).toBe(true);
+    const secondCookie = await signIn(email, PASSWORD, secondSecret);
+    expect((await call('/api/platform/me', 'GET', { cookie: secondCookie })).status).toBe(200);
+    const notAllowed = await call('/api/platform/admins', 'GET', { cookie: secondCookie });
+    expect(notAllowed).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    const cannotInvite = await call('/api/platform/admins', 'POST', {
+      cookie: secondCookie,
+      body: { email: `third.${RUN}@platform.example`, fullName: 'Third', permissions: [] },
+    });
+    expect(cannotInvite).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    const deniedRows = (await auditRows()).filter((r) => r.reason_code === 'NO_PERMISSION');
+    expect(deniedRows).toEqual([
+      { action: 'platform.admin.list', result: 'DENIED', reason_code: 'NO_PERMISSION' },
+      { action: 'platform.admin.invite', result: 'DENIED', reason_code: 'NO_PERMISSION' },
+    ]);
+    // Suspension is theirs: allowed (an unknown organization answers 404).
+    const theirs = await call('suspend', 'POST', {
+      cookie: secondCookie,
+      path: `/api/platform/organizations/${randomUUID()}/suspend`,
+      body: { reason: 'Permission check only' },
+    });
+    expect(theirs.status).toBe(404);
+
+    // Then they are revoked.
     const me = await call('/api/platform/me', 'GET', { cookie: adminCookie });
     const myId = (me.body.admin as { adminId: string }).adminId;
     const self = await call('revoke', 'POST', {
@@ -608,8 +728,31 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       for (const r of page.body.rows as { id: string }[]) seen.push(r.id);
       cursor = page.body.next as typeof cursor;
     } while (cursor);
-    expect(new Set(seen).size).toBe(seen.length);
-    expect(seen.length).toBeGreaterThanOrEqual(all.length);
+    expect(all.length).toBeGreaterThan(6);
+    const expected = await owner.query<{ id: string }>(
+      `select id from platform.audit_events order by occurred_at desc, id desc`,
+    );
+    expect(seen).toEqual(expected.rows.map((r) => r.id));
+  });
+
+  it('sensitive actions are rate limited per administrator; the refusal is audited', async () => {
+    let limited = false;
+    for (let i = 0; i < 40 && !limited; i += 1) {
+      const r = await call('suspend', 'POST', {
+        cookie: adminCookie,
+        path: `/api/platform/organizations/${randomUUID()}/suspend`,
+        body: { reason: 'Rate limit probe' },
+      });
+      if (r.status === 429) limited = true;
+      else expect(r.status).toBe(404);
+    }
+    expect(limited).toBe(true);
+    const rows = (await auditRows()).filter((r) => r.reason_code === 'RATE_LIMITED');
+    expect(rows[0]).toEqual({
+      action: 'platform.organization.suspend',
+      result: 'DENIED',
+      reason_code: 'RATE_LIMITED',
+    });
   });
 
   it('break-glass recovery invalidates the old password and factor at once', async () => {

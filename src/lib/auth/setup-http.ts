@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { env } from '@/env';
-import { BootstrapSetupError } from './bootstrap-setup';
+import { BootstrapSetupError, sqlstateOf } from './bootstrap-setup';
 import { clientIp } from './login-events';
 import { completePlatformSetup, type PlatformSetupKind } from './platform-setup';
 import { checkIpRateLimit, ipRateLimitKey } from './rate-limit';
@@ -47,11 +47,10 @@ export async function handleSetupCompletion(
     return reply(400, { error: 'INVALID_REQUEST' });
   }
 
-  if (!(await checkIpRateLimit(ipRateLimitKey(`setup:${kind}`, clientIp(req)), 5, 60))) {
-    return reply(429, { error: 'RATE_LIMITED' });
-  }
-
   try {
+    if (!(await checkIpRateLimit(ipRateLimitKey(`setup:${kind}`, clientIp(req)), 5, 60))) {
+      return reply(429, { error: 'RATE_LIMITED' });
+    }
     const result = await completePlatformSetup(kind, body);
     if (result.ok) return reply(200, { status: 'COMPLETED' });
     switch (result.reason) {
@@ -68,7 +67,7 @@ export async function handleSetupCompletion(
         return reply(400, { error: result.reason });
     }
   } catch (e) {
-    const sqlstate = e instanceof BootstrapSetupError ? e.sqlstate : null;
+    const sqlstate = e instanceof BootstrapSetupError ? e.sqlstate : sqlstateOf(e);
     console.error('[setup] could not be completed', { kind, sqlstate });
     return reply(500, { error: 'INTERNAL' });
   }

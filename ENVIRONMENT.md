@@ -43,7 +43,8 @@ when it is present. CI creates a per-run `app_auth` password, exactly as for the
 `app_platform` (migrations 0083-0086, ADR-008), the login that provisions, suspends and
 reactivates organizations. It holds no table privilege: every operation is a function that
 re-checks the acting platform administrator, their second factor and their permission. There is
-no fallback — without it `/platform` and `/api/platform/*` answer "unavailable" — and
+no fallback — without it a signed-in request to `/platform` or `/api/platform/*` is answered
+"unavailable" (503; a request without a session is still sent to sign in) — and
 `src/env.ts` refuses it when it equals `DATABASE_URL` or `DATABASE_URL_AUTH`; the pool refuses
 any connection that did not authenticate as `app_platform`. Only `src/lib/platform` may use it
 (`tests/guards/single-db-path.test.ts`). The worker must not hold it.

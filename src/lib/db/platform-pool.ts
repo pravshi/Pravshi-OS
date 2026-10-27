@@ -109,6 +109,8 @@ async function connectPlatformWithWake(attempt = 0): Promise<PoolClient> {
 export interface PlatformActorSettings {
   adminId: string;
   aal: 'aal1' | 'aal2';
+  /** The administrator's own session: the database requires it to be live and aal2 (0086). */
+  sessionId: string;
 }
 
 /**
@@ -126,7 +128,8 @@ export async function withPlatformTx<T>(
     return await drizzle(client).transaction(async (tx) => {
       await tx.execute(sql`
         select set_config('app.platform_admin_id', ${actor?.adminId ?? ''}, true),
-               set_config('app.platform_aal', ${actor?.aal ?? ''}, true)
+               set_config('app.platform_aal', ${actor?.aal ?? ''}, true),
+               set_config('app.platform_session_id', ${actor?.sessionId ?? ''}, true)
       `);
       return fn(tx);
     });
