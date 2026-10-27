@@ -40,30 +40,25 @@
  * in the 0062 body, and 0062's verification DO block asserts the
  * hardening is present at migration time.
  *
- * WHY THIS RUNS IN THE 'serial' PROJECT, INSIDE audit-partition-lock-order.test.ts. The function
- * under test takes its table locks without waiting (NOWAIT: organizations, people, then
- * audit_logs ACCESS EXCLUSIVE) and retries ten times (about 2 s of back-off in all). Any other
- * transaction that writes audit_logs, people or organizations in that window makes an attempt
- * fail — by design (0062, 0075). Beside the other suites, which write constantly, probe B
- * therefore failed intermittently with "could not obtain lock on relation public.audit_logs".
- * Reproduced on unmodified main: 0 of 4 runs failed alone, 4 of 4 with four concurrent writers
- * each holding an audit_logs row lock for 50 ms. Run first and alone, the probe tests exactly
- * what it says: that the call completes once ITS contention (the advisory lock) clears.
- *
- * It is a module imported by tests/serial/audit-partition-lock-order.test.ts, not a test file of
- * its own, because the files of the 'serial' project run in parallel with each other (the project
- * sets no fileParallelism: false) and the two suites disturb each other: lock-order watches
- * pg_stat_activity for ITS maintenance backend and mistook this probe's deliberately waiting one
- * for it (7 failures, 3 of 3 full runs). In one file they run one after the other. Giving the
- * serial project fileParallelism: false in vitest.config.mts would make this unnecessary; that is
- * a shared root file and awaits the founder.
+ * WHY THIS RUNS IN THE 'serial' PROJECT. The function under test takes its table locks without
+ * waiting (NOWAIT: organizations, people, then audit_logs ACCESS EXCLUSIVE) and retries ten times
+ * (about 2 s of back-off in all). Any other transaction that writes audit_logs, people or
+ * organizations in that window makes an attempt fail — by design (0062, 0075). Beside the other
+ * suites, which write constantly, probe B therefore failed intermittently with "could not obtain
+ * lock on relation public.audit_logs". Reproduced on unmodified main: 0 of 4 runs failed alone,
+ * 4 of 4 with four concurrent writers each holding an audit_logs row lock for 50 ms. Run first
+ * and alone, the probe tests exactly what it says: that the call completes once ITS contention
+ * (the advisory lock) clears. The serial project runs its files one at a time
+ * (fileParallelism: false in vitest.config.mts): beside audit-partition-lock-order.test.ts, which
+ * watches pg_stat_activity for ITS maintenance backend, this probe's deliberately waiting one was
+ * mistaken for it (7 failures, 3 of 3 full runs).
  *
  * Nothing in the assertions changed. Gated behind DB_READY (tests/workflows/helpers.ts).
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { Pool, type PoolClient } from '@neondatabase/serverless';
 
-import { DB_READY } from '../../workflows/helpers';
+import { DB_READY } from '../workflows/helpers';
 
 const dbReady = DB_READY;
 const MAINTENANCE_LOCK = `select pg_advisory_lock(hashtext('ensure-audit-log-partitions'))`;

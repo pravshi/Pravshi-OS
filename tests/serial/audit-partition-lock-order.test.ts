@@ -21,17 +21,12 @@
  * suites assert exact windows) and rehearses the once-per-database bootstrap (other suites need
  * an unbootstrapped database). It records the partition set first and drops every partition it
  * created at the end, all of them empty and in the future.
- *
- * The contention probes for the same function (./probes/audit-partition-maintenance-failure.ts)
- * are imported below so that they run in this file, after this suite — see that file's header.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool, type PoolClient } from '@neondatabase/serverless';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { DB_READY, mkOrg, mkPerson, RUN } from '../workflows/helpers';
-// Registers the contention probes' describe in THIS file (side effect of the import).
-import './probes/audit-partition-maintenance-failure';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
