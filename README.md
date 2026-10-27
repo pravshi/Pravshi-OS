@@ -40,7 +40,7 @@ is [DEPLOYMENT.md](DEPLOYMENT.md), and the production migration has its own runb
 
 ## Prerequisites
 
-- **Node 22 LTS** (`.nvmrc` pins `22`; `package.json` requires `>=22.12`)
+- **Node 22 LTS** (`.nvmrc` pins `22`; `package.json` requires `>=22.12 <23`)
 - **pnpm 12.3.4** (pinned via `packageManager`; run `corepack enable`)
 - A **Neon branch** you can connect to. Do not use `production`. See
   [DEVELOPMENT.md](DEVELOPMENT.md).

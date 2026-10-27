@@ -196,9 +196,9 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 - **Command:** `pnpm worker` (`pnpm worker --help` prints usage without touching env or
   the database). **Node 22** (`.nvmrc`): the worker runs its TypeScript through
   `--experimental-transform-types`, which newer Node releases removed — on Node 26 it does
-  not start. Pin the host's Node version explicitly: on Railway set
-  `RAILPACK_NODE_VERSION=22` — Railpack reads `package.json` `engines.node` (an open
-  range, `>=22.12`) **before** `.nvmrc`, so without the pin it may pick a newer major.
+  not start. `package.json` `engines.node` is `>=22.12 <23`, which Railpack reads **before**
+  `.nvmrc`; still pin the host's Node version explicitly — on Railway set
+  `RAILPACK_NODE_VERSION=22` — so the version is never left to a resolver.
 - **Environment:** parity with the web app. Required — validated at boot, and the process
   refuses to start without them: `DATABASE_URL` (the **pooled** endpoint; the host
   contains `-pooler.`), `DATABASE_URL_WORKER` (pooled, role **`app_worker`**, migration
