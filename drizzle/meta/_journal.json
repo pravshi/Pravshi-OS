@@ -641,6 +641,14 @@
       "tag": "0084_platform_provisioning",
       "breakpoints": true,
       "hash": "a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415"
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791600728057,
+      "tag": "0085_login_email_case",
+      "breakpoints": true,
+      "hash": "aac001479cc932262bcf2aa94801848ee49550000e623240d5a694c1077286cd"
     }
   ]
 }

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0084 (production still pending — see the
+Database migrations: 0063–0085 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -169,6 +169,15 @@ Database migrations: 0063–0084 (production still pending — see the
 
 ### Security
 
+- Sign-in lockout reaches every account whatever the case of its address (migration 0085,
+  LOCK-1). Accounts created by invitation or bootstrap kept the address as typed, and the lockout
+  looked logins up case-sensitively, so an account stored with capital letters was never locked
+  out and a password-reset request did not find it. Every login address is now stored
+  lower-cased: existing ones are normalised (a case-only duplicate cannot exist — the address
+  was already unique regardless of case — and the migration refuses rather than merge if it ever
+  did), and every writer is normalised by a trigger and a CHECK. The organization lookup before
+  sign-in compares case-insensitively. Rate limits were never keyed by address and are
+  unchanged. Prepared rollback: `scripts/db/rollback/0085_login_email_case.down.sql`.
 - Least-privilege cleanup (migration 0082, found by the V1 acceptance review). The two
   link-immutability trigger functions from 0036 no longer carry PUBLIC EXECUTE (the triggers
   still fire for every role), and `app_user` no longer holds DELETE on webhook deliveries,
