@@ -293,7 +293,7 @@ The stable per-delivery identifier is the envelope body's `id` (§6.1), not the 
 Phase 10 also enables the workflow engine's previously deferred `webhook` **action** (only `run_ai_action` remains deferred). Its params take exactly one target:
 
 - `subscriptionId` — send to one of the org's subscriptions through `deliverToSubscription()` (event key recorded as `workflow.action`; a disabled subscription fails the step). The subscription's vault secret signs, resolved in the worker as in §5.3.
-- `url` (+ optional `signatureSecretRef`) — a deployment-level delivery: enqueues a plain `webhook` job signed with the env-referenced secret `WEBHOOK_SIGNING_SECRET_<REF>` (the Phase 6 pattern; an unconfigured ref refuses to send unsigned). `signatureSecretRef` is accepted in URL mode only.
+- `url` — enqueues a plain `webhook` job to that URL, sent unsigned. A `signatureSecretRef` (a deployment-level `WEBHOOK_SIGNING_SECRET_<REF>`, the Phase 6 pattern) is no longer accepted: deployment secrets are not an organization's to use. A workflow naming one is refused on save, edit and activation, its step fails without sending if it runs, and the `webhook` job payload refuses the field (a job queued earlier fails without sending). For a signed delivery, use a subscription.
 
 Execution runs under the trigger actor's authority, like the Phase 8 `send_email` executor.
 

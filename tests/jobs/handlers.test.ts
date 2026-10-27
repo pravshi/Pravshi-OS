@@ -422,35 +422,27 @@ describe('normalizeWebhookPayload', () => {
     );
   });
 
-  it('accepts the task-contract inline signatureSecret (takes precedence over ref)', () => {
-    process.env.WEBHOOK_SIGNING_SECRET_ACME = 'from-ref';
+  it('accepts the inline signatureSecret the handler passes for a subscription', () => {
     const w = normalizeWebhookPayload({
       url: 'https://example.com/hook',
       signatureSecret: 'inline-secret',
-      signatureSecretRef: 'acme',
     });
     expect(w.signatureSecret).toBe('inline-secret');
-    delete process.env.WEBHOOK_SIGNING_SECRET_ACME;
   });
 
-  it('resolves signatureSecretRef from the environment (value never in output)', () => {
+  it('refuses a deployment signatureSecretRef (B3), even a configured one', async () => {
     process.env.WEBHOOK_SIGNING_SECRET_ACME = 's3cr3t';
-    const w = normalizeWebhookPayload({
-      url: 'https://example.com/hook',
-      signatureSecretRef: 'acme',
-    });
-    expect(w.signatureSecret).toBe('s3cr3t');
-    delete process.env.WEBHOOK_SIGNING_SECRET_ACME;
-  });
-
-  it('throws CONFIG_ERROR (non-retryable) when a secret ref is unconfigured', async () => {
-    delete process.env.WEBHOOK_SIGNING_SECRET_MISSING;
-    await expectNonRetryable(() =>
-      normalizeWebhookPayload({
-        url: 'https://example.com/hook',
-        signatureSecretRef: 'missing',
-      }),
-    );
+    try {
+      for (const payload of [
+        { url: 'https://example.com/hook', signatureSecretRef: 'acme' },
+        { url: 'https://example.com/hook', signatureSecretRef: 'missing' },
+        { url: 'https://example.com/hook', signatureSecret: 'inline', signatureSecretRef: 'acme' },
+      ]) {
+        await expectNonRetryable(() => normalizeWebhookPayload(payload));
+      }
+    } finally {
+      delete process.env.WEBHOOK_SIGNING_SECRET_ACME;
+    }
   });
 
   it('strips caller-supplied signature headers (anti-spoofing)', () => {

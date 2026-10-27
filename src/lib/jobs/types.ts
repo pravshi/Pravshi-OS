@@ -116,14 +116,18 @@ export type ScheduledTriggerPayload = z.infer<typeof ScheduledTriggerPayloadSche
  *  payload carries ids and the event envelope (as `body`) only — the
  *  subscription's signing secret is NEVER a payload field (contract §4.5);
  *  the handler resolves and decrypts it inside the worker from the
- *  subscriptionId. Deployment-level deliveries keep using
- *  `signatureSecretRef` exactly as before. */
+ *  subscriptionId. A payload without a subscriptionId is sent unsigned.
+ *
+ *  B3: `signatureSecretRef` (a deployment-level WEBHOOK_SIGNING_SECRET_<REF>
+ *  env reference) is no longer a payload field. Every webhook job is enqueued
+ *  under a tenant's authority, so a ref here let a tenant have its own URL
+ *  signed with a deployment secret. The strict schema refuses it at enqueue;
+ *  the handler refuses a job stored before B3 that still carries it. */
 export const WebhookPayloadSchema = z.strictObject({
   url: z.string().url(),
   method: z.enum(['POST', 'PUT', 'PATCH']).default('POST'),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.unknown().optional(),
-  signatureSecretRef: z.string().max(128).optional(),
   subscriptionId: z.string().regex(UUID, 'subscriptionId must be a uuid').optional(),
   deliveryId: z.string().regex(UUID, 'deliveryId must be a uuid').optional(),
   timeoutMs: z.number().int().min(1000).max(30000).default(10000),

@@ -130,7 +130,7 @@ external senders are built from `APP_URL` (documented above).
 | `EMAIL_PROVIDER_API_KEY`       | optional | Resend credential for the job email path. Falls back to `RESEND_API_KEY` when unset                                                                                                                                                             |
 | `RESEND_API_KEY`               | optional | Resend credential used by invitation/auth mail. With `EMAIL_PROVIDER` unset it also selects Resend for job email (password reset included), and it is the job adapter's fallback credential                                                     |
 | `EMAIL_FROM`                   | optional | Sender address for invitation mail and job email. Must be on a Resend-verified domain; no safe default                                                                                                                                          |
-| `WEBHOOK_SIGNING_SECRET_<REF>` | optional | Deployment-level webhook signing secrets, one per `<REF>` named by a delivery's `signatureSecretRef`. An unconfigured ref refuses to send unsigned                                                                                              |
+| `WEBHOOK_SIGNING_SECRET_<REF>` | unused   | No longer read. Workflows and webhook jobs refuse a `signatureSecretRef`; signed deliveries use a webhook subscription's own secret. Safe to remove from the environment                                                                        |
 
 ### Worker and workflow dispatch — optional
 

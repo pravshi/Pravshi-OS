@@ -262,14 +262,14 @@ describe('webhook job payload contract', () => {
     expect(parsed.deliveryId).toBe(DELIVERY_ID);
   });
 
-  it('keeps the legacy env-ref payload shape working', () => {
-    const parsed = WebhookPayloadSchema.parse({
-      url: 'https://example.com/hook',
-      body: { hello: 'world' },
-      signatureSecretRef: 'PARTNER_A',
-    });
-    expect(parsed.signatureSecretRef).toBe('PARTNER_A');
-    expect(parsed.subscriptionId).toBeUndefined();
+  it('refuses the former deployment env-ref payload shape (B3)', () => {
+    expect(
+      WebhookPayloadSchema.safeParse({
+        url: 'https://example.com/hook',
+        body: { hello: 'world' },
+        signatureSecretRef: 'PARTNER_A',
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects a secret smuggled in as a payload field, and a malformed subscriptionId', () => {
@@ -309,6 +309,8 @@ describe('workflow webhook action enablement', () => {
     expect(WebhookActionParamsSchema.safeParse({ url: 'https://example.com/hook' }).success).toBe(
       true,
     );
+    // B3: still PARSED (stored workflows stay readable); refused on save,
+    // activation and execution — tests/workflows/webhook-secret-isolation.test.ts.
     expect(
       WebhookActionParamsSchema.safeParse({
         url: 'https://example.com/hook',

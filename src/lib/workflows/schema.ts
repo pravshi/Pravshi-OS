@@ -567,14 +567,22 @@ const SendEmailActionSchema = z.strictObject({
 // src/lib/workflows/actions.ts (same arrangement as the Phase 8 pair
 // above). Exactly one addressing mode: a subscriptionId (an org webhook
 // subscription — delivery is signed with its per-subscription secret,
-// resolved inside the worker) or a url (a deployment-level endpoint,
-// optionally signed via signatureSecretRef). `body` is the event body
-// sent as the request payload; its string values may carry templates.
+// resolved inside the worker) or a url (sent unsigned). `body` is the event
+// body sent as the request payload; its string values may carry templates.
+//
+// B3: a workflow can no longer name a deployment-level signing secret
+// (`signatureSecretRef` → env WEBHOOK_SIGNING_SECRET_<REF>). Those secrets
+// belong to the deployment, not to a tenant: any organization that guessed or
+// learned a ref could have had its own URL signed with another party's
+// secret. The key is still PARSED here so that workflows stored before B3
+// stay readable (list, detail, trigger matching) and can be edited to remove
+// it; it is refused everywhere a workflow is saved, activated or executed —
+// see hasDeploymentSecretRef below.
 export const WebhookActionParamsSchema = z
   .strictObject({
     subscriptionId: templateOr(uuid).optional(),
     url: templateOr(z.string().url()).optional(),
-    /** URL mode only: WEBHOOK_SIGNING_SECRET_<REF> env reference. */
+    /** Legacy, read-only: refused on save, activation and execution (B3). */
     signatureSecretRef: z.string().trim().min(1).max(128).optional(),
     body: z.record(z.string(), z.unknown()).optional(),
   })
@@ -585,6 +593,37 @@ export const WebhookActionParamsSchema = z
     message: 'signatureSecretRef applies to url mode only',
   });
 export type WebhookActionParams = z.infer<typeof WebhookActionParamsSchema>;
+
+export const DEPLOYMENT_SECRET_REF_MESSAGE =
+  'signatureSecretRef is not allowed: workflows cannot use deployment signing secrets — ' +
+  'deliver to a webhook subscription (subscriptionId), which is signed with its own secret';
+
+/** B3 policy, one definition for save, activation and execution: true when a
+ *  webhook action's params carry a deployment signing-secret reference
+ *  (present at all — any value, even an empty one, is refused). */
+export function hasDeploymentSecretRef(type: string, params: unknown): boolean {
+  return (
+    type === 'webhook' &&
+    params !== null &&
+    typeof params === 'object' &&
+    'signatureSecretRef' in params
+  );
+}
+
+function rejectDeploymentSecretRefs(
+  actions: ReadonlyArray<{ type: string; params?: unknown }>,
+  ctx: z.RefinementCtx,
+): void {
+  actions.forEach((action, index) => {
+    if (hasDeploymentSecretRef(action.type, action.params)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [index, 'params', 'signatureSecretRef'],
+        message: DEPLOYMENT_SECRET_REF_MESSAGE,
+      });
+    }
+  });
+}
 
 const WebhookActionSchema = z.strictObject({
   type: z.literal('webhook'),
@@ -653,7 +692,7 @@ export const CreateWorkflowSchema = z.strictObject({
   conditions: conditionTreeSchema().default([]),
   // DRAFT is "being built": empty action lists are legal at create time;
   // activation-time validation enforces semantic completeness instead.
-  actions: z.array(ActionConfigSchema).max(20),
+  actions: z.array(ActionConfigSchema).max(20).superRefine(rejectDeploymentSecretRefs),
 });
 export type CreateWorkflowInput = z.infer<typeof CreateWorkflowSchema>;
 
@@ -665,6 +704,6 @@ export const UpdateWorkflowSchema = z.strictObject({
   trigger: TriggerConfigSchema.optional(),
   conditions: conditionTreeSchema().optional(),
   // Same as create: empty action lists are legal while DRAFT.
-  actions: z.array(ActionConfigSchema).max(20).optional(),
+  actions: z.array(ActionConfigSchema).max(20).superRefine(rejectDeploymentSecretRefs).optional(),
 });
 export type UpdateWorkflowInput = z.infer<typeof UpdateWorkflowSchema>;

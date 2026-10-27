@@ -9,10 +9,12 @@ import {
   ActionConfigSchema,
   ConditionNodeSchema,
   CreateWorkflowSchema,
+  DEPLOYMENT_SECRET_REF_MESSAGE,
   IMPLEMENTED_TRIGGER_TYPES,
   TriggerConfigSchema,
   UpdateWorkflowSchema,
   WorkflowStatusSchema,
+  hasDeploymentSecretRef,
   type ActionConfig,
   type ConditionNode,
   type CreateWorkflowInput,
@@ -556,6 +558,11 @@ export async function activateWorkflow(auth: Authorization, id: string): Promise
   }
   if (!(IMPLEMENTED_TRIGGER_TYPES as readonly string[]).includes(workflow.trigger.type)) {
     throw new Error('INVALID_REQUEST: trigger type not yet supported');
+  }
+  // B3: a workflow stored with a deployment signing-secret reference stays
+  // inactive until it is edited (the edit path refuses the key too).
+  if (workflow.actions.some((action) => hasDeploymentSecretRef(action.type, action.params))) {
+    throw new Error(`INVALID_REQUEST: ${DEPLOYMENT_SECRET_REF_MESSAGE}`);
   }
   return setWorkflowStatus(auth, id, 'ACTIVE', 'workflow.activated');
 }
