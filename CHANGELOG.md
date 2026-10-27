@@ -7,11 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0082 (production still pending — see the
+Database migrations: 0063–0084 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
 
+- Organization provisioning by the platform, database layer (migration 0084, ADR-008). In one
+  transaction a platform administrator creates an organization from an available type (today
+  `generic_crm`; Real Estate and Education stay disabled) and its latest published template,
+  its Executive department and its first administrator with SUPER_ADMIN, plus a 72-hour setup
+  link for that administrator — who then creates their own login, never adopting an existing
+  one. Requests are idempotent by key. Platform administrators can re-issue the setup link
+  until it is used, and suspend or reactivate an organization with a reason: while suspended,
+  its members are refused and its background work waits. Archive and restore are deferred to
+  V1.1 (ADR-008). Every change writes one platform audit entry. Not yet reachable from the
+  application. Prepared rollback: `scripts/db/rollback/0084_platform_provisioning.down.sql`.
+- Platform administrator plane, database layer (migration 0083, ADR-008). A separate
+  authority from every organization: platform administrators with their own permission
+  catalogue, an append-only platform audit trail, and a new database login `app_platform`
+  that holds no table privilege anywhere and reaches the platform only through its functions.
+  The first administrator is created by a once-per-database operator bootstrap, independent of
+  the organization bootstrap — which it then closes, so every later organization is provisioned
+  by the platform. Setup creates the administrator's own login (never adopting an existing one);
+  a login is a platform administrator or a tenant person, never both. Administrators can invite
+  (least privilege) and revoke administrators (never themselves; revocation ends their
+  sessions) and grant only permissions they hold themselves. Every platform action needs an
+  administrator whose login has an enrolled second factor; the aal2 claim alone is not enough.
+  A break-glass operator recovery resets a lost factor and clears the whole old credential
+  (password, sessions, factors, reset links), and nothing created during the recovery window
+  survives it; the web password reset never reaches a platform login. The protected-role genesis
+  grant now names exactly the logins allowed to perform it (`app_admin`, `app_owner`,
+  `app_platform`). Not yet reachable from the application: the platform API, console and
+  organization provisioning follow. Requires `scripts/db/roles.sql` to create `app_platform`
+  before 0083 (runbook). Prepared rollback: `scripts/db/rollback/0083_platform_identity.down.sql`.
 - Sales Sheet import, stored half (migration 0081, BP-06). An uploaded CSV is previewed and
   recorded — file name, SHA-256, mapping, header and every row with its plan or errors, never
   the raw file — and, once the importer confirms that exact preview, committed by a background

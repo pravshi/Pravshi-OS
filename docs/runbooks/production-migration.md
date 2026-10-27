@@ -42,8 +42,8 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** The only down-migrations in this repo are the eight
-   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081 and 0082), each
+2. **Forward-fix only.** The only down-migrations in this repo are the ten
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083 and 0084), each
    run only with Nani's explicit approval as Failure doctrine (d) describes;
    none are invented at incident time. Every other failure is fixed by a new PR
    and a new or corrective migration, rehearsed again from Step 2.
@@ -69,7 +69,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 82 81 0082_least_privilege_cleanup
+      # expected at the current release: 84 83 0084_platform_provisioning
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -100,16 +100,25 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
       `DATABASE_URL_AUTH` set. 0074 only narrows the two administrator definers 0072 adds (the
       target must be visible to the administrator under `people.view`); it is safe under either
       app and is applied in the same run — never stop the chain between 0072 and 0074.
+- [ ] **The `app_platform` role exists on the target branch** (needed by 0083, ADR-008): the
+      same `scripts/db/roles.sql` run creates it; set its password in the Neon console.
+      Without the role, 0083 stops before changing anything and names this step. Its
+      `DATABASE_URL_PLATFORM` goes only where the platform console runs. **Caution:** a
+      re-run of `roles.sql` after migrations re-grants `app_user` SELECT/INSERT/UPDATE on
+      every public table (see the note in the file), which undoes table-level revokes made by
+      migrations; on a database already migrated, create the role with that file's
+      `create role app_platform login nobypassrls` block alone, then re-run the attribute
+      assertion — or run the whole file and re-apply the documented revokes.
 - [ ] **Calendar gate:** any step that touches Neon (Steps 0–4) consumes the
       Neon allowance. Before **2026-11-01** these steps are written but not
       executed, unless Nani directs otherwise.
 
 ## The chain as of writing
 
-The repo journal holds 82 entries (idx 0–81). Per project records, production
+The repo journal holds 84 entries (idx 0–83). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-37 migrations **idx 45–81 (0045–0082)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4581). Step 0 verifies this;
+39 migrations **idx 45–83 (0045–0084)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4583). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the journal's **order is its
@@ -119,7 +128,7 @@ ordering the history by `created_at` is not journal order, and drizzle-kit's
 rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
 skip pending entries from a database stopped inside those ranges. The runner
 does not use that rule: it verifies the history as an exact prefix and applies
-the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–81 —
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–83 —
 no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
@@ -226,8 +235,8 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 82, last applied created_at: 1791111413392
-   verified history: 45 of 82 entries match the repository (idx 0-44, through 0044_workflow_engine)
+   journal entries: 84, last applied created_at: 1791111413392
+   verified history: 45 of 84 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
    applying idx 76 0077_deal_history_and_org_identity (… statements)
@@ -236,18 +245,22 @@ Production is **not touched** in this step.
    applying idx 79 0080_organization_types (… statements)
    applying idx 80 0081_crm_imports (… statements)
    applying idx 81 0082_least_privilege_cleanup (… statements)
-   done: applied 37, total 82
+   applying idx 82 0083_platform_identity (… statements)
+   applying idx 83 0084_platform_provisioning (… statements)
+   done: applied 39, total 84
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `82`, max_created_at `1791597728057`, and the
-     hash list in `id` order equal to the file-byte hashes of idx 0…81.
+     full repo state: count `84`, max_created_at `1791599728057`, and the
+     hash list in `id` order equal to the file-byte hashes of idx 0…83.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity), deal-stage history and organization identity (CRM pipelines, organizations)) run green against the branch, or in CI's equivalent
-     from-empty shape. Note what this rehearsal proves that CI cannot: the
+     from-empty shape. The platform suite (`tests/serial/platform-identity.test.ts`, 0083/0084)
+     is not one of them: the platform bootstrap is permanent by design, so that suite runs only
+     against an empty database of its own (CI's `pravshi_platform_test`), never the snapshot. Note what this rehearsal proves that CI cannot: the
      **upgrade path** — the chain applied over lived-in 0044 data, not over
      an empty database.
    - No unexplained warnings in the runner output.
@@ -308,8 +321,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `82`, max_created_at `1791597728057`, hash list in `id` order equal to
-   the file-byte hashes of idx 0…81 (same comparison method as Step 0).
+   count `84`, max_created_at `1791599728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…83 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -399,7 +412,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the eight prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081 and 0082),
+the ten prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083 and 0084),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 
@@ -457,6 +470,15 @@ invented at incident time.
   PUBLIC EXECUTE on 0036's two link-immutability trigger functions and app_user DELETE on
   deliveries, inbound events and sync checkpoints. It re-opens both leftovers (neither has a
   reachable effect) and needs Nani's explicit approval and a run-record entry.
+  `scripts/db/rollback/0084_platform_provisioning.down.sql` restores the 0083 state — no
+  provisioning, no suspend/reactivate, no organization lifecycle columns. It refuses unless the
+  database is at 0084 and while any organization was provisioned or suspended through the
+  platform. `scripts/db/rollback/0083_platform_identity.down.sql` restores the 0082 state — no
+  platform schema, and 0015's, 0008's and 0024's functions verbatim. It refuses unless the
+  database is at 0083 (roll 0084 back first) and while any platform administrator or platform
+  audit event exists, because dropping the schema would destroy the platform audit trail. Both
+  lock their tables before checking, and each needs Nani's explicit approval and a run-record
+  entry.
 
 ## Abort criteria (any step)
 
@@ -466,7 +488,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–81)
+## Appendix A — The pending chain (idx 45–83)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -528,13 +550,15 @@ re-apply.
 | 79  | `0080_organization_types` | 1791595728057 | `b7f9a5738d5073509ae5d266ab8ffaeb5b1983571adbfd5727afbdae2ffe6d91` |
 | 80  | `0081_crm_imports` | 1791596728057 | `16572ad4f453af52a8ac8ef4a9824e99a9fed612d43ec41f7590a0d774160a2f` |
 | 81  | `0082_least_privilege_cleanup` | 1791597728057 | `6d1199733a64e5032ad77327bfa89986282f5c232db764c11422211d51087d8d` |
+| 82  | `0083_platform_identity` | 1791598728057 | `5d9fee181574291c277df09f6d35546119940e69395903720ba62f4ee32e263b` |
+| 83  | `0084_platform_provisioning` | 1791599728057 | `8566ea931aad2b1522c9c18ed24e60d8cd6485684cc77290e183a7befbc66f9e` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `82`,
-max_created_at `1791597728057`.
+Final expected state after a complete run: count `84`,
+max_created_at `1791599728057`.
 
 ## Appendix B — Run record template
 
@@ -565,7 +589,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 82 / max 1791597728057 / hashes): yes/no
+  - journal == repo (count 84 / max 1791599728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint
