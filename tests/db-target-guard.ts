@@ -32,9 +32,9 @@ import { parse } from 'dotenv';
  * a user or a password.
  */
 export const PROTECTED_ENDPOINT_FINGERPRINTS: Readonly<Record<string, string>> = {
-  // Pravshi-OS-New (sparkling-water-53449782), branch `production` — the intended primary.
+  // Pravshi-OS-New, branch `production` — the intended primary.
   '8fe576111c5ec162': 'Pravshi-OS-New production branch',
-  // floral-base-77155861, branch `production` — the recorded production project (runbook).
+  // floral-base, branch `production` — the recorded production project (runbook).
   a5a05c0273552f5e: 'floral-base production branch',
 };
 
