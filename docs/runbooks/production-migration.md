@@ -556,7 +556,7 @@ re-apply.
 | 81  | `0082_least_privilege_cleanup` | 1791597728057 | `6d1199733a64e5032ad77327bfa89986282f5c232db764c11422211d51087d8d` |
 | 82  | `0083_platform_identity` | 1791598728057 | `9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18` |
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
-| 84  | `0085_login_email_case` | 1791600728057 | `aac001479cc932262bcf2aa94801848ee49550000e623240d5a694c1077286cd` |
+| 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

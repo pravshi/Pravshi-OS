@@ -78,20 +78,36 @@ describe.skipIf(!DB_READY)('login address case (0085, live DB)', () => {
   });
 
   it('the CHECK, the trigger and the function are in place; no stored address has upper case', async () => {
-    const res = await owner.query<{
-      con: boolean;
-      trg: boolean;
-      upper: number;
-      public_exec: boolean;
-    }>(
-      `select exists (select 1 from pg_constraint where conname = 'auth_users_email_lowercase') con,
+    const res = await owner.query<{ con: boolean; trg: boolean; upper: number }>(
+      `select exists (select 1 from pg_constraint where conname = 'auth_users_email_lowercase'
+                        and convalidated) con,
               exists (select 1 from pg_trigger where tgname = 'auth_users_normalize_email'
                         and tgrelid = 'auth.auth_users'::regclass and tgenabled = 'O') trg,
-              (select count(*)::int from auth.auth_users where email::text <> lower(email::text)) upper,
-              has_function_privilege('app_user', 'auth.normalize_login_email()', 'EXECUTE')
-                or has_function_privilege('app_auth', 'auth.normalize_login_email()', 'EXECUTE') public_exec`,
+              (select count(*)::int from auth.auth_users where email::text <> lower(email::text)) upper`,
     );
-    expect(res.rows[0]).toEqual({ con: true, trg: true, upper: 0, public_exec: false });
+    expect(res.rows[0]).toEqual({ con: true, trg: true, upper: 0 });
+    // Who may execute the normalising function, from its ACL: its owner alone (PUBLIC included).
+    const holders = await owner.query<{ who: string }>(
+      `select coalesce(r.rolname, 'PUBLIC') who
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       left join pg_roles r on r.oid = a.grantee
+       where p.oid = 'auth.normalize_login_email()'::regprocedure and a.privilege_type = 'EXECUTE'`,
+    );
+    expect(holders.rows.map((r) => r.who)).toEqual(['app_owner']);
+  });
+
+  it('the CHECK refuses a mixed-case address even with the trigger off', async () => {
+    await rehearse(async (q) => {
+      await q('alter table auth.auth_users disable trigger auth_users_normalize_email');
+      expect(
+        await stateOf(
+          q(`insert into auth.auth_users (name, email, email_verified) values ('X', $1, false)`, [
+            `Bypass.${RUN}@Example.com`,
+          ]),
+        ),
+      ).toBe('23514');
+    });
   });
 
   it('the organization lookup before sign-in ignores case', async () => {
