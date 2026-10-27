@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0085 (production still pending — see the
+Database migrations: 0063–0086 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
 
+- Platform administrator console (ADR-008, migration 0086). `/platform` for platform
+  administrators only: the organizations (metadata only), provisioning with type selection and
+  a one-time setup link for the first administrator, re-issuing that link, suspend and
+  reactivate with a reason, platform administrators (invite with no more than the inviter's
+  own permissions, revoke — which ends their sessions), and the platform audit trail. Every
+  action goes through `/api/platform/*` on its own database login (`DATABASE_URL_PLATFORM`,
+  `app_platform`, no fallback): a tenant user of any role, SUPER_ADMIN included, gets 404; an
+  administrator without an enrolled authenticator can only enrol one; sensitive actions need a
+  sign-in from the last 10 minutes; platform sessions end after 30 idle minutes or 12 hours;
+  sensitive actions are rate limited; refusals are audited. The setup links
+  `/platform/setup` and `/setup/organization` set a first password under the full password
+  policy. The operator CLI `scripts/bootstrap/platform.mjs` creates the first platform
+  administrator, re-issues a pending administrator's link, and performs audited break-glass
+  recovery that invalidates the old password and second factor at once. Migration 0086 adds
+  `platform.list_admins()`. Prepared rollback: `scripts/db/rollback/0086_platform_console.down.sql`.
 - Organization provisioning by the platform, database layer (migration 0084, ADR-008). In one
   transaction a platform administrator creates an organization from an available type (today
   `generic_crm`; Real Estate and Education stay disabled) and its latest published template,
@@ -20,8 +35,8 @@ Database migrations: 0063–0085 (production still pending — see the
   one. Requests are idempotent by key. Platform administrators can re-issue the setup link
   until it is used, and suspend or reactivate an organization with a reason: while suspended,
   its members are refused and its background work waits. Archive and restore are deferred to
-  V1.1 (ADR-008). Every change writes one platform audit entry. Not yet reachable from the
-  application. Prepared rollback: `scripts/db/rollback/0084_platform_provisioning.down.sql`.
+  V1.1 (ADR-008). Every change writes one platform audit entry. Reachable from the platform
+  console (above). Prepared rollback: `scripts/db/rollback/0084_platform_provisioning.down.sql`.
 - Platform administrator plane, database layer (migration 0083, ADR-008). A separate
   authority from every organization: platform administrators with their own permission
   catalogue, an append-only platform audit trail, and a new database login `app_platform`

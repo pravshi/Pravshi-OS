@@ -211,7 +211,8 @@ jobs:
       # tests/serial/platform-identity.test.ts: the platform bootstrap is permanent by design and
       # closes the organization bootstrap in its database, so that suite runs against an empty
       # database of its own, migrated from zero by the real runner. Gone with the job.
-      - name: Provision the platform test database
+      # tests/serial/platform-console.test.ts bootstraps the platform too, so it gets a third.
+      - name: Provision the platform test databases
         env:
           PGHOST: localhost
           PGPORT: '5432'
@@ -222,6 +223,9 @@ jobs:
           psql -v ON_ERROR_STOP=1 -q -c "create database pravshi_platform_test"
           psql -v ON_ERROR_STOP=1 -q -d pravshi_platform_test -f scripts/db/roles.sql
           echo "DATABASE_URL_PLATFORM_TEST=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_platform_test" >> "$GITHUB_ENV"
+          psql -v ON_ERROR_STOP=1 -q -c "create database pravshi_console_test"
+          psql -v ON_ERROR_STOP=1 -q -d pravshi_console_test -f scripts/db/roles.sql
+          echo "DATABASE_URL_CONSOLE_TEST=postgresql://app_owner:${CI_OWNER_PW}@ci.local/pravshi_console_test" >> "$GITHUB_ENV"
 
       # Proves the plumbing before anything depends on it: through the proxy, each URL
       # must log in as its own role, and the runtime role must be unable to bypass RLS.

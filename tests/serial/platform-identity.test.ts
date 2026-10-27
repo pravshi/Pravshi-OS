@@ -206,6 +206,7 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
       'app_auth platform.setup_token_is_valid',
       'app_platform platform.admin_for_login',
       'app_platform platform.invite_admin',
+      'app_platform platform.list_admins',
       'app_platform platform.list_audit_events',
       'app_platform platform.list_organization_types',
       'app_platform platform.list_organizations',

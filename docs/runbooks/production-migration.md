@@ -42,8 +42,8 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** The only down-migrations in this repo are the eleven
-   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084 and 0085), each
+2. **Forward-fix only.** The only down-migrations in this repo are the twelve
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085 and 0086), each
    run only with Nani's explicit approval as Failure doctrine (d) describes;
    none are invented at incident time. Every other failure is fixed by a new PR
    and a new or corrective migration, rehearsed again from Step 2.
@@ -69,7 +69,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 85 84 0085_login_email_case
+      # expected at the current release: 86 85 0086_platform_console
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -115,10 +115,10 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
 ## The chain as of writing
 
-The repo journal holds 85 entries (idx 0–84). Per project records, production
+The repo journal holds 86 entries (idx 0–85). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-40 migrations **idx 45–84 (0045–0085)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4584). Step 0 verifies this;
+41 migrations **idx 45–85 (0045–0086)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4585). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the journal's **order is its
@@ -128,7 +128,7 @@ ordering the history by `created_at` is not journal order, and drizzle-kit's
 rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
 skip pending entries from a database stopped inside those ranges. The runner
 does not use that rule: it verifies the history as an exact prefix and applies
-the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–84 —
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–85 —
 no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
@@ -235,8 +235,8 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 85, last applied created_at: 1791111413392
-   verified history: 45 of 85 entries match the repository (idx 0-44, through 0044_workflow_engine)
+   journal entries: 86, last applied created_at: 1791111413392
+   verified history: 45 of 86 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
    applying idx 76 0077_deal_history_and_org_identity (… statements)
@@ -248,14 +248,15 @@ Production is **not touched** in this step.
    applying idx 82 0083_platform_identity (… statements)
    applying idx 83 0084_platform_provisioning (… statements)
    applying idx 84 0085_login_email_case (… statements)
-   done: applied 40, total 85
+   applying idx 85 0086_platform_console (… statements)
+   done: applied 41, total 86
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `85`, max_created_at `1791600728057`, and the
-     hash list in `id` order equal to the file-byte hashes of idx 0…84.
+     full repo state: count `86`, max_created_at `1791601728057`, and the
+     hash list in `id` order equal to the file-byte hashes of idx 0…85.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity), deal-stage history and organization identity (CRM pipelines, organizations)) run green against the branch, or in CI's equivalent
@@ -322,8 +323,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `85`, max_created_at `1791600728057`, hash list in `id` order equal to
-   the file-byte hashes of idx 0…84 (same comparison method as Step 0).
+   count `86`, max_created_at `1791601728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…85 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -413,7 +414,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the eleven prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084 and 0085),
+the twelve prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085 and 0086),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 
@@ -483,6 +484,9 @@ invented at incident time.
   and CHECK and restores 0020's `resolve_login_org()`; it re-opens LOCK-1 for addresses written
   in mixed case afterwards (addresses already lower-cased stay so), refuses unless the database
   is at 0085, and needs Nani's explicit approval and a run-record entry.
+  `scripts/db/rollback/0086_platform_console.down.sql` drops the console's administrator list
+  function; it re-opens nothing, refuses unless the database is at 0086, and needs Nani's
+  explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -492,7 +496,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–84)
+## Appendix A — The pending chain (idx 45–85)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -557,13 +561,14 @@ re-apply.
 | 82  | `0083_platform_identity` | 1791598728057 | `9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18` |
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
+| 85  | `0086_platform_console` | 1791601728057 | `348f296899b928189d0f62c0f3a7c32746a97f9cb797eb501fb7f92c3bb233ea` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `85`,
-max_created_at `1791600728057`.
+Final expected state after a complete run: count `86`,
+max_created_at `1791601728057`.
 
 ## Appendix B — Run record template
 
@@ -594,7 +599,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 85 / max 1791600728057 / hashes): yes/no
+  - journal == repo (count 86 / max 1791601728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint

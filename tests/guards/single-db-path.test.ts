@@ -82,6 +82,34 @@ describe('there is exactly one path to Postgres', () => {
     expect(src).toMatch(/verify: verifyAuthLogin/);
   });
 
+  // ── the platform plane's login (app_platform, migrations 0083-0086, ADR-008) ──────────────
+
+  it('only the platform module (src/lib/platform) uses the app_platform pool', () => {
+    // platform-pool.ts connects as app_platform: the login that provisions, suspends and
+    // reactivates organizations. Only the platform module, behind its gate, may reach it.
+    const hits = grep(`-lE "db/platform-pool'" -- src ":!src/lib/platform/*" ":!src/lib/db/*"`);
+    expect(hits, `app_platform pool imported outside src/lib/platform, in:\n${hits}`).toBe('');
+  });
+
+  it('the app_platform pool has no fallback and proves its login', () => {
+    const src = readFileSync(join(process.cwd(), 'src/lib/db/platform-pool.ts'), 'utf8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n');
+    expect(src).toMatch(/connectionString: env\.DATABASE_URL_PLATFORM,/);
+    expect(src).not.toMatch(/env\.DATABASE_URL(_AUTH)?\b(?!_PLATFORM)/);
+    for (const line of src.split('\n').filter((l) => l.includes('DATABASE_URL'))) {
+      expect(line).not.toMatch(/\?\?|\|\|/);
+    }
+    expect(src).toMatch(
+      /if \(!env\.DATABASE_URL_PLATFORM\) \{\s*throw new PlatformUnavailableError/,
+    );
+    expect(src).toMatch(/verify: verifyPlatformLogin/);
+    // The administrator is set transaction-locally, never for the session.
+    expect(src).toMatch(/set_config\('app\.platform_admin_id', [^)]+, true\)/);
+    expect(src).toMatch(/set_config\('app\.platform_aal', [^)]+, true\)/);
+  });
+
   it('the worker plane imports nothing from the authentication plane directly', () => {
     // The worker host must not hold DATABASE_URL_AUTH (runner.ts refuses it); no worker-plane
     // file may import the auth module, the auth client or the auth pool. This is a DIRECT-import

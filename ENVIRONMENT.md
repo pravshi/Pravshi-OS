@@ -5,14 +5,15 @@
 
 ## Credential separation — the most important rule in this file
 
-| Variable                 | Role         | Endpoint | Permitted to live in                                             |
-| ------------------------ | ------------ | -------- | ---------------------------------------------------------------- |
-| `DATABASE_URL`           | `app_user`   | pooled   | Vercel (all envs, when it exists) + local                        |
-| `DATABASE_URL_MIGRATE`   | `app_owner`  | direct   | GitHub Actions and local machines ONLY                           |
-| `DATABASE_URL_TEST`      | `app_user`   | pooled   | GitHub Actions and local machines ONLY                           |
-| `DATABASE_URL_WORKER`    | `app_worker` | pooled   | The worker host (Railway) + local — NEVER Vercel                 |
-| `DATABASE_URL_AUTH`      | `app_auth`   | pooled   | Vercel (all envs) + local — NEVER the worker host                |
-| `DATABASE_URL_BOOTSTRAP` | `app_admin`  | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions |
+| Variable                 | Role           | Endpoint | Permitted to live in                                                 |
+| ------------------------ | -------------- | -------- | -------------------------------------------------------------------- |
+| `DATABASE_URL`           | `app_user`     | pooled   | Vercel (all envs, when it exists) + local                            |
+| `DATABASE_URL_MIGRATE`   | `app_owner`    | direct   | GitHub Actions and local machines ONLY                               |
+| `DATABASE_URL_TEST`      | `app_user`     | pooled   | GitHub Actions and local machines ONLY                               |
+| `DATABASE_URL_WORKER`    | `app_worker`   | pooled   | The worker host (Railway) + local — NEVER Vercel                     |
+| `DATABASE_URL_AUTH`      | `app_auth`     | pooled   | Vercel (all envs) + local — NEVER the worker host                    |
+| `DATABASE_URL_PLATFORM`  | `app_platform` | pooled   | Only where the platform console runs + local — NEVER the worker host |
+| `DATABASE_URL_BOOTSTRAP` | `app_admin`    | direct   | The operator's machine ONLY — never Vercel, never GitHub Actions     |
 
 **`DATABASE_URL_BOOTSTRAP` must never leave the operator's machine.** It connects as
 `app_admin`, whose one capability is creating the first SUPER_ADMIN — once per database, see
@@ -38,6 +39,15 @@ without it and refuses it when it equals `DATABASE_URL`, and the pool refuses an
 did not authenticate as `app_auth`. The worker never authenticates anyone and refuses to start
 when it is present. CI creates a per-run `app_auth` password, exactly as for the other roles.
 
+**`DATABASE_URL_PLATFORM` belongs only where the platform console runs.** It connects as
+`app_platform` (migrations 0083-0086, ADR-008), the login that provisions, suspends and
+reactivates organizations. It holds no table privilege: every operation is a function that
+re-checks the acting platform administrator, their second factor and their permission. There is
+no fallback — without it `/platform` and `/api/platform/*` answer "unavailable" — and
+`src/env.ts` refuses it when it equals `DATABASE_URL` or `DATABASE_URL_AUTH`; the pool refuses
+any connection that did not authenticate as `app_platform`. Only `src/lib/platform` may use it
+(`tests/guards/single-db-path.test.ts`). The worker must not hold it.
+
 **`DATABASE_URL_MIGRATE` must never be added to Vercel.** It uses `app_owner`, which owns the
 schema and is precisely what RLS does not constrain. A deployed application holding that
 credential could, through one careless import, read every row in the database with every
@@ -59,14 +69,16 @@ absolute everywhere else. Both halves are pinned by tests in `tests/env.test.ts`
 
 ### Database
 
-| Variable                 | Required  | Notes                                                                   |
-| ------------------------ | --------- | ----------------------------------------------------------------------- |
-| `DATABASE_URL`           | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL   |
-| `DATABASE_URL_MIGRATE`   | tooling   | Must **not** contain `-pooler`; migrations need one real session        |
-| `DATABASE_URL_TEST`      | tooling   | Integration tests. Point at your own branch, never `production`         |
-| `DATABASE_URL_WORKER`    | worker    | `app_worker`, pooled. Required by `pnpm worker`; never on Vercel        |
-| `DATABASE_URL_AUTH`      | yes (web) | `app_auth`, pooled. Required on Vercel and locally; never on the worker |
-| `DATABASE_URL_BOOTSTRAP` | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs`  |
+| Variable                    | Required  | Notes                                                                                                       |
+| --------------------------- | --------- | ----------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`              | yes       | Must contain `-pooler` in the host; `src/env.ts` rejects a direct URL                                       |
+| `DATABASE_URL_MIGRATE`      | tooling   | Must **not** contain `-pooler`; migrations need one real session                                            |
+| `DATABASE_URL_TEST`         | tooling   | Integration tests. Point at your own branch, never `production`                                             |
+| `DATABASE_URL_WORKER`       | worker    | `app_worker`, pooled. Required by `pnpm worker`; never on Vercel                                            |
+| `DATABASE_URL_AUTH`         | yes (web) | `app_auth`, pooled. Required on Vercel and locally; never on the worker                                     |
+| `DATABASE_URL_PLATFORM`     | console   | `app_platform`, pooled. Without it the platform console answers 503                                         |
+| `DATABASE_URL_BOOTSTRAP`    | bootstrap | `app_admin`, direct endpoint. Read only by `scripts/bootstrap/run.mjs` and `scripts/bootstrap/platform.mjs` |
+| `DATABASE_URL_CONSOLE_TEST` | tooling   | Owner URL of an EMPTY database for `tests/serial/platform-console.test.ts` (CI provisions it)               |
 
 ### First-run bootstrap — operator machine only
 
