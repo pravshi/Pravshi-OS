@@ -178,7 +178,8 @@ describe('rate limiting: Phase 11 Wave D surfaces (F-11-08, F-11-09)', () => {
   it('inbound ingress is throttled per IP (300/min) and per endpoint digest (60/min)', () => {
     expect(INBOUND).toMatch(/RATE_LIMIT_PER_IP_PER_MINUTE = 300/);
     expect(INBOUND).toMatch(/RATE_LIMIT_PER_ENDPOINT_PER_MINUTE = 60/);
-    expect(INBOUND).toMatch(/`inbound:ip:\$\{clientIp\(req\) \?\? 'unknown'\}`/);
+    // Shared key builder (Phase 3, F-SEC-B1-1): same address handling as every per-IP bucket.
+    expect(INBOUND).toMatch(/ipRateLimitKey\('inbound:ip', clientIp\(req\)\)/);
     expect(INBOUND).toMatch(/`inbound:ep:\$\{hashEndpointKey\(endpointKey\)\}`/);
     expect(INBOUND).toMatch(/RATE_LIMIT_PER_IP_PER_MINUTE,\s*RATE_LIMIT_WINDOW_SECONDS/);
     expect(INBOUND).toMatch(/RATE_LIMIT_PER_ENDPOINT_PER_MINUTE,\s*RATE_LIMIT_WINDOW_SECONDS/);

@@ -9,6 +9,7 @@ import { isCommonPassword } from './common-passwords';
 import { buildResetEmailContent } from './password-reset-email';
 import { recordLoginEvent, resolveLoginOrg } from './login-events';
 import { clearLoginLockout } from './login-lockout';
+import { ipRateLimitKey } from './rate-limit';
 import { revokeSessionsFor } from './session';
 
 /**
@@ -135,7 +136,7 @@ export async function requestPasswordReset(
   }
   const cleanEmail = parsed.data;
 
-  if (!(await underRateLimit(`pwreset:req:${ip ?? 'unknown'}`))) {
+  if (!(await underRateLimit(ipRateLimitKey('pwreset:req', ip)))) {
     throw new PasswordResetError(
       'RATE_LIMITED',
       null,
@@ -237,7 +238,7 @@ export async function resetPassword(
   password: string,
   ip: string | null,
 ): Promise<{ ok: true }> {
-  if (!(await underRateLimit(`pwreset:complete:${ip ?? 'unknown'}`))) {
+  if (!(await underRateLimit(ipRateLimitKey('pwreset:complete', ip)))) {
     throw new PasswordResetError(
       'RATE_LIMITED',
       null,

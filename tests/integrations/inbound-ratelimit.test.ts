@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/auth/rate-limit', () => ({
+// Only the database call is stubbed; the key builder is the real one, so the keys
+// asserted below are the ones production builds.
+vi.mock('@/lib/auth/rate-limit', async (importActual) => ({
+  ...(await importActual<typeof import('@/lib/auth/rate-limit')>()),
   checkIpRateLimit: vi.fn(),
 }));
 
@@ -10,7 +13,7 @@ vi.mock('@/lib/integrations/inbound', async (importActual) => {
 });
 
 import { POST } from '@/app/api/integrations/inbound/[endpointKey]/route';
-import { checkIpRateLimit } from '@/lib/auth/rate-limit';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 import { hashEndpointKey, receiveInbound, rejectionResult } from '@/lib/integrations/inbound';
 
 /**
@@ -69,6 +72,17 @@ describe('inbound route rate limiting (F-11-08)', () => {
     expect(await res.json()).toEqual(rejectionResult().body);
     expect(limit).toHaveBeenCalledTimes(2);
     expect(receive).not.toHaveBeenCalled();
+  });
+
+  it('the per-IP key is the shared ipRateLimitKey bucket for any address', async () => {
+    // F-SEC-B1-1: one key builder for every per-IP bucket, so the address handling
+    // in ipRateLimitKey (validation, IPv6 grouping) applies here too.
+    limit.mockResolvedValue(true);
+    for (const ip of ['2001:db8:1:2::1', '2001:db8:1:2::beef', '203.0.113.5']) {
+      limit.mockClear();
+      await post(ip);
+      expect(limit.mock.calls[0]?.[0]).toBe(ipRateLimitKey('inbound:ip', ip));
+    }
   });
 
   it('a request with no forwarding header lands in the unknown-IP bucket', async () => {

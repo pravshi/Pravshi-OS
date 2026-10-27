@@ -1,5 +1,5 @@
 import { clientIp } from '@/lib/auth/login-events';
-import { checkIpRateLimit } from '@/lib/auth/rate-limit';
+import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 import { hashEndpointKey, receiveInbound, rejectionResult } from '@/lib/integrations/inbound';
 import { noStoreHeaders } from '@/lib/integrations/http';
 
@@ -62,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ endpoin
     // and a refused request consumes no second bucket.
     if (
       !(await checkIpRateLimit(
-        `inbound:ip:${clientIp(req) ?? 'unknown'}`,
+        ipRateLimitKey('inbound:ip', clientIp(req)),
         RATE_LIMIT_PER_IP_PER_MINUTE,
         RATE_LIMIT_WINDOW_SECONDS,
       ))

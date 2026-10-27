@@ -52,7 +52,9 @@ describe('reset token handling: the plaintext never reaches the database', () =>
 
 describe('rate limiting', () => {
   it('request path checks pwreset:req:{ip} at 5 per 60s via check_rate_limit', () => {
-    expect(SERVICE).toMatch(/pwreset:req:/);
+    // Built by the shared key builder (Phase 3, F-SEC-B1-1), so the bucket gets the
+    // same address handling as every other per-IP bucket.
+    expect(SERVICE).toMatch(/underRateLimit\(ipRateLimitKey\('pwreset:req', ip\)\)/);
     expect(SERVICE).toMatch(
       /authz\.check_rate_limit\(\$\{key\}, \$\{RATE_LIMIT_MAX\}, \$\{RATE_LIMIT_WINDOW_SECONDS\}\)/,
     );
@@ -60,8 +62,17 @@ describe('rate limiting', () => {
     expect(SERVICE).toMatch(/RATE_LIMIT_WINDOW_SECONDS = 60/);
   });
 
+  it('an admin-issued reset shares the self-service request bucket, built the same way', () => {
+    // Two paths, one bucket: both keys must come from the same builder with the same
+    // namespace, or address normalisation in ipRateLimitKey would split the bucket.
+    const ADMIN = readFileSync(root('src/lib/auth/admin-credentials.ts'), 'utf8');
+    expect(ADMIN).toMatch(/ipRateLimitKey\('pwreset:req', meta\.ip\)/);
+    expect(ADMIN).not.toMatch(/`pwreset:req:\$\{/);
+    expect(SERVICE).not.toMatch(/`pwreset:(req|complete):\$\{/);
+  });
+
   it('complete path checks pwreset:complete:{ip} at the same allowance', () => {
-    expect(SERVICE).toMatch(/pwreset:complete:/);
+    expect(SERVICE).toMatch(/underRateLimit\(ipRateLimitKey\('pwreset:complete', ip\)\)/);
   });
 
   it('rate-limited requests raise RATE_LIMITED, which the reset route maps to 429', () => {
