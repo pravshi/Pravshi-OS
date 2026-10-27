@@ -29,15 +29,21 @@ export default defineConfig({
     // A third group runs FIRST, alone (tests/serial): suites that must create and drop
     // audit_logs partitions or run the once-per-database bootstrap, which no other suite may
     // see happen — they assert exact partition windows and an unbootstrapped database. These
-    // suites leave the database as they found it. (groupOrder indexes an array in vitest, so it
-    // must not be negative: the existing groups moved up by one, in the same relative order.)
+    // suites leave the database as they found it, and they run one file at a time
+    // (fileParallelism: false): they disturb each other too — the partition-maintenance probes
+    // hold a maintenance backend waiting, which the lock-order suite would take for its own.
+    //
+    // groupOrder indexes an array in vitest, so it must not be negative; and it must not be 0
+    // for the serial project: vitest 5 moves a project with groupOrder 0 and a single worker
+    // into a separate sequential group that runs LAST (groupSpecs). So the groups are 1, 2, 3.
     projects: [
       {
         extends: true,
         test: {
           name: 'serial',
           include: ['tests/serial/**/*.test.ts'],
-          sequence: { groupOrder: 0 },
+          fileParallelism: false,
+          sequence: { groupOrder: 1 },
         },
       },
       {
@@ -46,7 +52,7 @@ export default defineConfig({
           name: 'default',
           include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
           exclude: ['tests/perf/**', 'tests/serial/**', '**/node_modules/**'],
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 2 },
         },
       },
       {
@@ -54,7 +60,7 @@ export default defineConfig({
         test: {
           name: 'perf',
           include: ['tests/perf/**/*.test.ts'],
-          sequence: { groupOrder: 2 },
+          sequence: { groupOrder: 3 },
         },
       },
     ],

@@ -467,68 +467,68 @@ describe('reapStaleJobs', () => {
 describe('runWorker adaptive idle poll', () => {
   const gapsBetween = (stamps: number[]): number[] => stamps.slice(1).map((t, i) => t - stamps[i]!);
 
-  /** Run a worker whose claims are scripted by `claim`, recording claim times. */
+  /**
+   * Run a worker whose claims are scripted by `claim`, recording the time of every claim.
+   *
+   * FAKE TIMERS. The backoff under test is a schedule — the worker asks its latch to sleep
+   * pollIntervalMs, then twice that, and so on up to pollMaxIdleMs — and the interval itself is
+   * deterministic. These tests used to measure real elapsed time between claims against tolerances
+   * of 8–50 ms; on a loaded machine (the whole suite runs ~30 test processes at once) the real
+   * timers drift further than that, in both directions, and they failed intermittently while the
+   * schedule was correct (reproduced on unmodified main: 0 of 6 runs failed alone, 1 of 6 with
+   * the CPU oversubscribed twice). With the clock under the test's control the claim times ARE the
+   * schedule, so the assertions are exact — a stricter check, not a looser one.
+   */
   async function observeClaims(
     config: Partial<WorkerConfig>,
     observeMs: number,
     claim: () => Promise<Job | null>,
     stamps: number[],
   ): Promise<void> {
-    vi.mocked(claimJob).mockImplementation(async () => {
-      stamps.push(Date.now());
-      return claim();
-    });
-    const runPromise = runWorker({
-      workerId: 'w-idle-poll',
-      reapIntervalMs: 0,
-      retrySweepIntervalMs: 0,
-      ...config,
-    });
-    await sleep(observeMs);
-    process.emit('SIGINT');
-    await runPromise;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      vi.mocked(claimJob).mockImplementation(async () => {
+        stamps.push(Date.now());
+        return claim();
+      });
+      const runPromise = runWorker({
+        workerId: 'w-idle-poll',
+        reapIntervalMs: 0,
+        retrySweepIntervalMs: 0,
+        ...config,
+      });
+      await vi.advanceTimersByTimeAsync(observeMs);
+      process.emit('SIGINT');
+      await runPromise;
+    } finally {
+      vi.useRealTimers();
+    }
   }
 
   it('backs off geometrically from pollIntervalMs to the pollMaxIdleMs ceiling', async () => {
     registerHandler('email', async () => {});
     const stamps: number[] = [];
-    // Sleeps: 25, 50, 100, 200, 200, … — ~7 claims in the window, where
-    // fixed 25 ms polling would claim ~38 times.
+    // Sleeps 25, 50, 100, 200, 200, 200 …: claims at 0, 25, 75, 175, 375, 575, 775 within 950 ms,
+    // where fixed 25 ms polling would claim 39 times.
     await observeClaims({ pollIntervalMs: 25, pollMaxIdleMs: 200 }, 950, async () => null, stamps);
 
-    const gaps = gapsBetween(stamps);
-    expect(gaps.length).toBeGreaterThanOrEqual(5);
-    expect(stamps.length).toBeLessThanOrEqual(10);
-    // Starts at the base interval, then doubles (within timer tolerance).
-    expect(gaps[0]).toBeGreaterThanOrEqual(15);
-    expect(gaps[0]).toBeLessThanOrEqual(80);
-    expect(gaps[1]).toBeGreaterThanOrEqual(gaps[0]! + 8);
-    expect(gaps[2]).toBeGreaterThanOrEqual(gaps[1]! + 20);
-    // Reaches the ceiling and never sleeps past it.
-    expect(gaps[3]).toBeGreaterThanOrEqual(140);
-    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(320);
-    expect(gaps[gaps.length - 1]).toBeGreaterThanOrEqual(150);
+    expect(gapsBetween(stamps)).toEqual([25, 50, 100, 200, 200, 200]);
     expect(startJob).not.toHaveBeenCalled();
   });
 
   it('holds the ceiling over a long idle (no drift back, no overshoot)', async () => {
     registerHandler('email', async () => {});
     const stamps: number[] = [];
-    // Sleeps: 20, 40, 60, 60, 60, … — ~22 claims in the window, where
-    // fixed 20 ms polling would claim ~60 times.
+    // Sleeps 20, 40, 60, 60, 60 …, where fixed 20 ms polling would claim 61 times.
     await observeClaims({ pollIntervalMs: 20, pollMaxIdleMs: 60 }, 1200, async () => null, stamps);
 
     const gaps = gapsBetween(stamps);
-    expect(stamps.length).toBeLessThanOrEqual(30);
-    expect(gaps.length).toBeGreaterThanOrEqual(12);
-    expect(gaps[0]).toBeLessThanOrEqual(45); // started at the base interval
-    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(110); // capped at 60 + slack
-    // Settled at the ceiling: the tail gaps are neither the base interval
-    // (backoff lost) nor above the ceiling (backoff unbounded).
-    for (const gap of gaps.slice(-5)) {
-      expect(gap).toBeGreaterThanOrEqual(45);
-      expect(gap).toBeLessThanOrEqual(110);
-    }
+    expect(gaps.slice(0, 3)).toEqual([20, 40, 60]);
+    // Every later gap is exactly the ceiling: not the base interval (backoff lost), not above it
+    // (backoff unbounded), not drifting.
+    expect(gaps.slice(3).every((gap) => gap === 60)).toBe(true);
+    // Claims at 0, 20, 60, 120 … 1200: 22 claims, 21 gaps (fixed 20 ms polling would make 60).
+    expect(gaps.length).toBe(21);
   });
 
   it('resets the idle sleep to pollIntervalMs on any claimed job', async () => {
@@ -549,14 +549,13 @@ describe('runWorker adaptive idle poll', () => {
 
     expect(completeJob).toHaveBeenCalledTimes(1);
     const gaps = gapsBetween(stamps);
-    // Proof the worker really was deep in backoff before the claim…
-    expect(gaps[3]).toBeGreaterThanOrEqual(140);
+    // The worker really was deep in backoff before the claim…
+    expect(gaps.slice(0, 4)).toEqual([25, 50, 100, 200]);
     // …claimed the next job immediately after executing (no sleep inserted)…
-    expect(gaps[4]).toBeLessThanOrEqual(60);
-    // …and the first idle sleep after the job is the base interval again,
-    // not the 400 ms the backoff had grown to.
-    expect(gaps[5]).toBeGreaterThanOrEqual(12);
-    expect(gaps[5]).toBeLessThanOrEqual(110);
+    expect(gaps[4]).toBe(0);
+    // …and the first idle sleep after the job is the base interval again, not the 400 ms the
+    // backoff had grown to.
+    expect(gaps[5]).toBe(25);
   });
 
   it('a pollMaxIdleMs below pollIntervalMs never shortens the base interval', async () => {
@@ -564,12 +563,7 @@ describe('runWorker adaptive idle poll', () => {
     const stamps: number[] = [];
     await observeClaims({ pollIntervalMs: 40, pollMaxIdleMs: 10 }, 320, async () => null, stamps);
 
-    const gaps = gapsBetween(stamps);
-    expect(gaps.length).toBeGreaterThanOrEqual(5);
-    for (const gap of gaps) {
-      expect(gap).toBeGreaterThanOrEqual(28);
-      expect(gap).toBeLessThanOrEqual(95);
-    }
+    expect(gapsBetween(stamps)).toEqual([40, 40, 40, 40, 40, 40, 40, 40]);
   });
 });
 
