@@ -399,7 +399,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the eight prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080 and 0081),
+the eight prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081 and 0082),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 

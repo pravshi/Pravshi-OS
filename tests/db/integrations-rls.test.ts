@@ -392,8 +392,6 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       [inboundB],
     );
     expect(upd.rowCount).toBe(0);
-    // No DELETE privilege for app_user (0082; there was never a DELETE policy) — even org A's
-    // own receipts stay.
     // 0082: app_user holds no DELETE on integration_inbound_events — refused before RLS is consulted.
     expect(
       await sqlstateOf(
@@ -424,8 +422,6 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       [checkpointB],
     );
     expect(upd.rowCount).toBe(0);
-    // No DELETE privilege for app_user (0082): checkpoints die with their connection, via the
-    // owner.
     // 0082: app_user holds no DELETE on integration_sync_checkpoints — refused before RLS is consulted.
     expect(
       await sqlstateOf(

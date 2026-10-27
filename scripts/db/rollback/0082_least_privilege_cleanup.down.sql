@@ -6,6 +6,11 @@
 -- What this re-opens: PUBLIC may again EXECUTE the two 0036 trigger functions
 -- (not callable directly), and app_user again holds DELETE on deliveries, inbound events and
 -- sync checkpoints (forced RLS has no DELETE policy there, so a DELETE matches no row).
+--
+-- Equal to 0081 in who holds which privilege, not byte for byte in the catalog: on a fresh 0081
+-- database the two functions have no ACL of their own (proacl is NULL, so the defaults apply);
+-- after this rollback they carry the same privileges as an explicit ACL. Compare with
+-- coalesce(proacl, acldefault('f', proowner)), item by item.
 
 begin;
 
