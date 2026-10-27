@@ -484,12 +484,19 @@ invented at incident time.
   and CHECK and restores 0020's `resolve_login_org()`; it re-opens LOCK-1 for addresses written
   in mixed case afterwards (addresses already lower-cased stay so), refuses unless the database
   is at 0085, and needs Nani's explicit approval and a run-record entry.
-  `scripts/db/rollback/0086_platform_console.down.sql` drops the console's administrator list
-  function and restores `platform.record_failure` and `platform.current_admin` verbatim from
-  0083. It re-opens one thing: the platform actor is again trusted from the transaction settings
-  without a live session (0086 binds it to an aal2 session of the administrator's own login,
-  within 12 hours and 30 idle minutes); the application still works against it, minus the
-  administrator list. It refuses unless the database is at 0086, and needs Nani's explicit
+  `scripts/db/rollback/0086_platform_console.down.sql` drops everything 0086 adds (the
+  administrator list, idempotent invitations and their request table — those rows go with it —
+  console re-issue of unused invitations, the revoked-administrator sign-in check, the stale
+  administrator-session check, and the trigger that fixes a pending first administrator's
+  email) and restores `platform.record_failure` and `platform.current_admin` verbatim from 0083.
+  What it re-opens: the platform actor is again trusted from the transaction settings without a
+  live session; revoked administrators can sign in again (to a session that reaches nothing);
+  administrators' stale sessions are no longer ended on Better Auth's own routes; a pending
+  first administrator's email can change. **Order matters both ways:** the application code
+  that ships with 0086 asks the database two questions on every sign-in and every Better Auth
+  request, and refuses (fails closed) when it cannot — so 0086 must be applied BEFORE that code
+  is deployed, and that code must be rolled back BEFORE (or with) this rollback, or every
+  sign-in, tenant users' included, is refused. It refuses unless the database is at 0086, and needs Nani's explicit
   approval and a run-record entry.
 
 ## Abort criteria (any step)
@@ -565,7 +572,7 @@ re-apply.
 | 82  | `0083_platform_identity` | 1791598728057 | `9d2b92e8b20e17519fdf480c611dd0f13eeb942ade5c9d4e5444731f2db3ba18` |
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
-| 85  | `0086_platform_console` | 1791601728057 | `298da7c4b60fc2d5489efe70a33f304ad387c4fc37d4360a9bd91299d8aa0d61` |
+| 85  | `0086_platform_console` | 1791601728057 | `f24234a2bec9e79964680bcec0c14d9fec893742020121613402ce15d83a3b15` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

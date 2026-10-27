@@ -25,9 +25,29 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 const stripComments = (s: string) => s.replace(/--.*$/gm, '');
 
 describe('0086 does what its rollback undoes', () => {
-  it('0086 creates exactly platform.list_admins(); the rollback drops exactly that', () => {
-    expect([...M0086.matchAll(/^create function (\S+)\(/gm)].map((m) => m[1])).toEqual([
+  it('every object 0086 creates, the rollback drops — and nothing else', () => {
+    const created = [...M0086.matchAll(/^create function (\S+)\(/gm)].map((m) => m[1]);
+    expect(created).toEqual([
       'platform.list_admins',
+      'platform.login_may_sign_in',
+      'platform.end_stale_admin_session',
+      'platform.first_admin_recipient_fixed',
+      'platform.invite_admin_once',
+      'platform.reissue_admin_setup',
+    ]);
+    const dropped = [...ROLLBACK.matchAll(/^drop function (\S+)\(/gm)].map((m) => m[1]);
+    expect([...dropped].sort()).toEqual([...created].sort());
+    expect([...M0086.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1])).toEqual([
+      'platform.admin_invite_requests',
+    ]);
+    expect([...ROLLBACK.matchAll(/^drop table (\S+);/gm)].map((m) => m[1])).toEqual([
+      'platform.admin_invite_requests',
+    ]);
+    expect([...M0086.matchAll(/^create trigger (\S+)\s/gm)].map((m) => m[1])).toEqual([
+      'people_first_admin_recipient_fixed',
+    ]);
+    expect([...ROLLBACK.matchAll(/^drop trigger (\S+) on/gm)].map((m) => m[1])).toEqual([
+      'people_first_admin_recipient_fixed',
     ]);
     const heads = splitStatements(ROLLBACK)
       .map((s) => squash(stripComments(s)))
@@ -36,6 +56,13 @@ describe('0086 does what its rollback undoes', () => {
       'begin;',
       'set local lock_timeout',
       'do $$ begin',
+      'drop trigger people_first_admin_recipient_fixed',
+      'drop function platform.first_admin_recipient_fixed();',
+      'drop function platform.reissue_admin_setup(uuid,',
+      'drop function platform.invite_admin_once(text,',
+      'drop table platform.admin_invite_requests;',
+      'drop function platform.end_stale_admin_session(text);',
+      'drop function platform.login_may_sign_in(uuid);',
       'drop function platform.list_admins();',
       'create or replace',
       'create or replace',

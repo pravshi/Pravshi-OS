@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { OneTimeLink } from '../one-time-link';
-import { platformApi, signInAgain } from '../platform-api';
+import { newIdempotencyKey, platformApi, signInAgain } from '../platform-api';
 
 interface Admin {
   adminId: string;
@@ -94,6 +94,7 @@ export function AdminsClient({ selfId, held }: { selfId: string; held: string[] 
                 admin={a}
                 self={a.adminId === selfId}
                 onChanged={() => void load()}
+                onLink={setShown}
               />
             ))}
           </ul>
@@ -107,10 +108,12 @@ function AdminRow({
   admin,
   self,
   onChanged,
+  onLink,
 }: {
   admin: Admin;
   self: boolean;
   onChanged: () => void;
+  onLink: (s: { title: string; link: string; expiresAt: string }) => void;
 }) {
   const [revoking, setRevoking] = useState(false);
   const [reason, setReason] = useState('');
@@ -131,6 +134,26 @@ function AdminRow({
       return;
     }
     setRevoking(false);
+    onChanged();
+  }
+
+  async function reissue() {
+    setPending(true);
+    setError(null);
+    const r = await platformApi<{ setupLink: string; setupExpiresAt: string }>(
+      `/admins/${admin.adminId}/setup`,
+      { method: 'POST' },
+    );
+    setPending(false);
+    if (!r.ok) {
+      setError(r);
+      return;
+    }
+    onLink({
+      title: `New setup link for ${admin.email} (the previous one no longer works)`,
+      link: r.data.setupLink,
+      expiresAt: r.data.setupExpiresAt,
+    });
     onChanged();
   }
 
@@ -155,11 +178,18 @@ function AdminRow({
       <p className="mt-1 text-xs text-ink-muted">
         {admin.permissions.join(', ') || 'no permissions'}
       </p>
-      {!self && admin.status !== 'REVOKED' && !revoking ? (
-        <Button className="mt-2" size="sm" variant="outline" onClick={() => setRevoking(true)}>
-          Revoke
-        </Button>
-      ) : null}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {!self && admin.status !== 'REVOKED' && !revoking ? (
+          <Button size="sm" variant="outline" onClick={() => setRevoking(true)}>
+            Revoke
+          </Button>
+        ) : null}
+        {admin.status === 'PENDING_ENROLMENT' && !admin.hasLogin && !revoking ? (
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => void reissue()}>
+            Re-issue setup link
+          </Button>
+        ) : null}
+      </div>
       {revoking ? (
         <form onSubmit={revoke} className="mt-3 flex flex-wrap items-end gap-2">
           <div className="min-w-64 flex-1 space-y-2">
@@ -205,21 +235,34 @@ function InviteForm({
   const [permissions, setPermissions] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
+  const [replayed, setReplayed] = useState(false);
+  // One key per invitation: a retry of the same details (a lost answer) replays, never
+  // duplicates; changed details are a new invitation (F-CONSOLE-11).
+  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
+  useEffect(() => {
+    setIdempotencyKey(newIdempotencyKey());
+    setReplayed(false);
+  }, [email, fullName, permissions]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setPending(true);
     setError(null);
-    const r = await platformApi<{ adminId: string; setupLink: string; setupExpiresAt: string }>(
-      '/admins',
-      {
-        method: 'POST',
-        body: { email: email.trim(), fullName: fullName.trim(), permissions },
-      },
-    );
+    setReplayed(false);
+    const r = await platformApi<
+      | { replayed: false; adminId: string; setupLink: string; setupExpiresAt: string }
+      | { replayed: true; adminId: string }
+    >('/admins', {
+      method: 'POST',
+      body: { idempotencyKey, email: email.trim(), fullName: fullName.trim(), permissions },
+    });
     setPending(false);
     if (!r.ok) {
       setError(r);
+      return;
+    }
+    if (r.data.replayed) {
+      setReplayed(true);
       return;
     }
     onInvited({
@@ -290,6 +333,12 @@ function InviteForm({
           <Button type="submit" disabled={pending}>
             {pending ? 'Inviting…' : 'Invite administrator'}
           </Button>
+          {replayed ? (
+            <p role="status" className="mt-3 text-sm text-ink-muted">
+              This invitation was already sent. Its link is not shown again — use &ldquo;Re-issue
+              setup link&rdquo; on the administrator below if it was lost.
+            </p>
+          ) : null}
           {error ? <ErrorLine {...error} /> : null}
         </div>
       </form>

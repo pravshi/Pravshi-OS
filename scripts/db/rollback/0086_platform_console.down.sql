@@ -4,7 +4,10 @@
 -- approval for the named database. It does NOT remove 0086's row from the history.
 --
 -- What this re-opens: the platform actor is again trusted from the transaction settings without
--- a live session (0083's current_admin), and the administrator list stops working.
+-- a live session (0083's current_admin); revoked administrators can sign in again and their stale
+-- sessions are no longer ended on Better Auth's own routes; the first administrator's email is
+-- no longer fixed during setup; invitations lose idempotency and console re-issue; the
+-- administrator list stops working. Invitation request rows are dropped with their table.
 -- platform.record_failure and platform.current_admin are restored verbatim from 0083.
 -- It refuses unless the database is exactly at 0086.
 
@@ -20,6 +23,13 @@ begin
 end;
 $$;
 
+drop trigger people_first_admin_recipient_fixed on public.people;
+drop function platform.first_admin_recipient_fixed();
+drop function platform.reissue_admin_setup(uuid, bytea, uuid);
+drop function platform.invite_admin_once(text, text, text, text[], bytea, uuid);
+drop table platform.admin_invite_requests;
+drop function platform.end_stale_admin_session(text);
+drop function platform.login_may_sign_in(uuid);
 drop function platform.list_admins();
 
 create or replace function platform.record_failure(

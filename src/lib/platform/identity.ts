@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  countsAsActivity,
   enforcePlatformSessionLimits,
   readRequestSession,
   type PlatformSession,
@@ -28,7 +29,10 @@ export interface PlatformActor {
 export type PlatformAccess =
   { kind: 'none' } | { kind: 'not-admin' } | { kind: 'admin'; actor: PlatformActor };
 
-export async function resolvePlatformAccess(headers: Headers): Promise<PlatformAccess> {
+export async function resolvePlatformAccess(
+  headers: Headers,
+  method: string,
+): Promise<PlatformAccess> {
   const current = await readRequestSession(headers);
   if (!current) return { kind: 'none' };
   // Whose login is it — asked BEFORE the platform's session limits are applied, so a tenant
@@ -42,7 +46,9 @@ export async function resolvePlatformAccess(headers: Headers): Promise<PlatformA
   if (!row || (row.status !== 'ACTIVE' && row.status !== 'PENDING_ENROLMENT')) {
     return { kind: 'not-admin' };
   }
-  const session = await enforcePlatformSessionLimits(current);
+  const session = await enforcePlatformSessionLimits(current, {
+    activity: countsAsActivity(headers, method),
+  });
   if (!session) return { kind: 'none' };
   return { kind: 'admin', actor: { adminId: row.admin_id, status: row.status, session } };
 }

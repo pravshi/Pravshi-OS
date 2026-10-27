@@ -242,6 +242,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       reissue: await import('@/app/api/platform/organizations/[orgId]/admin-setup/route'),
       '/api/platform/admins': await import('@/app/api/platform/admins/route'),
       revoke: await import('@/app/api/platform/admins/[adminId]/revoke/route'),
+      adminSetup: await import('@/app/api/platform/admins/[adminId]/setup/route'),
+      '/api/auth/[...all]': await import('@/app/api/auth/[...all]/route'),
       '/api/platform/audit': await import('@/app/api/platform/audit/route'),
     } as unknown as Record<string, Record<string, Handler>>;
     cli = await import('../../scripts/bootstrap/platform.mjs');
@@ -626,15 +628,44 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     const email = `second.admin.${RUN}@platform.example`;
     const badPermission = await call('/api/platform/admins', 'POST', {
       cookie: adminCookie,
-      body: { email, fullName: 'Second Admin', permissions: ['platform.everything'] },
+      body: {
+        idempotencyKey: `invite-${RUN}-bad`,
+        email,
+        fullName: 'Second Admin',
+        permissions: ['platform.everything'],
+      },
     });
     expect(badPermission.status).toBe(400);
+    const invitation = {
+      idempotencyKey: `invite-${RUN}-second`,
+      email,
+      fullName: 'Second Admin',
+      permissions: ['platform.organizations.suspend'],
+    };
     const invited = await call('/api/platform/admins', 'POST', {
       cookie: adminCookie,
-      body: { email, fullName: 'Second Admin', permissions: ['platform.organizations.suspend'] },
+      body: invitation,
     });
     expect(invited.status).toBe(201);
     const secondId = invited.body.adminId as string;
+
+    // F-CONSOLE-11: the same request again (a lost answer, retried) replays — no second
+    // administrator, no second link; the same key with other details is refused.
+    const retried = await call('/api/platform/admins', 'POST', {
+      cookie: adminCookie,
+      body: invitation,
+    });
+    expect(retried).toMatchObject({ status: 200, body: { replayed: true, adminId: secondId } });
+    expect(retried.body.setupLink).toBeUndefined();
+    const changed = await call('/api/platform/admins', 'POST', {
+      cookie: adminCookie,
+      body: { ...invitation, fullName: 'Someone Else' },
+    });
+    expect(changed).toMatchObject({ status: 409, body: { error: 'CONFLICT' } });
+    expect(
+      (await owner.query(`select count(*)::int n from platform.admins where email = $1`, [email]))
+        .rows[0],
+    ).toEqual({ n: 1 });
     const done = await call('/api/platform/setup/complete', 'POST', {
       body: { token: tokenOf(invited.body.setupLink as string), password: PASSWORD },
     });
@@ -675,7 +706,12 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     expect(notAllowed).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
     const cannotInvite = await call('/api/platform/admins', 'POST', {
       cookie: secondCookie,
-      body: { email: `third.${RUN}@platform.example`, fullName: 'Third', permissions: [] },
+      body: {
+        idempotencyKey: `invite-${RUN}-denied`,
+        email: `third.${RUN}@platform.example`,
+        fullName: 'Third',
+        permissions: [],
+      },
     });
     expect(cannotInvite).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
     const deniedRows = (await auditRows()).filter((r) => r.reason_code === 'NO_PERMISSION');
@@ -707,6 +743,231 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(revoked).toMatchObject({ status: 200, body: { status: 'REVOKED' } });
     expect((await call('/api/platform/me', 'GET', { cookie: secondCookie })).status).toBe(401);
+
+    // S-CONSOLE-3: the revoked administrator cannot obtain a session again, by any step —
+    // password and second factor both correct.
+    const ip = nextIp();
+    const again = await routes['/api/auth/login']!.POST!(
+      new Request(`${ORIGIN}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip, origin: ORIGIN },
+        body: JSON.stringify({ email, password: PASSWORD }),
+      }),
+    );
+    if (again.status === 200) {
+      expect(((await again.json()) as { twoFactorRedirect?: boolean }).twoFactorRedirect).toBe(
+        true,
+      );
+      const verify = await routes['/api/auth/mfa/verify']!.POST!(
+        new Request(`${ORIGIN}/api/auth/mfa/verify`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-forwarded-for': ip,
+            origin: ORIGIN,
+            cookie: cookieFrom(again),
+          },
+          body: JSON.stringify({ code: totpAt(secondSecret), email, method: 'totp' }),
+        }),
+      );
+      expect(verify.status).toBe(401);
+    } else {
+      expect(again.status).toBe(401);
+    }
+    const sessions = await owner.query<{ n: number }>(
+      `select count(*)::int n from auth.auth_sessions
+       where user_id = (select auth_user_id from platform.admins where id = $1)`,
+      [secondId],
+    );
+    expect(sessions.rows[0]).toEqual({ n: 0 });
+  });
+
+  it('an invitation that was never used can be re-issued; the recipient stays; a used one cannot', async () => {
+    const email = `pending.${RUN}@platform.example`;
+    const invited = await call('/api/platform/admins', 'POST', {
+      cookie: adminCookie,
+      body: {
+        idempotencyKey: `invite-${RUN}-pending`,
+        email,
+        fullName: 'Pending',
+        permissions: [],
+      },
+    });
+    expect(invited.status).toBe(201);
+    const id = invited.body.adminId as string;
+    const first = tokenOf(invited.body.setupLink as string);
+    const reissued = await call('adminSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/admins/${id}/setup`,
+    });
+    expect(reissued.status).toBe(200);
+    const second = tokenOf(reissued.body.setupLink as string);
+    expect(second).not.toBe(first);
+    const stale = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: first, password: PASSWORD },
+    });
+    expect(stale).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    const done = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: second, password: PASSWORD },
+    });
+    expect(done.status).toBe(200);
+    // The login it created is the invitation's recipient.
+    const login = await owner.query<{ email: string }>(
+      `select u.email::text from platform.admins a join auth.auth_users u on u.id = a.auth_user_id
+       where a.id = $1`,
+      [id],
+    );
+    expect(login.rows).toEqual([{ email }]);
+    // Used: the console cannot re-issue it (recovery is the operator's).
+    const used = await call('adminSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/admins/${id}/setup`,
+    });
+    expect(used).toMatchObject({ status: 409, body: { error: 'CANNOT_REISSUE' } });
+    const audited = await owner.query<{ action: string; actor_admin_id: string | null }>(
+      `select action, actor_admin_id from platform.audit_events
+       where target_id = $1 and action = 'platform.admin.setup_reissued'`,
+      [id],
+    );
+    expect(audited.rows).toHaveLength(1);
+    expect(audited.rows[0]!.actor_admin_id).not.toBeNull();
+  });
+
+  it("Better Auth's own routes apply the platform's session limits to administrators only", async () => {
+    const selfService = (cookie: string) =>
+      routes['/api/auth/[...all]']!.GET!(
+        new Request(`${ORIGIN}/api/auth/list-sessions`, {
+          headers: { cookie, 'x-forwarded-for': nextIp() },
+        }),
+      );
+    // An administrator's session idle past 30 minutes is ended there too (S-CONSOLE-6).
+    const idle = await signIn(FIRST_EMAIL, PASSWORD, firstAdminSecret);
+    const token = decodeURIComponent(idle.match(/session_token=([^;.]+)/)?.[1] ?? '');
+    expect((await selfService(idle)).status).toBe(200);
+    await owner.query(
+      `update auth.auth_sessions set updated_at = now() - interval '31 minutes' where token = $1`,
+      [token],
+    );
+    expect((await selfService(idle)).status).toBe(401);
+    expect(
+      (await owner.query(`select 1 from auth.auth_sessions where token = $1`, [token])).rowCount,
+    ).toBe(0);
+
+    // A tenant user's session idle as long is theirs to keep.
+    const tenant = await signIn(orgAdminEmail, ORG_ADMIN_PASSWORD);
+    const tenantToken = decodeURIComponent(tenant.match(/session_token=([^;.]+)/)?.[1] ?? '');
+    await owner.query(
+      `update auth.auth_sessions set updated_at = now() - interval '31 minutes' where token = $1`,
+      [tenantToken],
+    );
+    expect((await selfService(tenant)).status).toBe(200);
+    expect(
+      (await owner.query(`select 1 from auth.auth_sessions where token = $1`, [tenantToken]))
+        .rowCount,
+    ).toBe(1);
+  });
+
+  it('only same-site activity extends the idle clock; a cross-site or headerless read does not', async () => {
+    const cookie = await signIn(FIRST_EMAIL, PASSWORD, firstAdminSecret);
+    const token = decodeURIComponent(cookie.match(/session_token=([^;.]+)/)?.[1] ?? '');
+    const backdate = () =>
+      owner.query(
+        `update auth.auth_sessions set updated_at = now() - interval '20 minutes' where token = $1`,
+        [token],
+      );
+    const idleMinutes = async () =>
+      (
+        await owner.query<{ m: number }>(
+          `select floor(extract(epoch from now() - updated_at) / 60)::int m
+           from auth.auth_sessions where token = $1`,
+          [token],
+        )
+      ).rows[0]!.m;
+    const get = (site: string | null) => {
+      const headers: Record<string, string> = { cookie, 'x-forwarded-for': nextIp() };
+      if (site) headers['sec-fetch-site'] = site;
+      return routes['/api/platform/me']!.GET!(
+        new Request(`${ORIGIN}/api/platform/me`, { headers }),
+      );
+    };
+    for (const site of ['cross-site', 'same-site', null]) {
+      await backdate();
+      expect((await get(site)).status, String(site)).toBe(200);
+      expect(await idleMinutes(), String(site)).toBe(20);
+    }
+    for (const site of ['same-origin', 'none']) {
+      await backdate();
+      expect((await get(site)).status, site).toBe(200);
+      expect(await idleMinutes(), site).toBe(0);
+    }
+  });
+
+  it("the first administrator's recipient is fixed while their setup is pending (S-CONSOLE-10)", async () => {
+    const request = {
+      idempotencyKey: `console-${RUN}-fixed`,
+      name: `Fixed Org ${RUN}`,
+      slug: `fixed-${RUN}`,
+      timezone: 'Asia/Kolkata',
+      typeKey: (
+        await owner.query<{ type_key: string }>(
+          `select type_key from public.organizations where id = $1`,
+          [orgId],
+        )
+      ).rows[0]!.type_key,
+      adminFullName: 'Fixed Founder',
+      adminEmail: `fixed.${RUN}@tenant.example`,
+    };
+    const created = await call('/api/platform/organizations', 'POST', {
+      cookie: adminCookie,
+      body: request,
+    });
+    expect(created.status).toBe(201);
+    const person = await owner.query<{ person_id: string }>(
+      `select person_id from platform.org_admin_setup where org_id = $1`,
+      [created.body.orgId],
+    );
+    const personId = person.rows[0]!.person_id;
+    // Nobody — not even the schema owner — can redirect the pending setup to another address.
+    let refused = '';
+    try {
+      await owner.query(`update public.people set work_email = $2 where id = $1`, [
+        personId,
+        `attacker.${RUN}@evil.example`,
+      ]);
+    } catch (e) {
+      refused = (e as { code?: string }).code ?? 'unknown';
+    }
+    expect(refused).toBe('42501');
+    // A re-issue keeps the recipient; completing it creates that address's login.
+    const reissued = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${created.body.orgId}/admin-setup`,
+    });
+    expect(reissued.status).toBe(200);
+    const done = await call('/api/setup/organization/complete', 'POST', {
+      body: { token: tokenOf(reissued.body.setupLink as string), password: ORG_ADMIN_PASSWORD },
+    });
+    expect(done.status).toBe(200);
+    const login = await owner.query<{ email: string }>(
+      `select u.email::text from public.people p join auth.auth_users u on u.id = p.auth_user_id
+       where p.id = $1`,
+      [personId],
+    );
+    expect(login.rows).toEqual([{ email: request.adminEmail }]);
+    // The re-issue is audited with its actor and the recipient person.
+    const audited = await owner.query<{ actor_admin_id: string | null; target_id: string }>(
+      `select actor_admin_id, target_id from platform.audit_events
+       where action = 'platform.organization.admin_setup_reissued' and target_org_id = $1`,
+      [created.body.orgId],
+    );
+    expect(audited.rows).toHaveLength(1);
+    expect(audited.rows[0]!.target_id).toBe(personId);
+    expect(audited.rows[0]!.actor_admin_id).not.toBeNull();
+    // Once setup is complete the email is the organization's to manage again.
+    await owner.query(`update public.people set work_email = $2 where id = $1`, [
+      personId,
+      `renamed.${RUN}@tenant.example`,
+    ]);
   });
 
   it('pages the audit trail newest first without gaps or repeats', async () => {

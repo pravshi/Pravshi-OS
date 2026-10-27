@@ -38,6 +38,19 @@ export interface PlatformSession {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Whether a request counts as the administrator's own activity, extending the idle clock
+ * (S-CONSOLE-9). A state change does: its Origin was verified before it got here. A read does
+ * only when the browser says it came from this site or from the user directly
+ * (Sec-Fetch-Site: same-origin or none) — never a cross-site navigation (a SameSite=Lax cookie
+ * still rides on one) and never a request without that header.
+ */
+export function countsAsActivity(headers: Headers, method: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return true;
+  const site = headers.get('sec-fetch-site');
+  return site === 'same-origin' || site === 'none';
+}
+
 /** The request's live Better Auth session, before any platform question is asked. */
 export async function readRequestSession(
   headers: Headers,
@@ -66,11 +79,14 @@ export async function readRequestSession(
  * stamped by a request that merely reached a platform path. null: past a limit, and deleted.
  * Database errors propagate, so a caller fails closed.
  */
-export async function enforcePlatformSessionLimits(current: {
-  authUserId: string;
-  sessionId: string;
-  tokenSha256: string;
-}): Promise<PlatformSession | null> {
+export async function enforcePlatformSessionLimits(
+  current: {
+    authUserId: string;
+    sessionId: string;
+    tokenSha256: string;
+  },
+  opts: { activity: boolean },
+): Promise<PlatformSession | null> {
   const { authUserId: userId, sessionId, tokenSha256 } = current;
 
   const rows = await authDb.execute<{
@@ -96,10 +112,14 @@ export async function enforcePlatformSessionLimits(current: {
     return null;
   }
 
-  await authDb.execute(sql`
-    update auth.auth_sessions set updated_at = now()
-    where id = ${sessionId} and user_id = ${userId}::uuid
-  `);
+  // Only the administrator's own activity extends the idle clock (S-CONSOLE-9): not a
+  // cross-site navigation, not a request without browser provenance.
+  if (opts.activity) {
+    await authDb.execute(sql`
+      update auth.auth_sessions set updated_at = now()
+      where id = ${sessionId} and user_id = ${userId}::uuid
+    `);
+  }
 
   const aal = row.aal === 'aal2' ? 'aal2' : 'aal1';
   return {

@@ -17,20 +17,19 @@ import { PlatformError, whoami, type WhoAmI } from './service';
  *   administrator (any tenant user)  → 404, as for any unknown path
  *   an administrator without a
  *   second factor on this session    → /platform/security (enrol TOTP), unless already there
- *   console not configured           → { unavailable: true }
+ *   console not configured here      → 404 (it does not exist on this deployment)
  */
-export type PlatformPageContext =
-  | { unavailable: true }
-  | { unavailable: false; actor: PlatformActor; me: WhoAmI | null; enrolled: boolean };
+export type PlatformPageContext = { actor: PlatformActor; me: WhoAmI | null; enrolled: boolean };
 
 export async function requirePlatformPage(): Promise<PlatformPageContext> {
   const h = new Headers(await headers());
   const path = h.get('x-pathname') ?? '/platform';
   let access;
   try {
-    access = await resolvePlatformAccess(h);
+    access = await resolvePlatformAccess(h, 'GET');
   } catch (e) {
-    if (e instanceof PlatformUnavailableError) return { unavailable: true };
+    // Not configured here: the console does not exist on this deployment (S-CONSOLE-7).
+    if (e instanceof PlatformUnavailableError) notFound();
     throw sanitised(e);
   }
   if (access.kind === 'none') redirect(loginPathForNext(path));
@@ -58,7 +57,7 @@ export async function requirePlatformPage(): Promise<PlatformPageContext> {
     }
   }
   if (!enrolled && path !== '/platform/security') redirect('/platform/security');
-  return { unavailable: false, actor, me, enrolled };
+  return { actor, me, enrolled };
 }
 
 /** A driver error's message carries the query's parameters: pages rethrow name and SQLSTATE only. */

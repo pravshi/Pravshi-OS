@@ -373,10 +373,19 @@ export async function listAdmins(req: PlatformRequest): Promise<AdminRow[]> {
   }));
 }
 
+export type InviteResult =
+  | { replayed: false; adminId: string; setupToken: string; setupExpiresAt: string }
+  /** The same request was already completed: its link is not shown again (re-issue it). */
+  | { replayed: true; adminId: string };
+
+/**
+ * Idempotent by key (F-CONSOLE-11): a retry after a lost response answers the first result and
+ * creates nothing; the same key with other details is refused (409).
+ */
 export async function inviteAdmin(
   req: PlatformRequest,
-  input: { email: string; fullName: string; permissions: string[] },
-): Promise<{ adminId: string; setupToken: string; setupExpiresAt: string }> {
+  input: { idempotencyKey: string; email: string; fullName: string; permissions: string[] },
+): Promise<InviteResult> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
   // One bound parameter per key, as an array constructor: drizzle expands a JS array into a
@@ -402,6 +411,11 @@ export async function inviteAdmin(
         code: 'EMAIL_IN_USE',
         message: 'That email already has a login or is already a platform administrator.',
       },
+      '23505': {
+        status: 409,
+        code: 'CONFLICT',
+        message: 'This invitation was already sent with different details.',
+      },
       '42501': {
         status: 403,
         code: 'FORBIDDEN',
@@ -409,21 +423,62 @@ export async function inviteAdmin(
       },
     },
     (tx) =>
-      tx.execute<{ invited_admin_id: string; setup_expires_at: Date | string }>(sql`
-        select invited_admin_id, setup_expires_at
-        from platform.invite_admin(${input.email}, ${input.fullName},
-                                   ${permissions}, decode(${digest}, 'hex'),
-                                   ${req.requestId}::uuid)
+      tx.execute<{
+        invited_admin_id: string;
+        setup_expires_at: Date | string | null;
+        replayed: boolean;
+      }>(sql`
+        select invited_admin_id, setup_expires_at, replayed
+        from platform.invite_admin_once(${input.idempotencyKey}, ${input.email},
+                                        ${input.fullName}, ${permissions},
+                                        decode(${digest}, 'hex'), ${req.requestId}::uuid)
       `),
     { permission: 'platform.admins.manage' },
   );
   const r = rows.rows[0];
   if (!r) throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
+  if (r.replayed || !r.setup_expires_at) return { replayed: true, adminId: r.invited_admin_id };
   return {
+    replayed: false,
     adminId: r.invited_admin_id,
     setupToken: token,
     setupExpiresAt: new Date(r.setup_expires_at).toISOString(),
   };
+}
+
+/**
+ * A new 72-hour link for an invited administrator who never set up a login; the old link stops
+ * working and the recipient stays the invitation's. One who has a login is the operator's.
+ */
+export async function reissueAdminSetup(
+  req: PlatformRequest,
+  adminId: string,
+): Promise<{ setupToken: string; setupExpiresAt: string }> {
+  const token = newSetupToken();
+  const digest = hashSetupToken(token);
+  const rows = await run(
+    req,
+    'platform.admin.setup_reissue',
+    {
+      '55000': {
+        status: 409,
+        code: 'CANNOT_REISSUE',
+        message:
+          'Only an invitation that was never used can be re-issued here. An administrator who ' +
+          'already set up a login is recovered by the operator.',
+      },
+    },
+    (tx) =>
+      tx.execute<{ expires_at: Date | string }>(sql`
+        select platform.reissue_admin_setup(${adminId}::uuid, decode(${digest}, 'hex'),
+                                            ${req.requestId}::uuid) as expires_at
+      `),
+    { permission: 'platform.admins.manage' },
+  );
+  const expires = rows.rows[0]?.expires_at;
+  if (!expires)
+    throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
+  return { setupToken: token, setupExpiresAt: new Date(expires).toISOString() };
 }
 
 export async function revokeAdmin(

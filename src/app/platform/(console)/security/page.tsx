@@ -10,6 +10,5 @@ export const dynamic = 'force-dynamic';
  */
 export default async function PlatformSecurityPage() {
   const ctx = await requirePlatformPage();
-  if (ctx.unavailable) return null;
   return <PlatformSecurityClient enrolled={ctx.enrolled} />;
 }

@@ -45,7 +45,8 @@ export type PlatformOperation =
   | 'platform.organization.reactivate'
   | 'platform.organization.list'
   | 'platform.audit.list'
-  | 'platform.admin.list';
+  | 'platform.admin.list'
+  | 'platform.admin.setup_reissue';
 
 export interface PlatformGate {
   operation: PlatformOperation;
@@ -114,7 +115,9 @@ export async function gatePlatformRequest(
   try {
     return await gate_(req, gate);
   } catch (e) {
-    if (e instanceof PlatformUnavailableError) return json(503, { error: 'PLATFORM_UNAVAILABLE' });
+    // Where the console is not configured it does not exist: the same 404 a tenant user gets
+    // (S-CONSOLE-7), never an answer that tells anyone the platform is there.
+    if (e instanceof PlatformUnavailableError) return json(404, { error: 'NOT_FOUND' });
     const sqlstate = sqlstateOf(e);
     // The database no longer accepts this administrator as an actor (their factor was removed,
     // or the session went past a limit, after the checks above): treat as not enrolled.
@@ -129,7 +132,7 @@ export async function gatePlatformRequest(
 
 async function gate_(req: Request, gate: PlatformGate): Promise<PlatformRequest | Response> {
   const requestId = randomUUID();
-  const access = await resolvePlatformAccess(req.headers);
+  const access = await resolvePlatformAccess(req.headers, req.method);
   // A tenant user gets the answer of any unknown API path; nothing platform-side runs for them.
   if (access.kind === 'none') return json(401, { error: 'UNAUTHENTICATED' });
   if (access.kind === 'not-admin') return json(404, { error: 'NOT_FOUND' });

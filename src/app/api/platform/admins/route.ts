@@ -22,6 +22,7 @@ const PERMISSION_KEYS = [
 ] as const;
 
 const Invite = z.strictObject({
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
   email: z.string().trim().email().max(254),
   fullName: z.string().trim().min(1).max(200),
   permissions: z.array(z.enum(PERMISSION_KEYS)).max(PERMISSION_KEYS.length),
@@ -31,6 +32,8 @@ const Invite = z.strictObject({
  * POST /api/platform/admins — invite a platform administrator (platform.admins.manage;
  * step-up; 10 an hour). They always receive the two view permissions, plus only those
  * requested — never one the inviter does not hold. The setup link is in the answer, once.
+ * Idempotent by idempotencyKey: a retry of a completed request answers 200 {replayed: true}
+ * with no link (re-issue it: POST /api/platform/admins/{id}/setup).
  */
 export const POST = platformRoute(
   {
@@ -43,7 +46,9 @@ export const POST = platformRoute(
     const parsed = Invite.safeParse(await readJson(req));
     if (!parsed.success) throw new BadRequest(String(parsed.error.issues[0]?.path[0] ?? ''));
     const r = await inviteAdmin(ctx, parsed.data);
+    if (r.replayed) return json(200, { replayed: true, adminId: r.adminId });
     return json(201, {
+      replayed: false,
       adminId: r.adminId,
       setupLink: platformSetupLink(r.setupToken),
       setupExpiresAt: r.setupExpiresAt,

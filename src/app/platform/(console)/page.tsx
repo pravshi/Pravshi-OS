@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 /** /platform — the organizations: list, provision, suspend / reactivate, setup links. */
 export default async function PlatformOrganizationsPage() {
   const ctx = await requirePlatformPage();
-  if (ctx.unavailable || !ctx.me) return null;
+  if (!ctx.me) return null;
   const has = (p: string) => ctx.me?.permissions.includes(p) ?? false;
   if (!has('platform.organizations.view')) notFound();
   return (

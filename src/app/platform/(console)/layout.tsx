@@ -18,16 +18,6 @@ export const metadata = {
  */
 export default async function PlatformConsoleLayout({ children }: { children: ReactNode }) {
   const ctx = await requirePlatformPage();
-  if (ctx.unavailable) {
-    return (
-      <main className="mx-auto max-w-xl px-6 py-16">
-        <h1 className="text-2xl font-semibold tracking-tight">Platform console unavailable</h1>
-        <p className="mt-2 text-sm text-ink-muted">
-          This deployment is not configured for platform administration.
-        </p>
-      </main>
-    );
-  }
   const can = (p: string) => ctx.me?.permissions.includes(p) ?? false;
   return (
     <div className="min-h-dvh">

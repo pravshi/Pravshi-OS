@@ -12,6 +12,14 @@ Database migrations: 0063–0086 (production still pending — see the
 
 ### Added
 
+- Platform hardening (migration 0086, security findings S-CONSOLE-3/6/7/9/10, F-CONSOLE-11):
+  a revoked platform administrator can no longer sign in by any path; an administrator's session
+  past the platform's limits (12 hours, 30 idle minutes) is ended on Better Auth's own routes
+  too, never a tenant user's; only same-site activity extends the idle clock; where the console
+  is not configured it answers 404 like any unknown path; a pending first administrator's email
+  is fixed until their setup completes; administrator invitations are idempotent, and an unused
+  one can be re-issued from the console. **Deploy order:** apply 0086 before deploying this
+  code — every sign-in asks the database a question 0086 adds, and refuses when it cannot.
 - Platform administrator console (ADR-008, migration 0086). `/platform` for platform
   administrators only: the organizations (metadata only), provisioning with type selection and
   a one-time setup link for the first administrator, re-issuing that link, suspend and
