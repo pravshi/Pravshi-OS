@@ -33,7 +33,7 @@ choose its type where one is available → appoint the organization's first admi
 2. Platform-administrator-first bootstrap (operator CLI) and break-glass recovery.
 3. Organization provisioning with type selection and the first organization administrator,
    idempotent.
-4. Re-issuing the first administrator's invitation while the organization has none.
+4. Re-issuing the first administrator's setup link while it is unused.
 5. Read-only organization list and platform audit view.
 6. Platform-administrator management (invite, revoke) — K1.
 
@@ -112,8 +112,8 @@ p_admin_full_name, p_admin_email)` — `SECURITY DEFINER`, `search_path = ''`, `
 
 1. Idempotency: the key and a hash of the parameters are recorded. Same key + same parameters →
    the stored result, nothing written, no second audit entry. Same key + different parameters →
-   refused (409). The raw invitation link is returned **only** by the first call; a retry gets
-   the organization id and a "re-issue the invitation" pointer.
+   refused (409). The raw setup link is returned **only** by the first call; a retry gets
+   the organization id and a "re-issue the setup link" pointer.
 2. Organization: id generated inside; `type_key` must be an ACTIVE type (today only
    `generic_crm`); `template_version` = that type's latest published version. The 0080 trigger
    re-checks both and seeds the template's pipelines; system roles are seeded by the existing
@@ -121,8 +121,13 @@ p_admin_full_name, p_admin_email)` — `SECURITY DEFINER`, `search_path = ''`, `
 3. Default department, as the bootstrap creates it.
 4. First administrator: a person without a login, an ACTIVE engagement, `SUPER_ADMIN` through the
    protected-role genesis branch.
-5. Invitation for that person through the existing machinery (`drizzle/0018`): only the token
-   hash is stored.
+5. A setup link for that person (72 hours): only the token hash is stored; completing it on the
+   auth plane creates the person's own login, never adopting an existing one.
+   _Implementation reconciliation (0084):_ the design first named the invitation machinery
+   (`drizzle/0018`), but an invitation's `invited_by` must be a person of the organization,
+   taken from the transaction identity, and a platform administrator is not one. The first
+   administrator therefore gets exactly what the bootstrapped one gets (0015): a single-use,
+   expiring setup token. Same security properties: digest only, one use, expiry, no adoption.
 6. One `platform.audit_events` entry `platform.organization.provisioned` (actor, target
    organization, type, request id, idempotency key; no token).
 
@@ -141,7 +146,7 @@ unreachable only because they hold no write privilege on the role tables.
 |---|---|---|
 | `platform.organizations.view` | list and view organization metadata (name, slug, type, status, created, member count) | — |
 | `platform.organizations.create` | provision (§4) | idempotency key |
-| `platform.organizations.assign_initial_admin` | re-issue the first administrator's invitation while none is live | step-up |
+| `platform.organizations.assign_initial_admin` | re-issue the first administrator's setup litation while none is live | step-up |
 | `platform.organizations.suspend` / `.reactivate` | only if L1 includes them | reason required |
 | `platform.audit.view` | read platform audit events | — |
 | `platform.admins.manage` | invite and revoke platform administrators | step-up; never self; never the last holder |
@@ -171,11 +176,11 @@ administrators see the events about their own organization (K6).
 5. A tenant session of any role, `SUPER_ADMIN` included, gets 404 on every platform route and no
    platform function runs; a platform session resolves to no tenant identity.
 6. Catalogue: grants exactly as in §5; `app_platform` has no table privilege and no BYPASSRLS.
-7. Provisioning: same key twice → one organization, person, invitation and audit entry;
+7. Provisioning: same key twice → one organization, person, setup link and audit entry;
    different parameters → 409; injected failure → nothing left and one `ERROR` entry; an inactive
    type, a used slug and an existing login are refused.
 8. The new organization has the system roles, one department, the template's pipelines, the first
-   administrator (ACTIVE, `SUPER_ADMIN`) and an invitation that cannot be accepted elsewhere.
+   administrator (ACTIVE, `SUPER_ADMIN`) and a setup link that cannot be used elsewhere.
 9. The genesis grant is refused for `app_worker` and `app_auth`.
 10. No secret in any audit entry or log; runtime logins cannot write or truncate platform audit.
 11. The existing suite passes unchanged.
@@ -185,7 +190,7 @@ administrators see the events about their own organization (K6).
 | Package | Content | Owner |
 |---|---|---|
 | P1 | platform schema, `app_platform` login (roles.sql), permissions, resolver and wrapper, audit, bootstrap and recovery CLI modes, read-only list, genesis tightening | Claude Code |
-| P2 | provisioning with type and first administrator, idempotency, invitation re-issue, platform API routes | Claude Code |
+| P2 | provisioning with type and first administrator, idempotency, setup-link re-issue, platform API routes | Claude Code |
 | P1-UI / P2-UI | the platform console pages (setup, organization list, provisioning form, audit view) | **founder assigns** — frontend is Antigravity's by default (AGENTS.md §3) |
 | L1 | suspend / reactivate (if confirmed) | Claude Code |
 

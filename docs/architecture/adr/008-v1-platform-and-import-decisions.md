@@ -22,7 +22,7 @@ and
 
 V1 includes: a platform administrator identity separate from every organization; provisioning
 an organization with its type (ACTIVE types only) and its first administrator; re-issuing that
-administrator's invitation; administrator management; suspend and reactivate; the platform
+administrator's setup link; administrator management; suspend and reactivate; the platform
 audit trail. Outside V1: the broad architecture redesign, full CRM products (Real Estate,
 Education), website builder, custom app builder, support access, deletion, billing and plans.
 
@@ -67,7 +67,7 @@ covered by tests before it is offered.
 
 **GOV-03 / P-1 — done when:** the platform design above is implemented; a platform administrator
 can be bootstrapped (P-2), can provision an organization with its type and first administrator,
-re-issue that administrator's invitation, manage platform administrators, and suspend and
+re-issue that administrator's setup link, manage platform administrators, and suspend and
 reactivate organizations; every platform action is permission-checked, requires a verified second
 factor (and step-up where the design says so) and writes exactly one platform audit entry in the
 same transaction; no platform path can read customer business data; the design's acceptance tests
