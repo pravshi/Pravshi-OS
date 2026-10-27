@@ -715,6 +715,15 @@ describe('update rules', () => {
     expect(rows[0]!.id).toBe(assoc2);
   });
 
+  it('a link column never changes, for app_user too (0036 trigger; it fires without EXECUTE, 0082)', async () => {
+    await expect(
+      inContext(ctxOf(g), `update public.company_contacts set contact_id=$1 where id=$2`, [
+        ct3,
+        assoc2,
+      ]),
+    ).rejects.toThrow(/company_contacts link is immutable/);
+  });
+
   it('a viewer without edit reaches zero rows on update', async () => {
     const rows = await inContext<{ id: string }>(
       ctxOf(vNone),

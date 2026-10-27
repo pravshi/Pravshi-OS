@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0081 (production still pending — see the
+Database migrations: 0063–0082 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
@@ -141,6 +141,13 @@ Database migrations: 0063–0081 (production still pending — see the
 
 ### Security
 
+- Least-privilege cleanup (migration 0082, found by the V1 acceptance review). The two
+  link-immutability trigger functions from 0036 no longer carry PUBLIC EXECUTE (the triggers
+  still fire for every role), and `app_user` no longer holds DELETE on webhook deliveries,
+  inbound events and sync checkpoints — tables with no DELETE policy, where a DELETE used to
+  match no row and is now refused with 42501. Connections and subscriptions keep the DELETE
+  their disconnect and delete flows need; retention still purges through its definer.
+  Prepared rollback: `scripts/db/rollback/0082_least_privilege_cleanup.down.sql`.
 - Audit history cannot be truncated (migration 0078, Phase 3 MT-L3). `audit_logs` — the
   parent and every partition, including partitions created later — `login_events` and
   `engagement_events` refuse TRUNCATE, so a TRUNCATE … CASCADE reaching them is refused as a

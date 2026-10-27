@@ -360,16 +360,18 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
         ),
       ),
     ).toBe('42501');
-    const del = await inCtx(
-      ctx,
-      `delete from public.integration_webhook_deliveries where id = $1::uuid`,
-      [deliveryB],
-    );
-    expect(del.rowCount).toBe(0);
+    // 0082: app_user holds no DELETE on integration_webhook_deliveries — refused before RLS is consulted.
+    expect(
+      await sqlstateOf(
+        inCtx(ctx, `delete from public.integration_webhook_deliveries where id = $1::uuid`, [
+          deliveryB,
+        ]),
+      ),
+    ).toBe('42501');
     expect(await ownerCount('integration_webhook_deliveries', deliveryB)).toBe(1);
   }, 60_000);
 
-  it('inbound events: cross-tenant rows are invisible; inserts naming org B are refused; deletes touch nothing', async () => {
+  it('inbound events: cross-tenant rows are invisible; inserts naming org B are refused; deletes are refused', async () => {
     const ctx = aliceCtx();
     expect(await countAs(ctx, 'integration_inbound_events', inboundA)).toBe(1);
     expect(await countAs(ctx, 'integration_inbound_events', inboundB)).toBe(0);
@@ -390,18 +392,19 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       [inboundB],
     );
     expect(upd.rowCount).toBe(0);
-    // No DELETE policy for app_user at all — even org A's own receipts stay.
-    const del = await inCtx(
-      ctx,
-      `delete from public.integration_inbound_events where id = $1::uuid`,
-      [inboundA],
-    );
-    expect(del.rowCount).toBe(0);
+    // No DELETE privilege for app_user (0082; there was never a DELETE policy) — even org A's
+    // own receipts stay.
+    // 0082: app_user holds no DELETE on integration_inbound_events — refused before RLS is consulted.
+    expect(
+      await sqlstateOf(
+        inCtx(ctx, `delete from public.integration_inbound_events where id = $1::uuid`, [inboundA]),
+      ),
+    ).toBe('42501');
     expect(await ownerCount('integration_inbound_events', inboundA)).toBe(1);
     expect(await ownerCount('integration_inbound_events', inboundB)).toBe(1);
   }, 60_000);
 
-  it('checkpoints: cross-tenant rows are invisible; inserts naming org B are refused; deletes touch nothing', async () => {
+  it('checkpoints: cross-tenant rows are invisible; inserts naming org B are refused; deletes are refused', async () => {
     const ctx = aliceCtx();
     expect(await countAs(ctx, 'integration_sync_checkpoints', checkpointA)).toBe(1);
     expect(await countAs(ctx, 'integration_sync_checkpoints', checkpointB)).toBe(0);
@@ -421,13 +424,16 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       [checkpointB],
     );
     expect(upd.rowCount).toBe(0);
-    // No DELETE policy for app_user (checkpoints die with their connection, via the owner).
-    const del = await inCtx(
-      ctx,
-      `delete from public.integration_sync_checkpoints where id = $1::uuid`,
-      [checkpointA],
-    );
-    expect(del.rowCount).toBe(0);
+    // No DELETE privilege for app_user (0082): checkpoints die with their connection, via the
+    // owner.
+    // 0082: app_user holds no DELETE on integration_sync_checkpoints — refused before RLS is consulted.
+    expect(
+      await sqlstateOf(
+        inCtx(ctx, `delete from public.integration_sync_checkpoints where id = $1::uuid`, [
+          checkpointA,
+        ]),
+      ),
+    ).toBe('42501');
     expect(await ownerCount('integration_sync_checkpoints', checkpointA)).toBe(1);
   }, 60_000);
 
@@ -586,12 +592,14 @@ describe.skipIf(!HAS_DB)('integrations RLS (§4.7) — the 0056 policy matrix', 
       [deliveryA],
     );
     expect(upd.rowCount).toBe(0);
-    const del = await inCtx(
-      ctx,
-      `delete from public.integration_webhook_deliveries where id = $1::uuid`,
-      [deliveryA],
-    );
-    expect(del.rowCount).toBe(0);
+    // 0082: app_user holds no DELETE on integration_webhook_deliveries — refused before RLS is consulted.
+    expect(
+      await sqlstateOf(
+        inCtx(ctx, `delete from public.integration_webhook_deliveries where id = $1::uuid`, [
+          deliveryA,
+        ]),
+      ),
+    ).toBe('42501');
     // The owner bypasses RLS but not triggers: the row is frozen for
     // everyone (purges run through a cleanup path, not an UPDATE).
     await expect(
