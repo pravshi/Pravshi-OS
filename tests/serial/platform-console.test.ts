@@ -1202,6 +1202,239 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     expect(late).toMatchObject({ status: 409, body: { error: 'CANNOT_REVOKE' } });
   });
 
+  it('first-administrator link refusals change nothing: no permission, tenant user, bad target, no email; races and replays', async () => {
+    const typeKey = (
+      await owner.query<{ type_key: string }>(
+        `select type_key from public.organizations where id = $1`,
+        [orgId],
+      )
+    ).rows[0]!.type_key;
+    const guardEmail = `mail.guard.${RUN}@tenant.example`;
+    const prov = await call('/api/platform/organizations', 'POST', {
+      cookie: adminCookie,
+      body: {
+        idempotencyKey: `console-${RUN}-guard`,
+        name: `Mail guard ${RUN}`,
+        slug: `mail-guard-${RUN}`,
+        timezone: 'Asia/Kolkata',
+        typeKey,
+        adminFullName: 'Mail guard Founder',
+        adminEmail: guardEmail,
+      },
+    });
+    expect(prov.status).toBe(201);
+    const gOrg = prov.body.orgId as string;
+    const setupState = async () =>
+      (
+        await owner.query<{ h: string; e: string; c: string | null }>(
+          `select encode(token_hash, 'hex') h, expires_at::text e, consumed_at::text c
+           from platform.org_admin_setup where org_id = $1`,
+          [gOrg],
+        )
+      ).rows[0];
+    const auditFor = async () =>
+      (
+        await owner.query<{ action: string; result: string; reason_code: string | null }>(
+          `select action, result, reason_code from platform.audit_events
+           where target_org_id = $1 order by occurred_at, id`,
+          [gOrg],
+        )
+      ).rows;
+    const revokePath = `/api/platform/organizations/${gOrg}/admin-setup/revoke`;
+    const reissuePath = `/api/platform/organizations/${gOrg}/admin-setup`;
+    const before = await setupState();
+    const sentBefore = mail.sent.length;
+
+    // An administrator without platform.organizations.assign_initial_admin: 403, a DENIED entry,
+    // and the pending link, its expiry and the mail outbox exactly as they were.
+    const weakEmail = `nosetup.${RUN}@platform.example`;
+    const weakInvite = await call('/api/platform/admins', 'POST', {
+      cookie: adminCookie,
+      body: {
+        idempotencyKey: `nosetup-${RUN}`,
+        email: weakEmail,
+        fullName: 'No Setup Permission',
+        permissions: ['platform.organizations.suspend'],
+      },
+    });
+    expect(weakInvite.status).toBe(201);
+    const weak = await activateAdmin(weakEmail, weakInvite.body.setupLink as string);
+    // The gate records a refusal before the route reads its target, so these carry no org id.
+    const auditBefore = await auditRows();
+    const deniedRevoke = await call('revokeSetup', 'POST', {
+      cookie: weak,
+      path: revokePath,
+      body: { reason: 'Not mine to revoke' },
+    });
+    expect(deniedRevoke).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    const deniedReissue = await call('reissue', 'POST', { cookie: weak, path: reissuePath });
+    expect(deniedReissue).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    expect(await setupState()).toEqual(before);
+    expect(mail.sent.length).toBe(sentBefore);
+    expect((await auditRows()).slice(auditBefore.length)).toEqual([
+      {
+        action: 'platform.organization.admin_setup_revoke',
+        result: 'DENIED',
+        reason_code: 'NO_PERMISSION',
+      },
+      {
+        action: 'platform.organization.admin_setup_reissue',
+        result: 'DENIED',
+        reason_code: 'NO_PERMISSION',
+      },
+    ]);
+
+    // No session: 401. A tenant user — even an organization's SUPER_ADMIN: 404. Nothing runs.
+    const anonymous = await call('revokeSetup', 'POST', {
+      path: revokePath,
+      body: { reason: 'Anonymous attempt' },
+    });
+    expect(anonymous.status).toBe(401);
+    const tenantCookie = await signIn(orgAdminEmail, ORG_ADMIN_PASSWORD);
+    for (const [route, path, body] of [
+      ['revokeSetup', revokePath, { reason: 'Tenant attempt' }],
+      ['reissue', reissuePath, undefined],
+    ] as const) {
+      expect((await call(route, 'POST', { cookie: tenantCookie, path, body })).status).toBe(404);
+    }
+
+    // Wrong or malformed targets and bodies, by an administrator who holds the permission.
+    const badTargets: [string, string, unknown, number][] = [
+      [
+        'revokeSetup',
+        `/api/platform/organizations/${randomUUID()}/admin-setup/revoke`,
+        { reason: 'Unknown organization' },
+        404,
+      ],
+      [
+        'revokeSetup',
+        '/api/platform/organizations/not-a-uuid/admin-setup/revoke',
+        { reason: 'Not a uuid' },
+        400,
+      ],
+      ['revokeSetup', revokePath, {}, 400],
+      ['revokeSetup', revokePath, { reason: 42 }, 400],
+      ['revokeSetup', revokePath, { reason: 'Valid reason', extra: true }, 400],
+      ['revokeSetup', revokePath, { reason: 'x'.repeat(501) }, 400],
+      ['reissue', `/api/platform/organizations/${randomUUID()}/admin-setup`, undefined, 404],
+      ['reissue', '/api/platform/organizations/not-a-uuid/admin-setup', undefined, 400],
+    ];
+    for (const [route, path, body, status] of badTargets) {
+      const r = await call(route, 'POST', { cookie: adminCookie, path, body });
+      expect(r.status, `${route} ${path} ${JSON.stringify(body)}`).toBe(status);
+      expect(JSON.stringify(r.body)).not.toMatch(/select |platform\.|sqlstate|token/i);
+    }
+    expect(await setupState()).toEqual(before);
+
+    // Re-issue without email configured: 503 before anything changes — the old link stays,
+    // nothing is sent, and no re-issue is recorded as done.
+    mail.configured = false;
+    let noMail;
+    try {
+      noMail = await call('reissue', 'POST', { cookie: adminCookie, path: reissuePath });
+    } finally {
+      mail.configured = true;
+    }
+    expect(noMail).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await setupState()).toEqual(before);
+    expect(mail.sent.length).toBe(sentBefore);
+    expect(
+      (await auditFor()).filter(
+        (r) => r.action === 'platform.organization.admin_setup_reissue' && r.result === 'SUCCESS',
+      ),
+    ).toEqual([]);
+    expect(
+      (
+        await call('/api/setup/organization/complete', 'POST', {
+          body: { token: 'not-a-real-token', password: ORG_ADMIN_PASSWORD },
+        })
+      ).status,
+    ).toBe(400);
+
+    // Two re-issues at once: both answer, two emails go out, exactly one link is live.
+    const [r1, r2] = await Promise.all([
+      call('reissue', 'POST', { cookie: adminCookie, path: reissuePath }),
+      call('reissue', 'POST', { cookie: adminCookie, path: reissuePath }),
+    ]);
+    expect([r1.status, r2.status]).toEqual([200, 200]);
+    const raced = mail.sent.slice(sentBefore).filter((m) => m.to === guardEmail);
+    expect(raced).toHaveLength(2);
+    const live = (await setupState())!.h;
+    const digests = raced.map((m) =>
+      createHash('sha256').update(tokenOf(m.link), 'utf8').digest('hex'),
+    );
+    expect(digests.filter((d) => d === live)).toHaveLength(1);
+    expect(digests).not.toContain(before!.h);
+
+    // Two revocations at once: both answer, one is recorded, and no link — old or new — works.
+    const [v1, v2] = await Promise.all([
+      call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Race one' },
+      }),
+      call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Race two' },
+      }),
+    ]);
+    expect([v1.status, v2.status]).toEqual([200, 200]);
+    expect(
+      (await auditFor()).filter((r) => r.action === 'platform.organization.admin_setup_revoked'),
+    ).toHaveLength(1);
+    for (const m of raced) {
+      const replay = await call('/api/setup/organization/complete', 'POST', {
+        body: { token: tokenOf(m.link), password: ORG_ADMIN_PASSWORD },
+      });
+      expect(replay).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    }
+    expect((await setupState())!.c).toBeNull();
+  });
+
+  it('no tenant database login can execute the 0087 functions (runtime, not only the migration check)', async () => {
+    const tenantLogins: [string, string][] = [
+      ['DATABASE_URL', 'app_user'],
+      ['DATABASE_URL_AUTH', 'app_auth'],
+      ['DATABASE_URL_WORKER', 'app_worker'],
+    ];
+    for (const [variable, role] of tenantLogins) {
+      const url = process.env[variable];
+      expect(url, `${variable} must be set for this check`).toBeTruthy();
+      const c = new Client({ connectionString: onDb(url!, dbName) });
+      await c.connect();
+      try {
+        const who = await c.query<{ u: string }>('select current_user u');
+        expect(who.rows[0]!.u).toBe(role);
+        for (const statement of [
+          `select * from platform.org_admin_setup_recipient('${orgId}'::uuid)`,
+          `select platform.revoke_org_admin_setup('${orgId}'::uuid, 'role check', gen_random_uuid())`,
+        ]) {
+          let code = 'NO ERROR';
+          try {
+            await c.query(statement);
+          } catch (e) {
+            code = String((e as { code?: unknown }).code);
+          }
+          expect(code, `${role}: ${statement.slice(7, 50)}`).toBe('42501');
+        }
+      } finally {
+        await c.end();
+      }
+    }
+    // And what the catalog says, for every role that is not app_platform or the owner.
+    const grants = await owner.query<{ fn: string; grantee: string }>(
+      `select p.proname fn, r.rolname grantee
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       cross join pg_roles r
+       where n.nspname = 'platform'
+         and p.proname in ('org_admin_setup_recipient', 'revoke_org_admin_setup')
+         and r.rolname in ('app_user', 'app_auth', 'app_worker', 'app_admin', 'public')
+         and has_function_privilege(r.oid, p.oid, 'execute')`,
+    );
+    expect(grants.rows).toEqual([]);
+  });
+
   it('no organization setup token ever appears in an API answer or in the audit', async () => {
     const tokens = mail.sent.map((m) => tokenOf(m.link));
     expect(tokens.length).toBeGreaterThan(5);
