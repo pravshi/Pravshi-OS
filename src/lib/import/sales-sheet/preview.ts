@@ -423,8 +423,13 @@ export function planPreview(
 
     // Deal: no natural key; same title + company + contact as a live deal, or as an earlier
     // committing row of this file, is a possible duplicate (AC-D3).
+    //
+    // R-3 (founder decision 2026-10-29): "create anyway" creates the selected deal ONCE. A row
+    // repeating a deal an earlier row of this file creates is decided on its own — under a key
+    // of its own (`<deal key>|repeat:<row>`) — so one decision never creates the repeats.
     let dealOutcome: Outcome | null = null;
     let dealKey = '';
+    let dealDecisionKey = '';
     if (cand.deal) {
       dealKey = `${normaliseKey(cand.deal.title)}|${companyKey}|${contactKey}`;
       const existingDealKey = `${normaliseKey(cand.deal.title)}|${existingKey}|${existingContactKey}`;
@@ -435,8 +440,9 @@ export function planPreview(
         (againstExisting && snapshot.dealKeys.has(existingDealKey)) || fileDeals.has(dealKey)
           ? 'POSSIBLE_DUPLICATE'
           : 'CREATE';
+      dealDecisionKey = fileDeals.has(dealKey) ? `${dealKey}|repeat:${rowNumber}` : dealKey;
       if (dealOutcome === 'POSSIBLE_DUPLICATE') {
-        const d = decisions.deals.get(dealKey);
+        const d = decisions.deals.get(dealDecisionKey);
         if (d === 'SKIP') skip = true;
         else if (d === 'CREATE_NEW') dealOutcome = 'CREATE';
       }
@@ -453,7 +459,7 @@ export function planPreview(
     }
     if (companyOutcome === 'POSSIBLE_DUPLICATE') unresolved.companies.add(companyKey);
     if (contactOutcome === 'POSSIBLE_DUPLICATE') unresolved.contacts.add(contactKey);
-    if (dealOutcome === 'POSSIBLE_DUPLICATE') unresolved.deals.add(dealKey);
+    if (dealOutcome === 'POSSIBLE_DUPLICATE') unresolved.deals.add(dealDecisionKey);
 
     // Within-file identity (AC-D4). A row with a possible duplicate is skipped unless the user
     // includes it, so until then it creates nothing a later row could link to: only rows without

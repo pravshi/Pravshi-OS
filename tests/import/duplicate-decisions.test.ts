@@ -349,3 +349,57 @@ describe('"use the existing contact" compares with that contact’s own deals (r
     });
   }
 });
+
+describe('"create anyway" creates the selected deal once; repeats are reviewed one by one (R-3)', () => {
+  const O = 'owner.one@pravshi.example';
+  const file = (rows: string) =>
+    bytes('Company,Contact First Name,Contact Last Name,Deal Title,Owner Email\n' + rows);
+
+  it('a repeat of a deal the file creates is its own possible duplicate, decided per row', () => {
+    const f = file(`Fresh Co,Cy,Lee,Big deal,${O}\nFresh Co,Cy,Lee,Big deal,${O}\n`);
+    const repeat = 'big deal|name:fresh co|name:cy lee|name:fresh co|repeat:3';
+    const undecided = buildPreview(f, REPRESENTATIVE_MAPPING, snapshot(), DEFAULT_LIMITS);
+    expect(outcomes(undecided)).toEqual([
+      [2, 'CREATE', 'CREATE', 'CREATE'],
+      [3, 'LINK', 'LINK', 'POSSIBLE_DUPLICATE'],
+    ]);
+    expect(undecided.unresolved.deals).toEqual([repeat]);
+    const created = buildPreview(
+      f,
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+      DEFAULT_LIMITS,
+      decide({ deals: [[repeat, 'CREATE_NEW']] }),
+    );
+    expect(created.counts.deals).toEqual({ create: 2, link: 0, possibleDuplicate: 0 });
+    const skipped = buildPreview(
+      f,
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+      DEFAULT_LIMITS,
+      decide({ deals: [[repeat, 'SKIP']] }),
+    );
+    expect(skipped.skippedRows).toEqual([3]);
+  });
+
+  it('"create anyway" on an existing deal creates it once; the identical repeat stays flagged', () => {
+    const f = file(`Name Only Ltd,Asha,Rao,Renewal,${O}\nName Only Ltd,Asha,Rao,Renewal,${O}\n`);
+    const p = buildPreview(
+      f,
+      REPRESENTATIVE_MAPPING,
+      snapshot(),
+      DEFAULT_LIMITS,
+      decide({
+        companies: [[COMPANY, 'LINK_EXISTING']],
+        contacts: [[ASHA, 'LINK_EXISTING']],
+        deals: [[ASHA_DEAL, 'CREATE_NEW']],
+      }),
+    );
+    expect(outcomes(p)).toEqual([
+      [2, 'LINK', 'LINK', 'CREATE'],
+      [3, 'LINK', 'LINK', 'POSSIBLE_DUPLICATE'],
+    ]);
+    expect(p.unresolved.deals).toEqual([`${ASHA_DEAL}|repeat:3`]);
+    expect(p.counts.deals.create).toBe(1);
+  });
+});

@@ -792,4 +792,30 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     );
     expect(counts.rows[0]).toEqual({ contacts: 1, deals: 1 });
   });
+
+  it('"create anyway" creates the deal once; an identical repeat in the file needs its own decision (R-3)', async () => {
+    const company = name('Repeat Deal Ltd');
+    const ex = await existing(company, [['Asha', 'Rao']], ['Renewal']);
+    const v = await upload(
+      HEADER + `${company},Asha,Rao,Renewal,${OWNER}\n` + `${company},Asha,Rao,Renewal,${OWNER}\n`,
+      'repeat.csv',
+    );
+    const ck = `name:${key(company)}`;
+    const ak = `name:asha rao|${ck}`;
+    const dk = `renewal|${ck}|${ak}`;
+    await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
+    await decide(v.id, 'CONTACT', ak, 'LINK_EXISTING');
+    const p = await decide(v.id, 'DEAL', dk, 'CREATE_NEW');
+    // The selected deal is created once; the repeat (row 3) is flagged under its own key.
+    expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [`${dk}|repeat:3`] });
+    // The deal decision does not decide the repeat: deciding the repeat key is separate.
+    await confirmWith(v.id, v.fileSha256);
+    await commit.runImportCommit(ctxOf(importer), v.id, randomUUID());
+    expect((await rowsOf(v.id)).map((r) => r.status)).toEqual(['CREATED', 'SKIPPED']);
+    const deals = await owner.query<{ n: number }>(
+      `select count(*)::int n from public.deals where company_id = $1 and title = 'Renewal'`,
+      [ex.companyId],
+    );
+    expect(deals.rows[0]!.n).toBe(2); // the existing one + exactly one created
+  });
 });
