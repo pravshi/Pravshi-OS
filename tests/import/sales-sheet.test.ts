@@ -29,6 +29,7 @@ const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
   ]),
   contactIdsByNameCompany: new Map(),
   companyKeyById: new Map([['c0000000-0000-4000-8000-000000000001', 'name:name only ltd']]),
+  contactKeyById: new Map(),
   dealKeys: new Set(),
   activeOwnersByEmail: new Map([
     ['owner.one@pravshi.example', OWNER_1],
@@ -336,5 +337,21 @@ describe('failed-rows export (AC-C4)', () => {
       `"9","'=HYPERLINK(""http://x"")","'+cmd","Owner Email: is not an active person"`,
     );
     expect(lines[2]).toBe(`"12","'-1","'@SUM(A1)","bad"`);
+  });
+});
+
+describe('a domain cell is a domain (review R-13)', () => {
+  it('refuses a domain with a space or a control character', () => {
+    for (const domain of ['acme .com', 'acme\u0001.com']) {
+      const p = buildPreview(
+        bytes(`Company,Company Domain,Owner Email\nAcme,${domain},owner.one@pravshi.example\n`),
+        REPRESENTATIVE_MAPPING,
+        snapshot(),
+      );
+      expect(p.validRows).toEqual([]);
+      expect(p.invalidRows[0]!.errors.map((e) => e.reason)).toContain(
+        'is not a valid domain (it contains a space or a control character)',
+      );
+    }
   });
 });

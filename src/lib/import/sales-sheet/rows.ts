@@ -99,6 +99,13 @@ export function buildCandidate(
     ...(get('companyCountryCode') ? { countryCode: get('companyCountryCode') } : {}),
   };
   const c = CreateCompanySchema.safeParse(companyRaw);
+  if (c.success && c.data.domain && /[\s\p{Cc}]/u.test(c.data.domain)) {
+    errors.push({
+      rowNumber,
+      column: header('companyDomain'),
+      reason: 'is not a valid domain (it contains a space or a control character)',
+    });
+  }
   if (c.success) company = c.data;
   else
     errors.push(

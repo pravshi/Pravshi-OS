@@ -170,6 +170,14 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     companyNames: new Set(companies.rows.map((c) => normaliseKey(c.name))),
     companyIdsByName: groupIds(companies.rows.map((c) => [normaliseKey(c.name), c.id])),
     companyKeyById: new Map(companies.rows.map((c) => [c.id, companyKeyOf(c.domain, c.name)])),
+    contactKeyById: new Map(
+      contacts.rows
+        .filter((c) => c.co_name !== null)
+        .map((c) => [
+          c.id,
+          contactKey(c.email, c.first_name, c.last_name, companyKeyOf(c.co_domain, c.co_name!)),
+        ]),
+    ),
     contactIdsByNameCompany: groupIds(
       contacts.rows
         .filter((c) => c.co_name !== null)

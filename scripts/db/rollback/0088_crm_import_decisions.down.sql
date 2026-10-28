@@ -26,11 +26,12 @@ begin
 end;
 $$;
 
--- Then the lock, before the import check: a confirmation in flight (its plan written, not yet
--- committed) holds crm_imports and crm_import_row_plans; this waits for it, then sees it QUEUED
--- and refuses. And none can start between the check and the drops.
+-- Then the lock, before the import check. EXCLUSIVE conflicts with the ROW SHARE lock a
+-- confirmation takes first (its FOR UPDATE on crm_imports), and crm_imports is locked first: a
+-- confirmation in flight finishes before this proceeds — it then sees the import QUEUED and
+-- refuses — and no confirmation can start between the check and the drops. Reads continue.
 lock table public.crm_imports, public.crm_import_row_plans, public.crm_import_decisions
-  in share row exclusive mode;
+  in exclusive mode;
 
 do $$
 begin

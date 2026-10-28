@@ -52,6 +52,12 @@ export interface OrgSnapshot {
    * existing one by decision is compared with THAT company's contacts and deals (review R-1).
    */
   companyKeyById: ReadonlyMap<string, string>;
+  /**
+   * Live contact id → the contact part of the keys its deals are filed under in dealKeys
+   * (`email:…` when it has an email, else `name:…|<company key>`). A row whose contact is linked
+   * to an existing one by decision is compared with THAT contact's deals (review R-11).
+   */
+  contactKeyById: ReadonlyMap<string, string>;
   /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
@@ -401,6 +407,10 @@ export function planPreview(
           contactDecidedNew = true;
         }
       }
+    }
+    // Linked by decision (here or on an earlier row): compare with that contact's own deals.
+    if (existingContactId !== null) {
+      existingContactKey = snapshot.contactKeyById.get(existingContactId) ?? existingContactKey;
     }
     // A new company's contact cannot be an existing contact of the existing company.
     if (newCompany && linksExistingContact) {

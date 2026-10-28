@@ -745,4 +745,51 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     );
     expect(counts.rows[0]).toEqual({ contacts: 1, deals: 1 });
   });
+
+  it('a contact linked by name whose record has an email meets that contact’s deals (R-11)', async () => {
+    const company = name('Email Contact Co');
+    const c = await owner.query<{ id: string }>(
+      `insert into public.companies (org_id, owner_person_id, name, domain, country_code)
+       values ($1, $2, $3, $4, 'IN') returning id`,
+      [org, importer, company, `email-contact-${tag}.example`],
+    );
+    const companyId = c.rows[0]!.id;
+    // The existing John HAS an email: his deals are filed under it. The file names him without.
+    const k = await owner.query<{ id: string }>(
+      `insert into public.contacts (org_id, owner_person_id, company_id, first_name, last_name, email)
+       values ($1, $2, $3, 'John', 'Smith', $4) returning id`,
+      [org, importer, companyId, `john.${tag}@email-contact.example`],
+    );
+    const pipe = await owner.query<{ pid: string; sid: string }>(
+      `select p.id pid, s.id sid from public.pipelines p join public.pipeline_stages s on s.pipeline_id = p.id
+       where p.org_id = $1 order by p.created_at, s.position limit 1`,
+      [org],
+    );
+    await owner.query(
+      `insert into public.deals (org_id, owner_person_id, title, company_id, contact_id, currency,
+                                 stage, pipeline_id, pipeline_stage_id)
+       values ($1, $2, 'Renewal', $3, $4, 'INR', 'NEW', $5, $6)`,
+      [org, importer, companyId, k.rows[0]!.id, pipe.rows[0]!.pid, pipe.rows[0]!.sid],
+    );
+    const v = await upload(
+      HEADER + `${company},John,Smith,Renewal,${OWNER}\n`,
+      'email-contact.csv',
+    );
+    const ck = `name:${key(company)}`;
+    const jk = `name:john smith|${ck}`;
+    const dk = `renewal|${ck}|${jk}`;
+    await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
+    const p = await decide(v.id, 'CONTACT', jk, 'LINK_EXISTING');
+    // Linked to that John, his Renewal is a possible duplicate — never created silently.
+    expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [dk] });
+    await confirmWith(v.id, v.fileSha256);
+    await commit.runImportCommit(ctxOf(importer), v.id, randomUUID());
+    expect((await rowsOf(v.id)).map((r) => r.status)).toEqual(['SKIPPED']);
+    const counts = await owner.query<{ contacts: number; deals: number }>(
+      `select (select count(*)::int from public.contacts where company_id = $1) contacts,
+              (select count(*)::int from public.deals where company_id = $1) deals`,
+      [companyId],
+    );
+    expect(counts.rows[0]).toEqual({ contacts: 1, deals: 1 });
+  });
 });

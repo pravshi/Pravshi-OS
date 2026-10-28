@@ -27,6 +27,7 @@ const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
   companyIdsByName: new Map([[normaliseKey('Name Only Ltd'), [EXISTING_CO]]]),
   contactIdsByNameCompany: new Map([[`${normaliseKey('Asha Rao')}|name:name only ltd`, [ASHA_ID]]]),
   companyKeyById: new Map([[EXISTING_CO, 'name:name only ltd']]),
+  contactKeyById: new Map([[ASHA_ID, 'name:asha rao|name:name only ltd']]),
   dealKeys: new Set(['renewal|name:name only ltd|name:asha rao|name:name only ltd']),
   activeOwnersByEmail: new Map([['owner.one@pravshi.example', OWNER]]),
   completedFileHashes: new Set(),
@@ -251,6 +252,7 @@ describe('"use the existing company" compares with that company’s own records 
     companyNames: new Set(['acme']),
     companyIdsByName: new Map([['acme', [ACME]]]),
     companyKeyById: new Map([[ACME, 'domain:acme.com']]),
+    contactKeyById: new Map([[JOHN, 'name:john smith|domain:acme.com']]),
     contactEmails: new Map([['jo@acme.com', 'domain:acme.com']]),
     contactNameCompany: new Set(['john smith|domain:acme.com']),
     contactIdsByNameCompany: new Map([['john smith|domain:acme.com', [JOHN]]]),
@@ -304,4 +306,46 @@ describe('keys never carry a control character (review R-2)', () => {
     expect(normaliseKey('  Acme\u0001\u007f Ltd\t')).toBe('acme ltd');
     expect(normaliseKey('A\u0085B')).toBe('a b');
   });
+});
+
+describe('"use the existing contact" compares with that contact’s own deals (review R-11)', () => {
+  // The existing John has an email: his deals are filed under email:john@acme.com. The file names
+  // him without it, so he is matched by name — and once linked, his deals must still be found.
+  const JOHN_ID = 'a0000000-0000-4000-8000-0000000000bb';
+  const O = 'owner.one@pravshi.example';
+  const file = bytes(
+    'Company,Contact First Name,Contact Last Name,Deal Title,Owner Email\n' +
+      `Acme,John,Smith,Renewal,${O}\n`,
+  );
+  const decided = decide({
+    companies: [['name:acme', 'LINK_EXISTING']],
+    contacts: [['name:john smith|name:acme', 'LINK_EXISTING']],
+  });
+  for (const [label, companyKey, domains] of [
+    ['with a company domain', 'domain:acme.com', ['acme.com']],
+    ['without one', 'name:acme', []],
+  ] as const) {
+    it(`the linked contact's existing deal is a possible duplicate (${label})`, () => {
+      const ACME_ID = 'c0000000-0000-4000-8000-0000000000bb';
+      const p = buildPreview(
+        file,
+        REPRESENTATIVE_MAPPING,
+        snapshot({
+          companyDomains: new Set(domains),
+          companyNames: new Set(['acme']),
+          companyIdsByName: new Map([['acme', [ACME_ID]]]),
+          companyKeyById: new Map([[ACME_ID, companyKey]]),
+          contactEmails: new Map([['john@acme.com', companyKey]]),
+          contactNameCompany: new Set([`john smith|${companyKey}`]),
+          contactIdsByNameCompany: new Map([[`john smith|${companyKey}`, [JOHN_ID]]]),
+          contactKeyById: new Map([[JOHN_ID, 'email:john@acme.com']]),
+          dealKeys: new Set([`renewal|${companyKey}|email:john@acme.com`]),
+        }),
+        DEFAULT_LIMITS,
+        decided,
+      );
+      expect(outcomes(p)).toEqual([[2, 'LINK', 'LINK', 'POSSIBLE_DUPLICATE']]);
+      expect(p.validRows[0]!.existingContactId).toBe(JOHN_ID);
+    });
+  }
 });
