@@ -32,6 +32,7 @@ describe('0088 does what its rollback undoes', () => {
     expect(heads).toEqual([
       'begin;',
       "set local lock_timeout = '5s';",
+      'lock table public.crm_imports, public.crm_import_row_plans, public.crm_import_decisions in share row exclusive mode;',
       expect.stringMatching(
         /__drizzle_migrations\) <> 88[\s\S]*status in \('QUEUED', 'RUNNING'\)[\s\S]*crm_import_row_plans/,
       ),

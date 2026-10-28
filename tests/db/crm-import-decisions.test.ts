@@ -466,7 +466,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
         v.id,
       ])
     ).rows[0]!.status;
-    // The two serialise on the import row (confirm locks it; a decision takes a share lock).
+    // The two serialise on the import row (both lock it FOR UPDATE; the guard re-checks with a share lock).
     // Exactly one of them wins, and the loser is refused — never both, never neither.
     expect([conf.status, late.status].sort()).toEqual(['fulfilled', 'rejected']);
     const decisions = await owner.query<{ n: number }>(
@@ -696,5 +696,53 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     expect(row!.status).toBe('CREATED');
     expect(row!.contact_id).not.toBe(ex.contactIds[0]);
     expect(await companiesNamed(company)).toBe(2);
+  });
+
+  it('a name-only row linked to an existing company WITH a domain meets that company’s contact and deal (R-1)', async () => {
+    const company = name('Domain Co');
+    const domain = `domain-${tag}.example`;
+    const c = await owner.query<{ id: string }>(
+      `insert into public.companies (org_id, owner_person_id, name, domain, country_code)
+       values ($1, $2, $3, $4, 'IN') returning id`,
+      [org, importer, company, domain],
+    );
+    const companyId = c.rows[0]!.id;
+    const k = await owner.query<{ id: string }>(
+      `insert into public.contacts (org_id, owner_person_id, company_id, first_name, last_name)
+       values ($1, $2, $3, 'John', 'Smith') returning id`,
+      [org, importer, companyId],
+    );
+    const pipe = await owner.query<{ pid: string; sid: string }>(
+      `select p.id pid, s.id sid from public.pipelines p join public.pipeline_stages s on s.pipeline_id = p.id
+       where p.org_id = $1 order by p.created_at, s.position limit 1`,
+      [org],
+    );
+    await owner.query(
+      `insert into public.deals (org_id, owner_person_id, title, company_id, contact_id, currency,
+                                 stage, pipeline_id, pipeline_stage_id)
+       values ($1, $2, 'Renewal', $3, $4, 'INR', 'NEW', $5, $6)`,
+      [org, importer, companyId, k.rows[0]!.id, pipe.rows[0]!.pid, pipe.rows[0]!.sid],
+    );
+    const v = await upload(HEADER + `${company},John,Smith,Renewal,${OWNER}\n`, 'domain.csv');
+    const ck = `name:${key(company)}`;
+    let p = await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
+    // Linked to the domain company, its John and his deal are possible duplicates, not new.
+    const jk = `name:john smith|${ck}`;
+    const dk = `renewal|${ck}|${jk}`;
+    expect(p.unresolved).toEqual({ companies: [], contacts: [jk], deals: [dk] });
+    p = await decide(v.id, 'CONTACT', jk, 'LINK_EXISTING');
+    p = await decide(v.id, 'DEAL', dk, 'SKIP');
+    expect(p.skippedRows).toEqual([2]);
+    await decide(v.id, 'DEAL', dk, null);
+    await confirmWith(v.id, v.fileSha256);
+    await commit.runImportCommit(ctxOf(importer), v.id, randomUUID());
+    // Undecided deal: the row is skipped — no second John, no second Renewal.
+    expect((await rowsOf(v.id)).map((r) => r.status)).toEqual(['SKIPPED']);
+    const counts = await owner.query<{ contacts: number; deals: number }>(
+      `select (select count(*)::int from public.contacts where company_id = $1) contacts,
+              (select count(*)::int from public.deals where company_id = $1) deals`,
+      [companyId],
+    );
+    expect(counts.rows[0]).toEqual({ contacts: 1, deals: 1 });
   });
 });

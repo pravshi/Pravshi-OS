@@ -22,7 +22,8 @@ Database migrations: 0063–0088 (production still pending — see the
   Decisions are made by the importer before confirmation; the confirmation records the plan row
   by row, and the commit (both its batch and per-row paths, and any retry) applies exactly that
   plan. An import with no decisions keeps 0081's behaviour: a row clean at upload is not
-  re-checked against records created later. Prepared rollback (refuses while a decided import is
+  re-checked against records created later. A "create anyway" decision on a deal applies to every row of the file that
+  repeats that deal (same title, company and contact) — pending the founder's confirmation (R-3). Prepared rollback (refuses while a decided import is
   queued or running): `scripts/db/rollback/0088_crm_import_decisions.down.sql`.
 - First-administrator setup links by email only (founder policy 2026-10-29, migration 0087). When
   the platform provisions an organization or re-issues its first administrator's link, the link is

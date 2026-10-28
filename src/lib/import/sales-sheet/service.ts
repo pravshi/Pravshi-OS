@@ -169,6 +169,7 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     ),
     companyNames: new Set(companies.rows.map((c) => normaliseKey(c.name))),
     companyIdsByName: groupIds(companies.rows.map((c) => [normaliseKey(c.name), c.id])),
+    companyKeyById: new Map(companies.rows.map((c) => [c.id, companyKeyOf(c.domain, c.name)])),
     contactIdsByNameCompany: groupIds(
       contacts.rows
         .filter((c) => c.co_name !== null)
@@ -569,8 +570,11 @@ export async function confirmImport(
           fileName: row.file_name,
           fileSha256: row.file_sha256,
           dataRows: row.data_rows,
-          validRows: row.preview_counts.counts.validRows,
-          invalidRows: row.preview_counts.counts.invalidRows,
+          // A decided import starts from the counts confirmed, not the upload's (R-6).
+          validRows: (decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts)
+            .validRows,
+          invalidRows: (decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts)
+            .invalidRows,
           includedRows: include.length,
           reimport: earlier !== null,
         })}::jsonb,
@@ -848,7 +852,11 @@ export async function setDecision(
       }
     } catch (error) {
       const code = sqlstateOf(error);
-      // The guard's state refusal; the key-format check cannot fail here (validated above).
+      // The key-format check (a key the import itself could not have raised) is not the
+      // guard's state refusal: answered as an invalid decision, never with the key (R-2).
+      if (code === '23514' && constraintOf(error) === 'crm_import_decisions_key_format') {
+        throw new ImportServiceError('INVALID_DECISION', 'That key cannot be decided.');
+      }
       if (code === '23514') {
         throw new ImportServiceError(
           'NOT_PREVIEWED',
@@ -868,7 +876,8 @@ export async function setDecision(
  * The confirmed plan of a decided import (0088 crm_import_row_plans), for every row still
  * PENDING: a row the decisions skip, or that still has an undecided possible duplicate, or that
  * the decisions make invalid, is skipped; otherwise it records the existing company / contact
- * the row's "use the existing" decision resolved to — by id, as the user saw it — or none.
+ * the row's "use the existing" decision resolved to — by id, resolved at confirmation against
+ * the organization then — or none. The user confirms the counts, not the ids (R-7).
  */
 async function recordRowPlans(
   tx: Tx,
@@ -918,6 +927,15 @@ function sqlstateOf(error: unknown): string | null {
   for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
     const code = (e as { code?: unknown }).code;
     if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+}
+
+/** The violated constraint's name, on the error or its cause. */
+function constraintOf(error: unknown): string | null {
+  for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+    const constraint = (e as { constraint?: unknown }).constraint;
+    if (typeof constraint === 'string') return constraint;
   }
   return null;
 }

@@ -28,6 +28,7 @@ const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
     [normaliseKey('Name Only Ltd'), ['c0000000-0000-4000-8000-000000000001']],
   ]),
   contactIdsByNameCompany: new Map(),
+  companyKeyById: new Map([['c0000000-0000-4000-8000-000000000001', 'name:name only ltd']]),
   dealKeys: new Set(),
   activeOwnersByEmail: new Map([
     ['owner.one@pravshi.example', OWNER_1],

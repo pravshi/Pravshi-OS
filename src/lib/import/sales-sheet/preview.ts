@@ -46,6 +46,12 @@ export interface OrgSnapshot {
   companyIdsByName: ReadonlyMap<string, readonly string[]>;
   /** `${normalisedFullName}|${normalisedCompanyKey}` → the ids of the live contacts it names. */
   contactIdsByNameCompany: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Live company id → the key its own contacts and deals are recorded under (`domain:…` when it
+   * has a domain, else `name:…`). A row that names a company by name only and is linked to an
+   * existing one by decision is compared with THAT company's contacts and deals (review R-1).
+   */
+  companyKeyById: ReadonlyMap<string, string>;
   /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
@@ -54,8 +60,15 @@ export interface OrgSnapshot {
   completedFileHashes: ReadonlySet<string>;
 }
 
-/** Trimmed, case-folded, internal whitespace collapsed (AC-D1). */
-export const normaliseKey = (s: string) => s.trim().toLocaleLowerCase('en').replace(/\s+/g, ' ');
+/**
+ * Trimmed, case-folded, internal whitespace collapsed (AC-D1). Control characters count as
+ * whitespace: a key never carries one (the 0088 key-format check refuses them).
+ */
+export const normaliseKey = (s: string) =>
+  s
+    .toLocaleLowerCase('en')
+    .replace(/[\s\p{Cc}]+/gu, ' ')
+    .trim();
 
 export type Outcome = 'CREATE' | 'LINK' | 'POSSIBLE_DUPLICATE';
 
@@ -314,6 +327,17 @@ export function planPreview(
      * contacts or deals to collide with.
      */
     const newCompany = companyDecision === 'CREATE_NEW' || (seen?.decidedNew ?? false);
+    /**
+     * The key the organization's records of this row's company are filed under: the linked
+     * company's own key when a decision linked it (it may have a domain the file omits), else
+     * the row's. Within-file identity keeps the row's key.
+     */
+    const existingKey =
+      existingCompanyId !== null
+        ? (snapshot.companyKeyById.get(existingCompanyId) ?? companyKey)
+        : companyKey;
+    /** The row's contact as the organization would key it under existingKey ('' for none). */
+    let existingContactKey = '';
 
     // Contact: email is the natural key; name + company is a possible duplicate. An email that
     // already belongs to a contact under another company is a row error: the commit would refuse
@@ -328,6 +352,7 @@ export function planPreview(
       const fullName = normaliseKey(`${cand.contact.firstName} ${cand.contact.lastName}`);
       const email = cand.contact.email ? normaliseKey(cand.contact.email) : null;
       contactKey = email ? `email:${email}` : `name:${fullName}|${companyKey}`;
+      existingContactKey = email ? contactKey : `name:${fullName}|${existingKey}`;
       const inFile = fileContacts.get(contactKey);
       const existing = email ? snapshot.contactEmails.get(email) : undefined;
       if (inFile !== undefined) {
@@ -335,7 +360,7 @@ export function planPreview(
         contactDecidedNew = inFile.decidedNew;
       }
       if (inFile !== undefined || existing !== undefined) {
-        if ((inFile !== undefined ? inFile.companyKey : existing) !== companyKey) {
+        if (inFile !== undefined ? inFile.companyKey !== companyKey : existing !== existingKey) {
           errors.push({
             rowNumber,
             column: spec.columns.contactEmail?.header ?? 'contactEmail',
@@ -347,7 +372,7 @@ export function planPreview(
       } else if (
         !email &&
         !newCompany &&
-        snapshot.contactNameCompany.has(`${fullName}|${companyKey}`)
+        snapshot.contactNameCompany.has(`${fullName}|${existingKey}`)
       ) {
         contactOutcome = 'POSSIBLE_DUPLICATE';
       } else {
@@ -358,7 +383,7 @@ export function planPreview(
         if (d === 'SKIP') skip = true;
         else if (d === 'LINK_EXISTING') {
           contactOutcome = 'LINK';
-          const ids = snapshot.contactIdsByNameCompany.get(`${fullName}|${companyKey}`) ?? [];
+          const ids = snapshot.contactIdsByNameCompany.get(`${fullName}|${existingKey}`) ?? [];
           if (ids.length === 1) {
             existingContactId = ids[0]!;
           } else {
@@ -392,11 +417,12 @@ export function planPreview(
     let dealKey = '';
     if (cand.deal) {
       dealKey = `${normaliseKey(cand.deal.title)}|${companyKey}|${contactKey}`;
+      const existingDealKey = `${normaliseKey(cand.deal.title)}|${existingKey}|${existingContactKey}`;
       // Only an explicit "create new" decision rules out the existing deals: a record the user
       // declared new has none.
       const againstExisting = !newCompany && !contactDecidedNew;
       dealOutcome =
-        (againstExisting && snapshot.dealKeys.has(dealKey)) || fileDeals.has(dealKey)
+        (againstExisting && snapshot.dealKeys.has(existingDealKey)) || fileDeals.has(dealKey)
           ? 'POSSIBLE_DUPLICATE'
           : 'CREATE';
       if (dealOutcome === 'POSSIBLE_DUPLICATE') {

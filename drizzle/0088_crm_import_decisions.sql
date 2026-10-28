@@ -15,7 +15,7 @@
 -- Decisions are made by the importer, while the import is PREVIEWED, and are frozen from
 -- confirmation on. The confirmation also records the plan the user confirmed, row by row
 -- (crm_import_row_plans): skip, or link to the existing company / contact a "use the existing"
--- decision resolved to — by id, as the user saw it. The commit applies exactly that plan
+-- decision resolved to — by id, resolved at confirmation. The commit applies exactly that plan
 -- (the batch path included), so a commit retry, or records the import itself created, never
 -- change what a row does. Additive: no change to 0081's tables; crm_import_rows' recorded plan
 -- stays immutable.
