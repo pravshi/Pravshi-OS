@@ -46,7 +46,8 @@ export type PlatformOperation =
   | 'platform.organization.list'
   | 'platform.audit.list'
   | 'platform.admin.list'
-  | 'platform.admin.setup_reissue';
+  | 'platform.admin.setup_reissue'
+  | 'platform.organization.admin_setup_revoke';
 
 export interface PlatformGate {
   operation: PlatformOperation;

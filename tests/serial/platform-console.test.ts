@@ -1,8 +1,34 @@
 import { spawnSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client, Pool } from '@neondatabase/serverless';
 import { DB_READY } from '../workflows/helpers';
+
+/**
+ * First-administrator setup links go out by email only (0087 policy). The mail provider is
+ * replaced here: what the platform hands it is captured, so the suite completes setup with the
+ * very link the recipient would receive, and can prove the link appears in no API answer.
+ */
+const mail = vi.hoisted(() => ({
+  configured: true,
+  accept: true,
+  sent: [] as { to: string; link: string }[],
+}));
+vi.mock('@/lib/platform/setup-email', () => ({
+  isSetupEmailConfigured: () => mail.configured,
+  sendOrgAdminSetupEmail: async (m: { to: string; link: string }) => {
+    mail.sent.push({ to: m.to, link: m.link });
+    return mail.accept;
+  },
+}));
+/** Every API answer body the suite saw, to prove no setup token ever appears in one. */
+const answers: string[] = [];
+/** The latest link emailed to an address. */
+const linkSentTo = (email: string): string => {
+  const m = [...mail.sent].reverse().find((x) => x.to.toLowerCase() === email.toLowerCase());
+  if (!m) throw new Error(`no setup email was sent to ${email}`);
+  return m.link;
+};
 
 /**
  * The platform console end to end (ADR-008): the operator CLI, the setup links, sign-in and
@@ -128,10 +154,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       }),
     );
-    return {
-      status: res.status,
-      body: ((await res.json().catch(() => ({}))) ?? {}) as Record<string, unknown>,
-    };
+    const text = await res.text();
+    answers.push(text);
+    let body: Record<string, unknown> = {};
+    try {
+      body = (JSON.parse(text) ?? {}) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    return { status: res.status, body };
   };
 
   /** Mediated sign-in (+ TOTP when the login has a factor): the session cookie. */
@@ -263,6 +294,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       suspend: await import('@/app/api/platform/organizations/[orgId]/suspend/route'),
       reactivate: await import('@/app/api/platform/organizations/[orgId]/reactivate/route'),
       reissue: await import('@/app/api/platform/organizations/[orgId]/admin-setup/route'),
+      revokeSetup:
+        await import('@/app/api/platform/organizations/[orgId]/admin-setup/revoke/route'),
       '/api/platform/admins': await import('@/app/api/platform/admins/route'),
       revoke: await import('@/app/api/platform/admins/[adminId]/revoke/route'),
       adminSetup: await import('@/app/api/platform/admins/[adminId]/setup/route'),
@@ -398,8 +431,12 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(created.status).toBe(201);
     orgId = created.body.orgId as string;
-    const link = created.body.setupLink as string;
+    // Email only: the answer says where the link went, never the link.
+    expect(created.body).toMatchObject({ emailed: true, recipient: orgAdminEmail });
+    expect(created.body.setupLink).toBeUndefined();
+    const link = linkSentTo(orgAdminEmail);
     expect(link.startsWith(`${ORIGIN}/setup/organization#token=`)).toBe(true);
+    const sentBeforeReplay = mail.sent.length;
     orgSetupToken = tokenOf(link);
 
     const replay = await call('/api/platform/organizations', 'POST', {
@@ -408,6 +445,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(replay).toMatchObject({ status: 200, body: { replayed: true, orgId } });
     expect(replay.body.setupLink).toBeUndefined();
+    expect(mail.sent.length, 'a replay sends nothing').toBe(sentBeforeReplay);
     const conflict = await call('/api/platform/organizations', 'POST', {
       cookie: adminCookie,
       body: { ...request, name: 'Different' },
@@ -441,7 +479,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       call('/api/platform/organizations', 'POST', { cookie: adminCookie, body: raced }),
     ]);
     expect(both.map((r) => r.status).sort()).toEqual([200, 201]);
-    expect(both.filter((r) => r.body.setupLink)).toHaveLength(1);
+    expect(both.filter((r) => r.body.emailed === true)).toHaveLength(1);
+    expect(mail.sent.filter((m) => m.to === raced.adminEmail)).toHaveLength(1);
     expect(
       (
         await owner.query(`select count(*)::int n from public.organizations where slug = $1`, [
@@ -476,8 +515,10 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       path: `/api/platform/organizations/${orgId}/admin-setup`,
     });
     expect(reissued.status).toBe(200);
+    expect(reissued.body).toMatchObject({ emailed: true, recipient: orgAdminEmail });
+    expect(reissued.body.setupLink).toBeUndefined();
     const oldToken = orgSetupToken;
-    orgSetupToken = tokenOf(reissued.body.setupLink as string);
+    orgSetupToken = tokenOf(linkSentTo(orgAdminEmail));
 
     // An expired link is refused like any dead one; a re-issue replaces it (Priority 3).
     await owner.query(
@@ -496,7 +537,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(renewed.status).toBe(200);
     const expiredToken = orgSetupToken;
-    orgSetupToken = tokenOf(renewed.body.setupLink as string);
+    orgSetupToken = tokenOf(linkSentTo(orgAdminEmail));
     expect(orgSetupToken).not.toBe(expiredToken);
 
     const stale = await call('/api/setup/organization/complete', 'POST', {
@@ -1014,7 +1055,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(reissued.status).toBe(200);
     const done = await call('/api/setup/organization/complete', 'POST', {
-      body: { token: tokenOf(reissued.body.setupLink as string), password: ORG_ADMIN_PASSWORD },
+      body: { token: tokenOf(linkSentTo(request.adminEmail)), password: ORG_ADMIN_PASSWORD },
     });
     expect(done.status).toBe(200);
     const login = await owner.query<{ email: string }>(
@@ -1037,6 +1078,132 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       personId,
       `renamed.${RUN}@tenant.example`,
     ]);
+  });
+
+  it('setup links are email only: refused unconfigured, audited when undelivered, revocable', async () => {
+    const typeKey = (
+      await owner.query<{ type_key: string }>(
+        `select type_key from public.organizations where id = $1`,
+        [orgId],
+      )
+    ).rows[0]!.type_key;
+    const provision = (tag: string) =>
+      call('/api/platform/organizations', 'POST', {
+        cookie: adminCookie,
+        body: {
+          idempotencyKey: `console-${RUN}-${tag}`,
+          name: `Mail ${tag} ${RUN}`,
+          slug: `mail-${tag}-${RUN}`,
+          timezone: 'Asia/Kolkata',
+          typeKey,
+          adminFullName: `Mail ${tag} Founder`,
+          adminEmail: `mail.${tag}.${RUN}@tenant.example`,
+        },
+      });
+
+    // Not configured: refused before anything exists — no link nobody can receive.
+    mail.configured = false;
+    try {
+      const refused = await provision('off');
+      expect(refused).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    } finally {
+      mail.configured = true;
+    }
+    expect(
+      (
+        await owner.query(`select count(*)::int n from public.organizations where slug = $1`, [
+          `mail-off-${RUN}`,
+        ])
+      ).rows[0],
+    ).toEqual({ n: 0 });
+
+    // Not accepted by the provider: the organization stands, the failure is audited, no link.
+    mail.accept = false;
+    let undelivered;
+    try {
+      undelivered = await provision('fail');
+    } finally {
+      mail.accept = true;
+    }
+    expect(undelivered.status).toBe(201);
+    expect(undelivered.body).toMatchObject({ emailed: false });
+    expect(undelivered.body.setupLink).toBeUndefined();
+    const failedOrg = undelivered.body.orgId as string;
+    const failures = await owner.query<{ result: string; reason_code: string }>(
+      `select result, reason_code from platform.audit_events
+       where target_org_id = $1 and action = 'platform.organization.provision'`,
+      [failedOrg],
+    );
+    expect(failures.rows).toContainEqual({ result: 'ERROR', reason_code: 'EMAIL_DELIVERY_FAILED' });
+    // A re-issue sends a fresh one to the recorded recipient.
+    const resent = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${failedOrg}/admin-setup`,
+    });
+    expect(resent).toMatchObject({
+      status: 200,
+      body: { emailed: true, recipient: `mail.fail.${RUN}@tenant.example` },
+    });
+
+    // Revocation ends the pending link without issuing another; audited; re-issue works after.
+    const revocable = await provision('revoke');
+    expect(revocable.status).toBe(201);
+    const revOrg = revocable.body.orgId as string;
+    const revToken = tokenOf(linkSentTo(`mail.revoke.${RUN}@tenant.example`));
+    const noReason = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'x' },
+    });
+    expect(noReason.status).toBe(400);
+    const revoked = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'Sent to the wrong person' },
+    });
+    expect(revoked.status).toBe(200);
+    const dead = await call('/api/setup/organization/complete', 'POST', {
+      body: { token: revToken, password: ORG_ADMIN_PASSWORD },
+    });
+    expect(dead).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    const audited = await owner.query<{ actor_admin_id: string | null }>(
+      `select actor_admin_id from platform.audit_events
+       where target_org_id = $1 and action = 'platform.organization.admin_setup_revoked'`,
+      [revOrg],
+    );
+    expect(audited.rows).toHaveLength(1);
+    expect(audited.rows[0]!.actor_admin_id).not.toBeNull();
+    const again = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup`,
+    });
+    expect(again).toMatchObject({ status: 200, body: { emailed: true } });
+    const done = await call('/api/setup/organization/complete', 'POST', {
+      body: {
+        token: tokenOf(linkSentTo(`mail.revoke.${RUN}@tenant.example`)),
+        password: ORG_ADMIN_PASSWORD,
+      },
+    });
+    expect(done.status).toBe(200);
+    const late = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'Too late to revoke' },
+    });
+    expect(late).toMatchObject({ status: 409, body: { error: 'CANNOT_REVOKE' } });
+  });
+
+  it('no organization setup token ever appears in an API answer or in the audit', async () => {
+    const tokens = mail.sent.map((m) => tokenOf(m.link));
+    expect(tokens.length).toBeGreaterThan(5);
+    const everything = answers.join(' ');
+    for (const t of tokens) expect(everything.includes(t), 'a token in an API answer').toBe(false);
+    const audit = await owner.query<{ m: string }>(
+      `select coalesce(string_agg(metadata::text || coalesce(reason_code, ''), ' '), '') m
+       from platform.audit_events`,
+    );
+    for (const t of tokens)
+      expect(audit.rows[0]!.m.includes(t), 'a token in the audit').toBe(false);
   });
 
   it('pages the audit trail newest first without gaps or repeats', async () => {
