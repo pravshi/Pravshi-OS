@@ -318,8 +318,12 @@ end;
 $$;
 
 -- A new link for an invited administrator who has never set up a login (the first link was
--- lost or expired). The recipient is the invitation's; the previous link stops working. An
--- administrator who has a login — set up, or in recovery — is the operator's (break glass).
+-- lost or expired). The recipient is the invitation's; the previous link stops working. Only
+-- the administrator who sent the invitation may re-issue it, and only while they still hold
+-- every permission it grants (review S2-1): whoever holds the link can claim that identity, so
+-- a re-issue must never hand anyone more than an invitation of their own could. Everything
+-- else — another administrator's invitation, one who has a login (set up, or in recovery) — is
+-- the operator's (break glass).
 create function platform.reissue_admin_setup(p_admin_id uuid, p_setup_token_hash bytea, p_request_id uuid)
 returns timestamptz
 language plpgsql
@@ -340,6 +344,19 @@ begin
   if v_admin.status <> 'PENDING_ENROLMENT' or v_admin.auth_user_id is not null then
     raise exception 'platform: only an invitation that was never used can be re-issued here'
       using errcode = '55000';
+  end if;
+  if v_admin.created_by is distinct from v_actor then
+    raise exception 'platform: only the administrator who sent this invitation can re-issue it'
+      using errcode = '42501';
+  end if;
+  if exists (
+    select 1 from platform.admin_permissions ap
+    where ap.admin_id = v_admin.id
+      and not exists (select 1 from platform.admin_permissions mine
+                      where mine.admin_id = v_actor and mine.permission_key = ap.permission_key)
+  ) then
+    raise exception 'platform: the invitation grants a permission you no longer hold'
+      using errcode = '42501';
   end if;
 
   insert into platform.setup_tokens (admin_id, token_hash, issued_at, expires_at)

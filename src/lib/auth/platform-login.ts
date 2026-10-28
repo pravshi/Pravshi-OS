@@ -31,11 +31,41 @@ export async function loginMaySignIn(authUserId: string): Promise<boolean> {
   }
 }
 
-/** True when the session was a platform administrator's past the limits, and is now ended. */
+/**
+ * True when the session was a platform administrator's past the limits, and is now ended.
+ * Fails closed: if the question cannot be answered the request fails — but never with the
+ * driver's error, whose message carries the query's parameters, here the bearer token itself
+ * (review S2-2). Only the error's name and SQLSTATE are logged; a fresh error is thrown.
+ */
 export async function endStaleAdminSession(token: string): Promise<boolean> {
   if (token.length === 0 || token.length > 512) return false;
-  const r = await authDb.execute<{ ended: boolean }>(
-    sql`select platform.end_stale_admin_session(${token}) as ended`,
-  );
-  return r.rows[0]?.ended === true;
+  try {
+    const r = await authDb.execute<{ ended: boolean }>(
+      sql`select platform.end_stale_admin_session(${token}) as ended`,
+    );
+    return r.rows[0]?.ended === true;
+  } catch (e) {
+    const sqlstate = sqlstateOf(e);
+    console.error('[auth] platform session check failed', {
+      name: e instanceof Error ? e.name : typeof e,
+      sqlstate,
+    });
+    throw new PlatformSessionCheckError(sqlstate);
+  }
+}
+
+/** Carries the SQLSTATE and nothing else, by design. */
+export class PlatformSessionCheckError extends Error {
+  constructor(readonly sqlstate: string | null) {
+    super('the platform session check could not be completed');
+    this.name = 'PlatformSessionCheckError';
+  }
+}
+
+function sqlstateOf(e: unknown): string | null {
+  for (const c of [e, (e as { cause?: unknown } | null)?.cause]) {
+    const code = (c as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
 }
