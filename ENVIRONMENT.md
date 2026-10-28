@@ -104,6 +104,24 @@ Read by `scripts/bootstrap/run.mjs`, once per database, from the process environ
 | `APP_URL`            | yes      | `http://localhost:3000` locally. Validated as a URL                                                                                     |
 | `NODE_ENV`           | yes      | `development` \| `test` \| `production`                                                                                                 |
 | `HEALTH_CHECK_TOKEN` | optional | Minimum 32 characters. Unset means `/health/db` denies everyone — the correct fail-closed default. Generate with `openssl rand -hex 32` |
+| `VERCEL`             | platform | Set to `1` by Vercel itself in every deployment — never set it by hand. Selects the trusted client-address header (below)               |
+
+#### Client address — which header each service trusts (D1)
+
+The client address feeds rate limits, login records and audit metadata; it never grants access.
+It is read only from a header the deployment guarantees (`src/lib/auth/client-address.ts`), and
+Better Auth's own limiter is configured to read the same one:
+
+| Where the code runs                       | Trusted header           | Why                                                                                                                                             |
+| ----------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel (`VERCEL=1`, production + preview) | `x-vercel-forwarded-for` | Set by Vercel to the client's public address; a client cannot set it, and unlike `x-forwarded-for` a proxy in front of Vercel cannot replace it |
+| Not production (local, CI, tests)         | `x-forwarded-for`        | No real client; the test suites send it                                                                                                         |
+| Production anywhere else                  | none                     | Unsupported web host: every request is "unknown" and shares the tighter unknown bucket                                                          |
+| Worker host (Railway)                     | none                     | Serves no user request; its one route, `/wake`, is authorised by `WORKER_WAKE_TOKEN` and reads no address                                       |
+
+Topology this assumes (DEPLOYMENT.md): the web app on Vercel directly, Cloudflare DNS-only (grey
+cloud). If a proxy is ever put in front of Vercel, the header stays Vercel's own — re-check
+before enabling one. Vercel's paid "trusted proxy" feature is not used.
 
 ### Observability — not yet configured
 

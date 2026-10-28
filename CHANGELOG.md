@@ -218,6 +218,11 @@ Database migrations: 0063–0086 (production still pending — see the
 
 ### Security
 
+- Client addresses (rate limits, login records, audit metadata) are read only from the header the
+  deployment guarantees (D1): `x-vercel-forwarded-for` on Vercel, which Vercel sets and a client
+  cannot; `x-forwarded-for` only outside production; nothing on any other production host.
+  Better Auth's limiter reads the same header. A forged `X-Forwarded-For` on Vercel changes
+  nothing. See ENVIRONMENT.md, "Client address".
 - better-auth 1.7.3 → 1.7.14 (founder-approved, 2026-10-29), clearing GHSA-965c-763c-88jm
   (critical) and GHSA-r4xp-prcw-77qf (high). Neither was exploitable here: both need Magic Link
   with OAuth providers, or the OAuth Proxy plugin, and Pravshi uses only the two-factor plugin;

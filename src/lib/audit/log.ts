@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { clientAddressFromHeaders } from '@/lib/auth/client-address';
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
@@ -46,14 +47,14 @@ export interface AuditEntry {
 const USER_AGENT_MAX = 512;
 
 /**
- * The request facts an audit entry may carry. The client address is the first hop of
- * x-forwarded-for, which the platform sets; it is informational only and never used to decide
- * anything. A value that is not an IP literal is dropped rather than stored — including an
+ * The request facts an audit entry may carry. The client address comes from the header this
+ * deployment trusts (src/lib/auth/client-address.ts, D1); it is informational only and never
+ * used to decide anything. A value that is not an IP literal is dropped rather than stored — including an
  * IPv6 literal with a zone id (fe80::1%eth0): Node's isIP accepts it, Postgres inet does not,
  * and the `::inet` cast below would throw and lose the audit entry.
  */
 export function requestMetadata(headers: Headers, requestId: string): RequestMetadata {
-  const first = headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
+  const first = clientAddressFromHeaders(headers) ?? '';
   const agent = headers.get('user-agent');
   return {
     requestId,

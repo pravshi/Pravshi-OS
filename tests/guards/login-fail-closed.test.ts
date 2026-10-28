@@ -12,15 +12,22 @@ const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
 const EVENTS = read('lib/auth/login-events.ts');
+const ADDRESS = read('lib/auth/client-address.ts');
 
 describe('A1 review: every client address the auth plane uses is validated', () => {
-  it('clientIp and the hooks read the forwarded address through forwardedIp', () => {
-    expect(EVENTS).toMatch(/export function forwardedIp[\s\S]*?isIP\(first\) !== 0/);
-    expect(EVENTS).toMatch(/return forwardedIp\(req\.headers\.get\('x-forwarded-for'\)\)/);
+  it('clientIp and the hooks read the trusted header (D1) through forwardedIp', () => {
+    // One validator, in the D1 module; the trusted header's value always passes through it.
+    expect(ADDRESS).toMatch(/export function forwardedIp[\s\S]*?isIP\(first\) !== 0/);
+    expect(ADDRESS).toMatch(/return name \? forwardedIp\(headers\?\.get\(name\)\) : null;/);
+    expect(EVENTS).toMatch(/return clientAddressFromHeaders\(req\.headers\);/);
     const ipOfHeaders = SERVER.slice(SERVER.indexOf('function ipOfHeaders'));
-    expect(ipOfHeaders.slice(0, 200)).toMatch(
-      /return forwardedIp\(headers\?\.get\('x-forwarded-for'\)\)/,
-    );
+    expect(ipOfHeaders.slice(0, 200)).toMatch(/return clientAddressFromHeaders\(headers\);/);
+  });
+
+  it('no auth-plane or audit code reads a forwarding header directly', () => {
+    for (const file of ['lib/auth/login-events.ts', 'lib/auth/server.ts', 'lib/audit/log.ts']) {
+      expect(read(file), file).not.toMatch(/get\(\s*'x-(vercel-)?forwarded-for'\s*\)/);
+    }
   });
 });
 

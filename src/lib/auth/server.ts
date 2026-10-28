@@ -7,7 +7,8 @@ import { authDb } from '@/lib/db/auth-client';
 import { authDbSchema } from './schema';
 import { loginPersonActive } from './login-person-check';
 import { endStaleAdminSession, loginMaySignIn } from './platform-login';
-import { forwardedIp, recordLoginEvent, resolveLoginOrg } from './login-events';
+import { recordLoginEvent, resolveLoginOrg } from './login-events';
+import { betterAuthIpAddressOptions, clientAddressFromHeaders } from './client-address';
 import { isLockedOut, noteLoginFailure, noteLoginSuccess } from './login-lockout';
 import { env } from '@/env';
 import { authLoggerOptions } from './safe-log';
@@ -158,9 +159,9 @@ function signInEmailOf(body: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-/** clientIp()'s rule (login-events.ts) over the Headers a hook carries instead of a Request. */
+/** clientIp()'s rule (client-address.ts, D1) over the Headers a hook carries instead of a Request. */
 function ipOfHeaders(headers: Headers | undefined): string | null {
-  return forwardedIp(headers?.get('x-forwarded-for'));
+  return clientAddressFromHeaders(headers);
 }
 
 /**
@@ -316,6 +317,8 @@ export const auth = betterAuth({
     // public.people.auth_user_id has been uuid since Task 1.2. The library adapts to the
     // approved schema, not the other way round.
     database: { generateId: 'uuid' },
+    // The library's own limiter reads the same header the application does (D1).
+    ipAddress: betterAuthIpAddressOptions(),
     useSecureCookies: env.NODE_ENV === 'production',
     defaultCookieAttributes: {
       httpOnly: true,
