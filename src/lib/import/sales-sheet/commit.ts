@@ -32,6 +32,7 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import { MAPPINGS, resolveHeader, type MappingSpec, type TargetField } from './mapping';
+import { normaliseKey } from './preview';
 import { buildCandidate } from './rows';
 
 const BATCH = 100;
@@ -109,6 +110,75 @@ export function rowReason(error: unknown): string | null {
   return null;
 }
 
+/** The confirmed plan of a decided import (0088), per row; null when the import has none. */
+type RowPlan = { skip: boolean; companyExistingByName: boolean; contactExistingByName: boolean };
+type RowPlans = ReadonlyMap<number, RowPlan> | null;
+
+async function loadPlans(tx: Tx, importId: string): Promise<RowPlans> {
+  const res = await tx.execute<{
+    row_number: number;
+    skip: boolean;
+    company_existing_by_name: boolean;
+    contact_existing_by_name: boolean;
+  }>(sql`
+    select p.row_number, p.skip, p.company_existing_by_name, p.contact_existing_by_name
+    from public.crm_import_row_plans p where p.import_id = ${importId}::uuid
+  `);
+  if (res.rows.length === 0) return null;
+  return new Map(
+    res.rows.map((r) => [
+      r.row_number,
+      {
+        skip: r.skip,
+        companyExistingByName: r.company_existing_by_name,
+        contactExistingByName: r.contact_existing_by_name,
+      },
+    ]),
+  );
+}
+
+/** Same normalisation as the preview's keys (normaliseKey), in SQL. */
+const NORMALISED = (col: string) =>
+  sql.raw(`regexp_replace(lower(btrim(${col})), '\\s+', ' ', 'g')`);
+
+/**
+ * "Use the existing company": the one live company of this name. Decided at preview against a
+ * single match; if that is no longer true when the commit runs, the row fails — never a guess.
+ */
+async function existingCompanyByName(tx: Tx, orgId: string, name: string): Promise<string> {
+  const res = await tx.execute<{ id: string }>(sql`
+    select c.id from public.companies c
+    where c.org_id = ${orgId}::uuid and c.deleted_at is null
+      and ${NORMALISED('c.name')} = ${normaliseKey(name)}
+    limit 2
+  `);
+  if (res.rows.length === 0) {
+    throw new RowRefusal('the existing company of this name is no longer visible to you');
+  }
+  if (res.rows.length > 1) throw new RowRefusal('more than one company now has this name');
+  return res.rows[0]!.id;
+}
+
+/** "Use the existing contact": the one live contact of this name under the row's company. */
+async function existingContactByName(
+  tx: Tx,
+  orgId: string,
+  companyId: string,
+  fullName: string,
+): Promise<{ id: string; company_id: string | null }> {
+  const res = await tx.execute<{ id: string; company_id: string | null }>(sql`
+    select c.id, c.company_id from public.contacts c
+    where c.org_id = ${orgId}::uuid and c.company_id = ${companyId}::uuid and c.deleted_at is null
+      and ${NORMALISED("c.first_name || ' ' || c.last_name")} = ${normaliseKey(fullName)}
+    limit 2
+  `);
+  if (res.rows.length === 0) {
+    throw new RowRefusal('the existing contact of this name is no longer visible to you');
+  }
+  if (res.rows.length > 1) throw new RowRefusal('more than one contact now has this name');
+  return res.rows[0]!;
+}
+
 const hasPossibleDuplicate = (r: PendingRow) =>
   [r.planned_company, r.planned_contact, r.planned_deal].includes('POSSIBLE_DUPLICATE');
 
@@ -155,8 +225,16 @@ async function applyRow(
   header: string[],
   index: Partial<Record<TargetField, number>>,
   spec: MappingSpec,
+  plans: RowPlans = null,
 ): Promise<Outcome> {
-  if (hasPossibleDuplicate(row) && !row.include) return { status: 'SKIPPED' };
+  // A decided import follows its confirmed plan (0088); otherwise 0081's rule: a possible
+  // duplicate is skipped unless the user included it.
+  const plan = plans?.get(row.row_number);
+  if (plans) {
+    if (!plan || plan.skip) return { status: 'SKIPPED' };
+  } else if (hasPossibleDuplicate(row) && !row.include) {
+    return { status: 'SKIPPED' };
+  }
   const cand = buildCandidate(row.row_number, row.source_values, index, spec, header.length);
   if (cand.errors.length > 0 || !cand.company || cand.ownerEmail === null) {
     // The preview accepted it with the same code and mapping; this would be a defect.
@@ -185,6 +263,8 @@ async function applyRow(
     if (visible.rows.length === 0) {
       throw new RowRefusal('the company an earlier row created is no longer visible to you');
     }
+  } else if (plan?.companyExistingByName) {
+    companyId = await existingCompanyByName(tx, ctx.orgId, company.name);
   } else if (company.domain) {
     companyId = (
       await tx.execute<{ id: string }>(sql`
@@ -230,6 +310,13 @@ async function applyRow(
       if (!found) {
         throw new RowRefusal('the contact an earlier row created is no longer visible to you');
       }
+    } else if (plan?.contactExistingByName) {
+      found = await existingContactByName(
+        tx,
+        ctx.orgId,
+        companyId,
+        `${cand.contact.firstName} ${cand.contact.lastName}`,
+      );
     } else if (cand.contact.email) {
       found = (
         await tx.execute<{ id: string; company_id: string | null }>(sql`
@@ -353,7 +440,11 @@ async function applyBatchFast(
   header: string[],
   index: Partial<Record<TargetField, number>>,
   spec: MappingSpec,
+  plans: RowPlans = null,
 ): Promise<void> {
+  // Rows that were possible duplicates follow a decision the set-based path does not apply:
+  // a decided import runs such a batch row by row. Every other row's plan is 0081's.
+  if (plans && rows.some(hasPossibleDuplicate)) throw new FastPathDeclined();
   const work = rows.map((row) => {
     if (hasPossibleDuplicate(row) && !row.include) return { row, cand: null };
     const cand = buildCandidate(row.row_number, row.source_values, index, spec, header.length);
@@ -774,6 +865,8 @@ export async function runImportCommit(
     return 'DONE';
   }
   const { index } = resolveHeader(head.header, spec);
+  // Written by the confirmation and immutable (0088): the same plan on every run and retry.
+  const plans = await withAuthorizedDb(ctx, (tx) => loadPlans(tx, importId));
 
   // Until no PENDING row is left: a batch smaller than BATCH does not prove the end.
   for (;;) {
@@ -792,7 +885,7 @@ export async function runImportCommit(
       if (!options.careful) {
         try {
           await tx.transaction((sp) =>
-            applyBatchFast(sp, ctx, importId, rows.rows, head.header, index, spec),
+            applyBatchFast(sp, ctx, importId, rows.rows, head.header, index, spec, plans),
           );
           options.onBatch?.('FAST', rows.rows.length);
           return rows.rows.length;
@@ -805,7 +898,7 @@ export async function runImportCommit(
         let outcome: Outcome;
         try {
           outcome = await tx.transaction((sp) =>
-            applyRow(sp, ctx, importId, row, head.header, index, spec),
+            applyRow(sp, ctx, importId, row, head.header, index, spec, plans),
           );
         } catch (error) {
           const reason = rowReason(error);

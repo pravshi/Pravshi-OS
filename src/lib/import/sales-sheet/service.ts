@@ -18,9 +18,13 @@ import { z } from 'zod';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
 import { requestWorkerWake } from '@/lib/jobs/wake';
-import { REPRESENTATIVE_MAPPING, type MappingSpec } from './mapping';
+import { MAPPINGS, REPRESENTATIVE_MAPPING, type MappingSpec } from './mapping';
 import {
   buildPreview,
+  planPreview,
+  type DuplicateDecision,
+  type ImportDecisions,
+  type Unresolved,
   failedRowsCsv,
   normaliseKey,
   type OrgSnapshot,
@@ -40,7 +44,8 @@ export type ImportServiceCode =
   | 'PREVIEW_MISMATCH'
   | 'ALREADY_IMPORTED'
   | 'NOT_PREVIEWED'
-  | 'INVALID_INCLUDE';
+  | 'INVALID_INCLUDE'
+  | 'INVALID_DECISION';
 
 const notImporter = () =>
   new ImportServiceError('NOT_IMPORTER', 'Only the person who uploaded this import can do that.');
@@ -155,6 +160,11 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
       companies.rows.filter((c) => c.domain).map((c) => normaliseKey(c.domain!)),
     ),
     companyNames: new Set(companies.rows.map((c) => normaliseKey(c.name))),
+    companyNameCounts: companies.rows.reduce((m, c) => {
+      const k = normaliseKey(c.name);
+      m.set(k, (m.get(k) ?? 0) + 1);
+      return m;
+    }, new Map<string, number>()),
     contactEmails: new Map(
       contacts.rows
         .filter((c) => c.email)
@@ -388,6 +398,12 @@ export const ConfirmImportSchema = z.strictObject({
   allowReimport: z.boolean().default(false),
 });
 
+const countsOf = (p: Preview): PreviewCounts => ({
+  ...p.counts,
+  validRows: p.validRows.length,
+  invalidRows: p.invalidRows.length,
+});
+
 const sameCounts = (a: PreviewCounts, b: PreviewCounts) =>
   a.validRows === b.validRows &&
   a.invalidRows === b.invalidRows &&
@@ -430,10 +446,24 @@ export async function confirmImport(
     if (!row) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
     // Only the importer confirms (the 0081 guard refuses anyone else too).
     if (row.created_by !== auth.ctx.personId) throw notImporter();
-    if (
-      row.file_sha256 !== body.fileSha256 ||
-      !sameCounts(row.preview_counts.counts, body.counts)
-    ) {
+    // With duplicate decisions (0088) the preview the user saw is the recomputed one; once
+    // confirmed, a repeat is answered from the job (AC-I3) whatever the organization is now.
+    const decisions = await loadDecisions(tx, id);
+    const decided = decisions.companies.size + decisions.contacts.size + decisions.deals.size > 0;
+    if (decided && body.includeRows.length > 0) {
+      throw new ImportServiceError(
+        'INVALID_INCLUDE',
+        'This import is resolved by duplicate decisions; rows are not included one by one.',
+      );
+    }
+    const decidedPreview =
+      decided && row.status === 'PREVIEWED'
+        ? (await recompute(tx, auth.ctx.orgId, id, decisions)).preview
+        : null;
+    const expected = decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts;
+    const countsMatch =
+      decided && row.status !== 'PREVIEWED' ? true : sameCounts(expected, body.counts);
+    if (row.file_sha256 !== body.fileSha256 || !countsMatch) {
       throw new ImportServiceError(
         'PREVIEW_MISMATCH',
         'The confirmation does not match this import’s file and preview.',
@@ -502,6 +532,12 @@ export async function confirmImport(
     `);
     if ((inserted.rowCount ?? 0) !== 1) throw new Error('INTERNAL: crm_import job not created');
 
+    // A decided import records the plan the user just confirmed, row by row, before it is
+    // queued (0088): the commit applies exactly this, whatever the organization looks like when
+    // it runs or re-runs.
+    if (decidedPreview) {
+      await recordRowPlans(tx, auth.ctx.orgId, id, decidedPreview, decisions);
+    }
     await tx.execute(sql`
       update public.crm_imports
       set status = 'QUEUED', job_id = ${jobId}::uuid, allow_reimport = ${body.allowReimport}
@@ -591,4 +627,259 @@ export async function failedRowsFor(auth: Authorization, id: string): Promise<st
       })),
     );
   });
+}
+
+// ── Duplicate decisions (0088) ───────────────────────────────────────────────────
+
+export type DecisionKind = 'COMPANY' | 'CONTACT' | 'DEAL';
+
+export const DecisionInput = z.strictObject({
+  kind: z.enum(['COMPANY', 'CONTACT', 'DEAL']),
+  key: z.string().min(3).max(1200),
+  /** null clears the decision: the entity is undecided again. */
+  decision: z.enum(['LINK_EXISTING', 'CREATE_NEW', 'SKIP']).nullable(),
+});
+
+export interface DecisionPreview {
+  /** Exactly what confirm compares (PreviewCounts): send these back to confirm. */
+  counts: PreviewCounts;
+  unresolved: Unresolved;
+  skippedRows: number[];
+  invalidRows: number[];
+  decisions: { kind: DecisionKind; key: string; decision: DuplicateDecision }[];
+}
+
+const KIND_FIELD = { COMPANY: 'companies', CONTACT: 'contacts', DEAL: 'deals' } as const;
+
+type MutableDecisions = {
+  companies: Map<string, DuplicateDecision>;
+  contacts: Map<string, DuplicateDecision>;
+  deals: Map<string, Exclude<DuplicateDecision, 'LINK_EXISTING'>>;
+};
+
+/** The decisions recorded for an import, as the preview and the commit take them. */
+export async function loadDecisions(tx: Tx, importId: string): Promise<ImportDecisions> {
+  const res = await tx.execute<{
+    kind: DecisionKind;
+    entity_key: string;
+    decision: DuplicateDecision;
+  }>(sql`
+    select d.kind, d.entity_key, d.decision from public.crm_import_decisions d
+    where d.import_id = ${importId}::uuid
+  `);
+  const out: MutableDecisions = { companies: new Map(), contacts: new Map(), deals: new Map() };
+  for (const r of res.rows) {
+    if (r.kind === 'DEAL') {
+      if (r.decision !== 'LINK_EXISTING') out.deals.set(r.entity_key, r.decision);
+    } else if (r.kind === 'COMPANY') {
+      out.companies.set(r.entity_key, r.decision);
+    } else {
+      out.contacts.set(r.entity_key, r.decision);
+    }
+  }
+  return out;
+}
+
+/** The preview recomputed from the recorded rows, today's organization and the decisions. */
+async function recompute(
+  tx: Tx,
+  orgId: string,
+  importId: string,
+  decisions: ImportDecisions,
+): Promise<{ preview: Preview; status: string; createdBy: string }> {
+  const head = await tx.execute<{
+    status: string;
+    created_by: string;
+    mapping_id: string;
+    file_sha256: string;
+    header: string[];
+  }>(sql`
+    select i.status, i.created_by, i.mapping_id, i.file_sha256, i.header
+    from public.crm_imports i
+    where i.id = ${importId}::uuid and i.org_id = ${orgId}::uuid
+  `);
+  const h = head.rows[0];
+  if (!h) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  const spec = MAPPINGS[h.mapping_id];
+  if (!spec) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  const rows = await tx.execute<{ row_number: number; source_values: string[] }>(sql`
+    select r.row_number, r.source_values from public.crm_import_rows r
+    where r.import_id = ${importId}::uuid order by r.row_number
+  `);
+  const snapshot = await loadSnapshot(tx, orgId);
+  const preview = planPreview(
+    {
+      fileSha256: h.file_sha256,
+      header: h.header,
+      rows: rows.rows.map((r) => ({ rowNumber: r.row_number, values: r.source_values })),
+    },
+    spec,
+    snapshot,
+    decisions,
+  );
+  return { preview, status: h.status, createdBy: h.created_by };
+}
+
+function decisionPreview(preview: Preview, decisions: ImportDecisions): DecisionPreview {
+  const list: DecisionPreview['decisions'] = [];
+  for (const [key, decision] of decisions.companies) list.push({ kind: 'COMPANY', key, decision });
+  for (const [key, decision] of decisions.contacts) list.push({ kind: 'CONTACT', key, decision });
+  for (const [key, decision] of decisions.deals) list.push({ kind: 'DEAL', key, decision });
+  return {
+    counts: countsOf(preview),
+    unresolved: preview.unresolved,
+    skippedRows: preview.skippedRows,
+    invalidRows: preview.invalidRows.map((r) => r.rowNumber),
+    decisions: list,
+  };
+}
+
+export async function getDecisionPreview(
+  auth: Authorization,
+  id: string,
+): Promise<DecisionPreview> {
+  if (!UUID.test(id)) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    const decisions = await loadDecisions(tx, id);
+    const { preview } = await recompute(tx, auth.ctx.orgId, id, decisions);
+    return decisionPreview(preview, decisions);
+  });
+}
+
+/**
+ * Records (or clears) one decision and answers the recomputed preview. Only the importer, only
+ * while the import is PREVIEWED (the 0088 guard decides; this checks first for a clear answer).
+ * A key must name a possible duplicate of THIS import — judged as if it had no decision — so a
+ * decision cannot be planted for an entity the import never raised.
+ */
+export async function setDecision(
+  auth: Authorization,
+  id: string,
+  input: z.infer<typeof DecisionInput>,
+): Promise<DecisionPreview> {
+  if (!UUID.test(id)) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  if (input.kind === 'DEAL' && input.decision === 'LINK_EXISTING') {
+    throw new ImportServiceError('INVALID_DECISION', 'A deal can be created anew or skipped.');
+  }
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    const current = await loadDecisions(tx, id);
+    const without: MutableDecisions = {
+      companies: new Map(current.companies),
+      contacts: new Map(current.contacts),
+      deals: new Map(current.deals),
+    };
+    without[KIND_FIELD[input.kind]].delete(input.key);
+    const base = await recompute(tx, auth.ctx.orgId, id, without);
+    if (base.createdBy !== auth.ctx.personId) throw notImporter();
+    if (base.status !== 'PREVIEWED') {
+      throw new ImportServiceError(
+        'NOT_PREVIEWED',
+        'Decisions are made before the import is confirmed.',
+      );
+    }
+    if (!base.preview.unresolved[KIND_FIELD[input.kind]].includes(input.key)) {
+      throw new ImportServiceError(
+        'INVALID_DECISION',
+        'That is not a possible duplicate of this import, or another decision already settles it.',
+      );
+    }
+    // The 0088 guard decides at the write; a confirmation that commits between the check
+    // above and this write is refused there. Its refusal is answered like the check's — never
+    // as the driver's error, whose message carries the query's parameters (the entity key).
+    try {
+      if (input.decision === null) {
+        await tx.execute(sql`
+          delete from public.crm_import_decisions
+          where import_id = ${id}::uuid and kind = ${input.kind} and entity_key = ${input.key}
+        `);
+      } else {
+        await tx.execute(sql`
+          insert into public.crm_import_decisions
+            (org_id, import_id, kind, entity_key, decision, decided_by)
+          values (${auth.ctx.orgId}::uuid, ${id}::uuid, ${input.kind}, ${input.key},
+                  ${input.decision}, ${auth.ctx.personId}::uuid)
+          on conflict (import_id, kind, entity_key) do update set decision = excluded.decision
+        `);
+      }
+    } catch (error) {
+      const code = sqlstateOf(error);
+      if (code === '23514') {
+        throw new ImportServiceError(
+          'NOT_PREVIEWED',
+          'Decisions are made before the import is confirmed.',
+        );
+      }
+      if (code === '42501') throw notImporter();
+      throw new Error(`import decision not recorded (${code ?? 'no sqlstate'})`);
+    }
+    const after = await loadDecisions(tx, id);
+    const { preview } = await recompute(tx, auth.ctx.orgId, id, after);
+    return decisionPreview(preview, after);
+  });
+}
+
+/**
+ * The confirmed plan of a decided import (0088 crm_import_row_plans), for every row still
+ * PENDING: a row the decisions skip, or that still has an undecided possible duplicate, or that
+ * the decisions make invalid, is skipped; otherwise it says whether its company / contact is the
+ * existing one found by name ("use the existing").
+ */
+async function recordRowPlans(
+  tx: Tx,
+  orgId: string,
+  importId: string,
+  preview: Preview,
+  decisions: ImportDecisions,
+): Promise<void> {
+  const plans = new Map<number, { skip: boolean; company: boolean; contact: boolean }>();
+  for (const r of preview.validRows) {
+    const undecided = [r.company, r.contact, r.deal].includes('POSSIBLE_DUPLICATE');
+    plans.set(
+      r.rowNumber,
+      undecided
+        ? { skip: true, company: false, contact: false }
+        : {
+            skip: false,
+            company: decisions.companies.get(r.companyKey) === 'LINK_EXISTING',
+            contact:
+              r.contactKey !== null && decisions.contacts.get(r.contactKey) === 'LINK_EXISTING',
+          },
+    );
+  }
+  for (const n of preview.skippedRows) plans.set(n, { skip: true, company: false, contact: false });
+  for (const r of preview.invalidRows) {
+    plans.set(r.rowNumber, { skip: true, company: false, contact: false });
+  }
+  const pending = await tx.execute<{ row_number: number }>(sql`
+    select r.row_number from public.crm_import_rows r
+    where r.import_id = ${importId}::uuid and r.status = 'PENDING'
+  `);
+  const records = pending.rows.map((r) => {
+    const plan = plans.get(r.row_number) ?? { skip: true, company: false, contact: false };
+    return {
+      row_number: r.row_number,
+      skip: plan.skip,
+      company_existing_by_name: plan.company,
+      contact_existing_by_name: plan.contact,
+    };
+  });
+  if (records.length === 0) return;
+  await tx.execute(sql`
+    insert into public.crm_import_row_plans
+      (org_id, import_id, row_number, skip, company_existing_by_name, contact_existing_by_name)
+    select ${orgId}::uuid, ${importId}::uuid, x.row_number, x.skip,
+           x.company_existing_by_name, x.contact_existing_by_name
+    from jsonb_to_recordset(${JSON.stringify(records)}::jsonb)
+      as x(row_number int, skip boolean, company_existing_by_name boolean,
+           contact_existing_by_name boolean)
+  `);
+}
+
+/** drizzle wraps the driver error: the SQLSTATE is on the error or its cause. */
+function sqlstateOf(error: unknown): string | null {
+  for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
 }

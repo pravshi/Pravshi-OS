@@ -83,6 +83,7 @@ const SERVICE_STATUS: Record<ImportServiceError['code'], number> = {
   ALREADY_IMPORTED: 409,
   NOT_PREVIEWED: 409,
   INVALID_INCLUDE: 422,
+  INVALID_DECISION: 422,
 };
 
 /** The response for an import refusal or service error, or null for anything else. */

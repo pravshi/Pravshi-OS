@@ -185,6 +185,32 @@ export function buildPreview(
     );
   }
 
+  return planPreview(
+    { fileSha256, header: parsed.header, rows: parsed.rows },
+    spec,
+    snapshot,
+    decisions,
+  );
+}
+
+/**
+ * The preview of already-parsed rows: what the upload computes from the file, and what the
+ * decision API recomputes from the rows the import recorded (the raw file is never kept) after
+ * each duplicate decision. Same rules, same result for the same rows.
+ */
+export function planPreview(
+  input: {
+    fileSha256: string;
+    header: string[];
+    rows: readonly { rowNumber: number; values: string[] }[];
+  },
+  spec: MappingSpec,
+  snapshot: OrgSnapshot,
+  decisions: ImportDecisions = NO_DECISIONS,
+): Preview {
+  const { fileSha256 } = input;
+  const parsed = { header: input.header, rows: input.rows };
+  const resolution = resolveHeader(parsed.header, spec);
   const counts = { companies: emptyCounts(), contacts: emptyCounts(), deals: emptyCounts() };
   const validRows: PlannedRow[] = [];
   const invalidRows: Preview['invalidRows'] = [];

@@ -12,6 +12,14 @@ Database migrations: 0063–0086 (production still pending — see the
 
 ### Added
 
+- Sales Sheet duplicate resolution (migration 0088). A possible duplicate is decided once per
+  company, contact or deal — use the existing record, create a new one, or skip — and every row
+  naming it follows; the preview is recomputed after each decision (GET/PUT
+  `/api/crm/imports/{id}/decisions`). Undecided possible duplicates are skipped: nothing is ever
+  created as a duplicate without a decision. "Use the existing" is refused when several records
+  share the name, at preview and again at commit. Decisions are made by the importer before
+  confirmation; the confirmation records the plan row by row, and the commit (and any retry)
+  applies exactly that plan. Prepared rollback: `scripts/db/rollback/0088_crm_import_decisions.down.sql`.
 - First-administrator setup links by email only (founder policy 2026-10-29, migration 0087). When
   the platform provisions an organization or re-issues its first administrator's link, the link is
   emailed to the recipient the database recorded (fixed while setup is pending) and is never shown

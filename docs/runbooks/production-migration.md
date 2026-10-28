@@ -42,8 +42,8 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
    available to this repo, and the failed 2026-10-06 run may have applied
    migrations before failing. Step 0 establishes the true state before
    anything else happens, and the runbook branches on what Step 0 finds.
-2. **Forward-fix only.** The only down-migrations in this repo are the thirteen
-   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086 and 0087), each
+2. **Forward-fix only.** The only down-migrations in this repo are the fourteen
+   prepared rollback scripts in `scripts/db/rollback/` (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087 and 0088), each
    run only with Nani's explicit approval as Failure doctrine (d) describes;
    none are invented at incident time. Every other failure is fixed by a new PR
    and a new or corrective migration, rehearsed again from Step 2.
@@ -69,7 +69,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
       ```bash
       node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
-      # expected at the current release: 87 86 0087_org_admin_setup_email
+      # expected at the current release: 88 87 0088_crm_import_decisions
       ```
 
 - [ ] Access to the Neon console for the production project
@@ -115,10 +115,10 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
 
 ## The chain as of writing
 
-The repo journal holds 87 entries (idx 0–86). Per project records, production
+The repo journal holds 88 entries (idx 0–87). Per project records, production
 last applied **idx 44** (`0044_workflow_engine`), so the pending chain is the
-42 migrations **idx 45–86 (0045–0087)** listed in
-[Appendix A](#appendix-a--the-pending-chain-idx-4586). Step 0 verifies this;
+43 migrations **idx 45–87 (0045–0088)** listed in
+[Appendix A](#appendix-a--the-pending-chain-idx-4587). Step 0 verifies this;
 if Step 0 disagrees, the appendix is not evidence — Step 0's output is.
 
 One mechanical fact the operator should know: the journal's **order is its
@@ -128,7 +128,7 @@ ordering the history by `created_at` is not journal order, and drizzle-kit's
 rule (apply every entry whose `when` exceeds `max(created_at)`) would silently
 skip pending entries from a database stopped inside those ranges. The runner
 does not use that rule: it verifies the history as an exact prefix and applies
-the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–86 —
+the rest by `idx`. For the recorded 0044 state it applies exactly idx 45–87 —
 no more, no fewer.
 
 ## Step 0 — Verify current production state (read-only)
@@ -235,8 +235,8 @@ Production is **not touched** in this step.
 2. Expected runner output shape (for the recorded 0044 state):
 
    ```
-   journal entries: 87, last applied created_at: 1791111413392
-   verified history: 45 of 87 entries match the repository (idx 0-44, through 0044_workflow_engine)
+   journal entries: 88, last applied created_at: 1791111413392
+   verified history: 45 of 88 entries match the repository (idx 0-44, through 0044_workflow_engine)
    applying idx 45 0045_automation_jobs (… statements)
    …
    applying idx 76 0077_deal_history_and_org_identity (… statements)
@@ -250,14 +250,15 @@ Production is **not touched** in this step.
    applying idx 84 0085_login_email_case (… statements)
    applying idx 85 0086_platform_console (… statements)
    applying idx 86 0087_org_admin_setup_email (… statements)
-   done: applied 42, total 87
+   applying idx 87 0088_crm_import_decisions (… statements)
+   done: applied 43, total 88
    ```
 
 3. **Success criteria — all four must hold:**
    - The runner exits `0`.
    - Re-running the Step 0 queries **against the snapshot branch** shows the
-     full repo state: count `87`, max_created_at `1791602728057`, and the
-     hash list in `id` order equal to the file-byte hashes of idx 0…86.
+     full repo state: count `88`, max_created_at `1791603728057`, and the
+     hash list in `id` order equal to the file-byte hashes of idx 0…87.
    - The phase regression suites relevant to the newly applied migrations
      (jobs/scheduler, workflows, notifications, search, AI, integrations,
      security hardening, project members, task reminders, db maintenance, worker next-due, admin audit, job and schedule principals (jobs RLS, jobs audit atomicity), deal-stage history and organization identity (CRM pipelines, organizations)) run green against the branch, or in CI's equivalent
@@ -324,8 +325,8 @@ part of release-checklist item 12.
 All checks must pass before the freeze is lifted.
 
 1. **Journal == repo.** Re-run the Step 0 queries against production:
-   count `87`, max_created_at `1791602728057`, hash list in `id` order equal to
-   the file-byte hashes of idx 0…86 (same comparison method as Step 0).
+   count `88`, max_created_at `1791603728057`, hash list in `id` order equal to
+   the file-byte hashes of idx 0…87 (same comparison method as Step 0).
 2. **Application-level check.** Once the app is deployed against production:
 
    ```bash
@@ -415,7 +416,7 @@ All checks must pass before the freeze is lifted.
 ## Failure doctrine (binding)
 
 Migrations are **forward-fix only**. The only down-migrations in this repo are
-the thirteen prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086 and 0087),
+the fourteen prepared rollback scripts described under (d) below (for 0073, 0075, 0077, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087 and 0088),
 each run only with Nani's explicit approval and a run-record entry; none are
 invented at incident time.
 
@@ -505,6 +506,11 @@ tenant data, only Better Auth's own self-service endpoints);
   revoked without re-issuing; the 0087 application code's re-issue fails (no recipient lookup) —
   roll the application back with it. It refuses unless the database is at 0087, and needs Nani's
   explicit approval and a run-record entry.
+  `scripts/db/rollback/0088_crm_import_decisions.down.sql` drops the duplicate-decision table
+  (every recorded decision goes with it) and its guard function. A PREVIEWED import falls back
+  to 0081's behaviour (undecided possible duplicates are skipped unless included per row); the
+  0088 application code reads the table — roll the application back with it. It refuses unless
+  the database is at 0088, and needs Nani's explicit approval and a run-record entry.
   approval and a run-record entry.
 
 ## Abort criteria (any step)
@@ -515,7 +521,7 @@ with its expected value; the runner exits non-zero; the wrong branch/URL is
 suspected at any point; or the operator is unsure. An aborted run with a
 complete record is a success of process; a continued run on a doubt is not.
 
-## Appendix A — The pending chain (idx 45–86)
+## Appendix A — The pending chain (idx 45–87)
 
 As of this runbook's writing, assuming the Step 0 boundary at idx 44
 (`0044_workflow_engine`, `when` 1791111413392, file hash
@@ -582,13 +588,14 @@ re-apply.
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
 | 86  | `0087_org_admin_setup_email` | 1791602728057 | `3c065917786a51685f1b624e1eec693be117147b42ee37415fd3cba45c2194d4` |
+| 87  | `0088_crm_import_decisions` | 1791603728057 | `c5653bb745d51d598cee86393048e5d20f5786cc07fcce1e6d6d1cd856de84bf` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in
 Phase 11. The journal, not the file numbering, is the chain.)
 
-Final expected state after a complete run: count `87`,
-max_created_at `1791602728057`.
+Final expected state after a complete run: count `88`,
+max_created_at `1791603728057`.
 
 ## Appendix B — Run record template
 
@@ -619,7 +626,7 @@ reason is a valid entry; a blank field is not.
   - runner exit code:
   - runner output (verbatim, or link to captured file):
 - Step 4 — verification:
-  - journal == repo (count 87 / max 1791602728057 / hashes): yes/no
+  - journal == repo (count 88 / max 1791603728057 / hashes): yes/no
   - /health/db result (or role-connect check if app not deployed):
 - Outcome: completed / aborted at step … / failed at step …
 - Failure doctrine invoked: none / (a) forward-fix PR #… / (b) disaster repoint
