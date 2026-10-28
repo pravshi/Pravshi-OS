@@ -477,7 +477,11 @@ export async function inviteAdmin(
 export async function reissueAdminSetup(
   req: PlatformRequest,
   adminId: string,
-): Promise<{ setupToken: string; setupExpiresAt: string }> {
+): Promise<{
+  setupToken: string;
+  setupExpiresAt: string;
+  recipient: { email: string; fullName: string };
+}> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
   const rows = await runPlatformOperation(
@@ -499,17 +503,29 @@ export async function reissueAdminSetup(
           'grants, can re-issue it. Otherwise ask the operator.',
       },
     },
-    (tx) =>
-      tx.execute<{ expires_at: Date | string }>(sql`
+    // One transaction: the new hash commits only together with the address it is sent to —
+    // the invited administrator's own, recorded at invitation and never changed (0083).
+    async (tx) => {
+      const issued = await tx.execute<{ expires_at: Date | string }>(sql`
         select platform.reissue_admin_setup(${adminId}::uuid, decode(${digest}, 'hex'),
                                             ${req.requestId}::uuid) as expires_at
-      `),
+      `);
+      const to = await tx.execute<{ email: string; full_name: string }>(sql`
+        select email::text as email, full_name from platform.list_admins()
+        where admin_id = ${adminId}::uuid
+      `);
+      if (!to.rows[0]) throw Object.assign(new Error('no recipient'), { code: '55000' });
+      return { expires: issued.rows[0]?.expires_at, to: to.rows[0] };
+    },
     { permission: 'platform.admins.manage' },
   );
-  const expires = rows.rows[0]?.expires_at;
-  if (!expires)
+  if (!rows.expires)
     throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
-  return { setupToken: token, setupExpiresAt: new Date(expires).toISOString() };
+  return {
+    setupToken: token,
+    setupExpiresAt: new Date(rows.expires).toISOString(),
+    recipient: { email: rows.to.email, fullName: rows.to.full_name },
+  };
 }
 
 export async function revokeAdmin(

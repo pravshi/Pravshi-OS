@@ -58,9 +58,12 @@ ownership of the email. So the console re-issues an unused invitation only for t
 administrator who sent it, and only while they still hold every permission it grants: a
 re-issue never gives anyone more than an invitation of their own could. Every other case —
 another administrator's invitation, one whose inviter is gone, one who already has a login —
-is the operator's (`scripts/bootstrap/platform.mjs reissue-setup` or `recover`). Residual
-until N-2: the inviter sees the new link and could use it themselves, which gives them nothing
-beyond their own permissions.
+is the operator's (`scripts/bootstrap/platform.mjs reissue-setup` or `recover`). Closed by
+N-2 (email only, founder decision 2026-10-29): the inviter no longer sees the link — it is emailed
+to the invitation's own address, which nothing changes after the invitation, and appears in no
+answer, console view, log or audit entry. The operator CLI (first administrator, break-glass
+recovery) still prints its link to the operator's own terminal: it runs before any mail path
+exists.
 
 ## Sessions ended by the platform's limits (S2-4)
 
@@ -71,7 +74,7 @@ audited.
 
 ## Still open
 
-- N-2: decided for organization first-administrators (email only, 0087). Platform-administrator
-  invitations still show their link once in the console — whether to email them too is open.
+- N-2: closed. Organization first administrators (0087) and platform-administrator invitations
+  (founder decision 2026-10-29) receive their setup links by email only.
 - D1 (hosting): rate limits key on `X-Forwarded-For`; their value depends on the host's trusted
   client-IP header. Per-administrator limits do not depend on it.

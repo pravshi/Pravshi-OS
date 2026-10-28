@@ -20,6 +20,11 @@ vi.mock('@/lib/platform/setup-email', () => ({
     mail.sent.push({ to: m.to, link: m.link });
     return mail.accept;
   },
+  // Platform-administrator invitations are email only too (founder decision 2026-10-29).
+  sendPlatformAdminSetupEmail: async (m: { to: string; link: string }) => {
+    mail.sent.push({ to: m.to, link: m.link });
+    return mail.accept;
+  },
 }));
 /** Every API answer body the suite saw, to prove no setup token ever appears in one. */
 const answers: string[] = [];
@@ -711,6 +716,11 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       body: invitation,
     });
     expect(invited.status).toBe(201);
+    // Email only: the answer says where the link went, never what it is.
+    expect(invited.body).toMatchObject({ replayed: false, emailed: true, recipient: email });
+    expect(invited.body.setupLink).toBeUndefined();
+    expect(typeof invited.body.setupExpiresAt).toBe('string');
+    const sentBeforeRetry = mail.sent.length;
     const secondId = invited.body.adminId as string;
 
     // F-CONSOLE-11: the same request again (a lost answer, retried) replays — no second
@@ -721,6 +731,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(retried).toMatchObject({ status: 200, body: { replayed: true, adminId: secondId } });
     expect(retried.body.setupLink).toBeUndefined();
+    expect(mail.sent.length, 'a replayed invitation sends nothing').toBe(sentBeforeRetry);
     const changed = await call('/api/platform/admins', 'POST', {
       cookie: adminCookie,
       body: { ...invitation, fullName: 'Someone Else' },
@@ -731,7 +742,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
         .rows[0],
     ).toEqual({ n: 1 });
     const done = await call('/api/platform/setup/complete', 'POST', {
-      body: { token: tokenOf(invited.body.setupLink as string), password: PASSWORD },
+      body: { token: tokenOf(linkSentTo(email)), password: PASSWORD },
     });
     expect(done.status).toBe(200);
 
@@ -859,13 +870,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(invited.status).toBe(201);
     const id = invited.body.adminId as string;
-    const first = tokenOf(invited.body.setupLink as string);
+    const first = tokenOf(linkSentTo(email));
     const reissued = await call('adminSetup', 'POST', {
       cookie: adminCookie,
       path: `/api/platform/admins/${id}/setup`,
     });
     expect(reissued.status).toBe(200);
-    const second = tokenOf(reissued.body.setupLink as string);
+    expect(reissued.body).toMatchObject({ emailed: true, recipient: email });
+    expect(reissued.body.setupLink).toBeUndefined();
+    const second = tokenOf(linkSentTo(email));
     expect(second).not.toBe(first);
     const stale = await call('/api/platform/setup/complete', 'POST', {
       body: { token: first, password: PASSWORD },
@@ -909,7 +922,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       'platform.admins.manage',
     ]);
     expect(limitedInvite.status).toBe(201);
-    const limited = await activateAdmin(limitedEmail, limitedInvite.body.setupLink as string);
+    const limited = await activateAdmin(limitedEmail, linkSentTo(limitedEmail));
 
     // A stronger invitation, sent by someone else, never used.
     const strong = await invite(adminCookie, 'strong', `strong.${RUN}@platform.example`, [
@@ -1243,7 +1256,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     const revokePath = `/api/platform/organizations/${gOrg}/admin-setup/revoke`;
     const reissuePath = `/api/platform/organizations/${gOrg}/admin-setup`;
     const before = await setupState();
-    const sentBefore = mail.sent.length;
+    let sentBefore = mail.sent.length;
 
     // An administrator without platform.organizations.assign_initial_admin: 403, a DENIED entry,
     // and the pending link, its expiry and the mail outbox exactly as they were.
@@ -1258,7 +1271,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       },
     });
     expect(weakInvite.status).toBe(201);
-    const weak = await activateAdmin(weakEmail, weakInvite.body.setupLink as string);
+    const weak = await activateAdmin(weakEmail, linkSentTo(weakEmail));
+    sentBefore = mail.sent.length; // the weak administrator's own invitation was emailed
     // The gate records a refusal before the route reads its target, so these carry no org id.
     const auditBefore = await auditRows();
     const deniedRevoke = await call('revokeSetup', 'POST', {
@@ -1530,7 +1544,103 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     ]);
   });
 
-  it('no organization setup token ever appears in an API answer or in the audit', async () => {
+  it('platform-administrator invitations are email only: refused unconfigured, audited when undelivered', async () => {
+    const invite = (key: string, email: string) =>
+      call('/api/platform/admins', 'POST', {
+        cookie: adminCookie,
+        body: { idempotencyKey: `${key}-${RUN}`, email, fullName: key, permissions: [] },
+      });
+    const adminsWith = async (email: string) =>
+      (
+        await owner.query<{ n: number }>(
+          `select count(*)::int n from platform.admins where email = $1`,
+          [email],
+        )
+      ).rows[0]!.n;
+
+    // Not configured: refused before anything exists — no invitation nobody can receive.
+    const offEmail = `mail.off.admin.${RUN}@platform.example`;
+    const sentBefore = mail.sent.length;
+    mail.configured = false;
+    let refused;
+    try {
+      refused = await invite('mailoff', offEmail);
+    } finally {
+      mail.configured = true;
+    }
+    expect(refused).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await adminsWith(offEmail)).toBe(0);
+    expect(mail.sent.length).toBe(sentBefore);
+
+    // Not accepted by the provider: the invitation stands, the failure is audited, no link.
+    const failEmail = `mail.fail.admin.${RUN}@platform.example`;
+    mail.accept = false;
+    let undelivered;
+    try {
+      undelivered = await invite('mailfail', failEmail);
+    } finally {
+      mail.accept = true;
+    }
+    expect(undelivered).toMatchObject({
+      status: 201,
+      body: { emailed: false, recipient: failEmail },
+    });
+    expect(undelivered.body.setupLink).toBeUndefined();
+    const failId = undelivered.body.adminId as string;
+    expect(
+      (await auditRows()).filter(
+        (r) => r.action === 'platform.admin.invite' && r.reason_code === 'EMAIL_DELIVERY_FAILED',
+      ),
+    ).toEqual([
+      { action: 'platform.admin.invite', result: 'ERROR', reason_code: 'EMAIL_DELIVERY_FAILED' },
+    ]);
+
+    // Re-issue without email configured: 503, and the pending link is untouched.
+    const tokenRow = async () =>
+      (
+        await owner.query<{ h: string; e: string }>(
+          `select encode(token_hash, 'hex') h, expires_at::text e from platform.setup_tokens
+           where admin_id = $1`,
+          [failId],
+        )
+      ).rows;
+    const before = await tokenRow();
+    const outbox = mail.sent.length;
+    mail.configured = false;
+    let noMail;
+    try {
+      noMail = await call('adminSetup', 'POST', {
+        cookie: adminCookie,
+        path: `/api/platform/admins/${failId}/setup`,
+      });
+    } finally {
+      mail.configured = true;
+    }
+    expect(noMail).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await tokenRow()).toEqual(before);
+    expect(mail.sent.length).toBe(outbox);
+
+    // A re-issue sends a fresh link to the invitation's own address; the old one is dead.
+    const resent = await call('adminSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/admins/${failId}/setup`,
+    });
+    expect(resent).toMatchObject({ status: 200, body: { emailed: true, recipient: failEmail } });
+    expect(resent.body.setupLink).toBeUndefined();
+    expect(mail.sent.at(-1)!.to).toBe(failEmail);
+    expect(await tokenRow()).not.toEqual(before);
+    const done = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: tokenOf(linkSentTo(failEmail)), password: PASSWORD },
+    });
+    expect(done.status).toBe(200);
+    // Single use: the same link again is refused.
+    const again = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: tokenOf(linkSentTo(failEmail)), password: PASSWORD },
+    });
+    expect(again.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('no setup token — organization or platform administrator — ever appears in an API answer or in the audit', async () => {
     const tokens = mail.sent.map((m) => tokenOf(m.link));
     expect(tokens.length).toBeGreaterThan(5);
     const everything = answers.join(' ');

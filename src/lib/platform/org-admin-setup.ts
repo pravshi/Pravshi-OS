@@ -25,7 +25,7 @@ import { isSetupEmailConfigured, sendOrgAdminSetupEmail } from './setup-email';
  */
 export type SetupDelivery = { emailed: boolean; recipient: string; setupExpiresAt: string };
 
-function requireEmail(): void {
+export function requireEmail(): void {
   if (!isSetupEmailConfigured()) {
     throw new PlatformError(
       503,
