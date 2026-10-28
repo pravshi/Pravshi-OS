@@ -1424,12 +1424,26 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       await holder.query(`select 1 from platform.org_admin_setup where org_id = $1 for update`, [
         gOrg,
       ]);
+      const xid = (await holder.query<{ x: string }>(`select pg_current_xact_id()::xid::text x`))
+        .rows[0]!.x;
       revokeWhileLocked = call('revokeSetup', 'POST', {
         cookie: adminCookie,
         path: revokePath,
         body: { reason: 'Revoked while a re-issue commits' },
       });
-      await new Promise((r) => setTimeout(r, 1500)); // the revocation is now waiting on the lock
+      // Proven, not assumed (review F-EM-6): wait until a session is blocked on THIS
+      // transaction — the revocation, inside its FOR UPDATE — before the fresh issue commits.
+      let blocked = false;
+      for (let i = 0; i < 150 && !blocked; i += 1) {
+        const w = await owner.query<{ n: number }>(
+          `select count(*)::int n from pg_locks
+           where locktype = 'transactionid' and transactionid::text = $1 and not granted`,
+          [xid],
+        );
+        blocked = w.rows[0]!.n > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(blocked, 'the revocation must be waiting on the row lock').toBe(true);
       await holder.query(
         `update platform.org_admin_setup
          set issued_at = clock_timestamp(), expires_at = clock_timestamp() + interval '72 hours'
