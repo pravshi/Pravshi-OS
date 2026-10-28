@@ -37,6 +37,12 @@ export interface OrgSnapshot {
   contactEmails: ReadonlyMap<string, string | null>;
   /** `${normalisedFullName}|${normalisedCompanyKey}` */
   contactNameCompany: ReadonlySet<string>;
+  /**
+   * How many live companies carry each normalised name. "Use the existing company" for a
+   * name-only match is refused when more than one does: the user must add a domain (or create a
+   * new one) — the import never guesses which (duplicate resolution). Absent: every match counts 1.
+   */
+  companyNameCounts?: ReadonlyMap<string, number>;
   /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
@@ -69,6 +75,34 @@ export interface TableCounts {
   possibleDuplicate: number;
 }
 
+/**
+ * A user's decision about one possible duplicate (duplicate resolution). Companies and contacts
+ * are decided once per entity — every row that names it follows — and deals once per deal key.
+ *
+ *   LINK_EXISTING  use the existing record (companies and contacts only)
+ *   CREATE_NEW     create a new record although a similar one exists
+ *   SKIP           import nothing from the rows that need it
+ */
+export type DuplicateDecision = 'LINK_EXISTING' | 'CREATE_NEW' | 'SKIP';
+
+export interface ImportDecisions {
+  companies: ReadonlyMap<string, DuplicateDecision>;
+  contacts: ReadonlyMap<string, DuplicateDecision>;
+  deals: ReadonlyMap<string, Exclude<DuplicateDecision, 'LINK_EXISTING'>>;
+}
+
+export const NO_DECISIONS: ImportDecisions = {
+  companies: new Map(),
+  contacts: new Map(),
+  deals: new Map(),
+};
+
+export interface Unresolved {
+  companies: string[];
+  contacts: string[];
+  deals: string[];
+}
+
 export interface Preview {
   mappingId: string;
   fileSha256: string;
@@ -85,6 +119,13 @@ export interface Preview {
   conflicts: RowError[];
   /** Possible duplicates that would fail if included: they can only be skipped. */
   notIncludableRows: number[];
+  /** Rows a SKIP decision excludes. */
+  skippedRows: number[];
+  /**
+   * Possible duplicates still undecided, by entity key. While any remain, a commit would skip
+   * their rows: nothing is ever created as a duplicate without an explicit decision.
+   */
+  unresolved: Unresolved;
 }
 
 export class ImportRefusal extends Error {
@@ -111,6 +152,7 @@ export function buildPreview(
   spec: MappingSpec,
   snapshot: OrgSnapshot,
   limits: ImportLimits = DEFAULT_LIMITS,
+  decisions: ImportDecisions = NO_DECISIONS,
 ): Preview {
   const fileSha256 = createHash('sha256').update(bytes).digest('hex');
   let parsed;
@@ -148,6 +190,12 @@ export function buildPreview(
   const invalidRows: Preview['invalidRows'] = [];
   const conflicts: RowError[] = [];
   const notIncludableRows: number[] = [];
+  const skippedRows: number[] = [];
+  const unresolved = {
+    companies: new Set<string>(),
+    contacts: new Set<string>(),
+    deals: new Set<string>(),
+  };
   // Within-file identity (AC-D4): the first committing row creates, later rows with the same key
   // link. Contacts map to the company key they were first seen under.
   const fileCompanies = new Map<string, { rowNumber: number; industry: string | null }>();
@@ -194,6 +242,24 @@ export function buildPreview(
     } else {
       companyOutcome = 'CREATE';
     }
+    const companyDecision =
+      companyOutcome === 'POSSIBLE_DUPLICATE' ? decisions.companies.get(companyKey) : undefined;
+    let skip = companyDecision === 'SKIP';
+    if (companyDecision === 'LINK_EXISTING') {
+      if ((snapshot.companyNameCounts?.get(normaliseKey(company.name)) ?? 1) > 1) {
+        errors.push({
+          rowNumber,
+          column: spec.columns.companyName?.header ?? 'companyName',
+          reason:
+            'matches more than one existing company; add the domain, create a new one, or skip',
+        });
+      }
+      companyOutcome = 'LINK';
+    } else if (companyDecision === 'CREATE_NEW') {
+      companyOutcome = 'CREATE';
+    }
+    /** A company this file creates anew has no existing contacts or deals to collide with. */
+    const newCompany = companyDecision === 'CREATE_NEW';
 
     // Contact: email is the natural key; name + company is a possible duplicate. An email that
     // already belongs to a contact under another company is a row error: the commit would refuse
@@ -201,6 +267,8 @@ export function buildPreview(
     let contactOutcome: Outcome | null = null;
     let contactKey = '';
     let linksExistingContact = false;
+    /** The user decided this possible-duplicate contact is a new person. */
+    let contactDecidedNew = false;
     if (cand.contact) {
       const fullName = normaliseKey(`${cand.contact.firstName} ${cand.contact.lastName}`);
       const email = cand.contact.email ? normaliseKey(cand.contact.email) : null;
@@ -217,11 +285,32 @@ export function buildPreview(
         }
         contactOutcome = 'LINK';
         linksExistingContact = inFile === undefined;
-      } else if (!email && snapshot.contactNameCompany.has(`${fullName}|${companyKey}`)) {
+      } else if (
+        !email &&
+        !newCompany &&
+        snapshot.contactNameCompany.has(`${fullName}|${companyKey}`)
+      ) {
         contactOutcome = 'POSSIBLE_DUPLICATE';
       } else {
         contactOutcome = 'CREATE';
       }
+      if (contactOutcome === 'POSSIBLE_DUPLICATE') {
+        const d = decisions.contacts.get(contactKey);
+        if (d === 'SKIP') skip = true;
+        else if (d === 'LINK_EXISTING') contactOutcome = 'LINK';
+        else if (d === 'CREATE_NEW') {
+          contactOutcome = 'CREATE';
+          contactDecidedNew = true;
+        }
+      }
+    }
+    // A new company's contact cannot be an existing contact of the existing company.
+    if (newCompany && linksExistingContact) {
+      errors.push({
+        rowNumber,
+        column: spec.columns.contactEmail?.header ?? 'contactEmail',
+        reason: 'belongs to a contact of the existing company; use the existing company, or skip',
+      });
     }
 
     // Deal: no natural key; same title + company + contact as a live deal, or as an earlier
@@ -230,14 +319,32 @@ export function buildPreview(
     let dealKey = '';
     if (cand.deal) {
       dealKey = `${normaliseKey(cand.deal.title)}|${companyKey}|${contactKey}`;
+      // Only an explicit "create new" decision rules out the existing deals: a record the user
+      // declared new has none.
+      const againstExisting = !newCompany && !contactDecidedNew;
       dealOutcome =
-        snapshot.dealKeys.has(dealKey) || fileDeals.has(dealKey) ? 'POSSIBLE_DUPLICATE' : 'CREATE';
+        (againstExisting && snapshot.dealKeys.has(dealKey)) || fileDeals.has(dealKey)
+          ? 'POSSIBLE_DUPLICATE'
+          : 'CREATE';
+      if (dealOutcome === 'POSSIBLE_DUPLICATE') {
+        const d = decisions.deals.get(dealKey);
+        if (d === 'SKIP') skip = true;
+        else if (d === 'CREATE_NEW') dealOutcome = 'CREATE';
+      }
     }
 
     if (errors.length > 0) {
       invalidRows.push({ rowNumber, errors, values });
       continue;
     }
+    if (skip) {
+      // A SKIP decision excludes the row: it creates nothing, links nothing, registers nothing.
+      skippedRows.push(rowNumber);
+      continue;
+    }
+    if (companyOutcome === 'POSSIBLE_DUPLICATE') unresolved.companies.add(companyKey);
+    if (contactOutcome === 'POSSIBLE_DUPLICATE') unresolved.contacts.add(contactKey);
+    if (dealOutcome === 'POSSIBLE_DUPLICATE') unresolved.deals.add(dealKey);
 
     // Within-file identity (AC-D4). A row with a possible duplicate is skipped unless the user
     // includes it, so until then it creates nothing a later row could link to: only rows without
@@ -299,6 +406,12 @@ export function buildPreview(
     counts,
     conflicts,
     notIncludableRows,
+    skippedRows,
+    unresolved: {
+      companies: [...unresolved.companies],
+      contacts: [...unresolved.contacts],
+      deals: [...unresolved.deals],
+    },
   };
 }
 
