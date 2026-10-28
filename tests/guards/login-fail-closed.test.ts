@@ -43,8 +43,10 @@ describe('A1 review: every client address the auth plane uses is validated', () 
       .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/auth/client-address.ts');
     expect(files.length).toBeGreaterThan(100);
     const offenders = files.filter((f) =>
-      // Comments may name a header; code may not.
-      ADDRESS_HEADER.test(read(f).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')),
+      // Comments may name a header; code may not. Only comments that START a line are dropped
+      // (a block comment, or a whole-line //): a '//' inside a string, such as a URL, never
+      // hides the rest of its line. A trailing comment on a code line still counts — stricter.
+      ADDRESS_HEADER.test(read(f).replace(/^\s*\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*/gm, '')),
     );
     expect(offenders).toEqual([]);
   });
