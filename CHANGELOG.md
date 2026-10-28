@@ -12,6 +12,17 @@ Database migrations: 0063–0086 (production still pending — see the
 
 ### Added
 
+- First-administrator setup links by email only (founder policy 2026-10-29, migration 0087). When
+  the platform provisions an organization or re-issues its first administrator's link, the link is
+  emailed to the recipient the database recorded (fixed while setup is pending) and is never shown
+  in the console, returned by an API, logged or audited; the console shows only whether the email
+  was accepted, to whom, and when the link expires. Without Resend configured (`RESEND_API_KEY`,
+  `EMAIL_FROM`) provisioning and re-issue are refused before anything is created. An undelivered
+  email is audited (ERROR, `EMAIL_DELIVERY_FAILED`) and fixed by re-issuing. A pending link can now
+  be revoked without issuing another (reason required, audited). Prepared rollback:
+  `scripts/db/rollback/0087_org_admin_setup_email.down.sql`. Platform-administrator invitations
+  still show their link once in the console (unchanged).
+
 - Worker liveness (REL-11). A job's lease renewal proved only that the worker process was
   alive: a handler that never returned kept its lease, so the job was never reaped and
   nothing noticed. An in-process watchdog now holds every wait of the worker loop to the

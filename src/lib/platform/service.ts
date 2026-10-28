@@ -70,7 +70,7 @@ async function classify42501(
   }
 }
 
-async function run<T>(
+export async function runPlatformOperation<T>(
   req: PlatformRequest,
   operation: PlatformOperation,
   refusals: Refusals,
@@ -151,7 +151,7 @@ export interface OrganizationRow {
 }
 
 export async function listOrganizations(req: PlatformRequest): Promise<OrganizationRow[]> {
-  const rows = await run(req, 'platform.organization.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.organization.list', {}, (tx) =>
     tx.execute<{
       org_id: string;
       name: string;
@@ -189,7 +189,7 @@ export interface OrganizationTypeRow {
 }
 
 export async function listOrganizationTypes(req: PlatformRequest): Promise<OrganizationTypeRow[]> {
-  const rows = await run(req, 'platform.organization.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.organization.list', {}, (tx) =>
     tx.execute<{
       type_key: string;
       display_name: string;
@@ -240,12 +240,16 @@ export async function provisionOrganization(
 ): Promise<ProvisionResult> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(req, 'platform.organization.provision', PROVISION_REFUSALS, (tx) =>
-    tx.execute<{
-      provisioned_org_id: string;
-      setup_expires_at: Date | string | null;
-      replayed: boolean;
-    }>(sql`
+  const rows = await runPlatformOperation(
+    req,
+    'platform.organization.provision',
+    PROVISION_REFUSALS,
+    (tx) =>
+      tx.execute<{
+        provisioned_org_id: string;
+        setup_expires_at: Date | string | null;
+        replayed: boolean;
+      }>(sql`
       select provisioned_org_id, setup_expires_at, replayed
       from platform.provision_organization(
         ${input.idempotencyKey}, ${input.name}, ${input.slug}, ${input.timezone}, ${input.typeKey},
@@ -269,7 +273,7 @@ export async function reissueOrgAdminSetup(
 ): Promise<{ setupToken: string; setupExpiresAt: string }> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.organization.admin_setup_reissue',
     {
@@ -299,7 +303,7 @@ export async function setOrganizationStatus(
   to: 'SUSPENDED' | 'ACTIVE',
   reason: string,
 ): Promise<'SUSPENDED' | 'ACTIVE' | 'UNCHANGED'> {
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     to === 'SUSPENDED' ? 'platform.organization.suspend' : 'platform.organization.reactivate',
     {
@@ -343,7 +347,7 @@ export interface AdminRow {
 }
 
 export async function listAdmins(req: PlatformRequest): Promise<AdminRow[]> {
-  const rows = await run(req, 'platform.admin.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.admin.list', {}, (tx) =>
     tx.execute<{
       admin_id: string;
       email: string;
@@ -397,7 +401,7 @@ export async function inviteAdmin(
           input.permissions.map((p) => sql`${p}`),
           sql`, `,
         )}]::text[]`;
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.admin.invite',
     {
@@ -456,7 +460,7 @@ export async function reissueAdminSetup(
 ): Promise<{ setupToken: string; setupExpiresAt: string }> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.admin.setup_reissue',
     {
@@ -493,7 +497,7 @@ export async function revokeAdmin(
   adminId: string,
   reason: string,
 ): Promise<void> {
-  await run(
+  await runPlatformOperation(
     req,
     'platform.admin.revoke',
     {
@@ -540,7 +544,7 @@ export async function listAudit(
   cursor: { beforeAt: string; beforeId: string } | null,
   limit: number,
 ): Promise<{ rows: AuditRow[]; next: { beforeAt: string; beforeId: string } | null }> {
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.audit.list',
     { '22023': { status: 400, code: 'INVALID_INPUT', message: 'Invalid page.' } },

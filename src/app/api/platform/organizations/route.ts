@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { json } from '@/lib/platform/guard';
-import { BadRequest, orgAdminSetupLink, platformRoute, readJson } from '@/lib/platform/http';
-import { listOrganizations, provisionOrganization } from '@/lib/platform/service';
+import { BadRequest, platformRoute, readJson } from '@/lib/platform/http';
+import { listOrganizations } from '@/lib/platform/service';
+import { provisionAndEmail } from '@/lib/platform/org-admin-setup';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +28,10 @@ const Provision = z.strictObject({
 /**
  * POST /api/platform/organizations — provision an organization and its first administrator
  * (platform.organizations.create; step-up; 20 an hour). Idempotent by idempotencyKey: a retry
- * of a completed request answers 200 {replayed: true} and does not show the setup link again
- * (re-issue it instead). The first administrator's setup link is in the 201 answer, once.
+ * of a completed request answers 200 {replayed: true} and sends nothing (re-issue instead). The
+ * first administrator's setup link is emailed to them (email only); the 201 answer says whether
+ * the email was accepted, to whom, and when the link expires — never the link. Without email
+ * delivery configured: 503 EMAIL_NOT_CONFIGURED before anything is created.
  */
 export const POST = platformRoute(
   {
@@ -40,13 +43,9 @@ export const POST = platformRoute(
   async (req, ctx) => {
     const parsed = Provision.safeParse(await readJson(req));
     if (!parsed.success) throw new BadRequest(String(parsed.error.issues[0]?.path[0] ?? ''));
-    const result = await provisionOrganization(ctx, parsed.data);
+    const result = await provisionAndEmail(ctx, parsed.data);
     if (result.replayed) return json(200, { replayed: true, orgId: result.orgId });
-    return json(201, {
-      replayed: false,
-      orgId: result.orgId,
-      setupLink: orgAdminSetupLink(result.setupToken),
-      setupExpiresAt: result.setupExpiresAt,
-    });
+    // The setup link went to the first administrator by email only; it is never in an answer.
+    return json(201, result);
   },
 );

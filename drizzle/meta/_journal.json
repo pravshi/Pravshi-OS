@@ -657,6 +657,14 @@
       "tag": "0086_platform_console",
       "breakpoints": true,
       "hash": "1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a"
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791602728057,
+      "tag": "0087_org_admin_setup_email",
+      "breakpoints": true,
+      "hash": "3c065917786a51685f1b624e1eec693be117147b42ee37415fd3cba45c2194d4"
     }
   ]
 }

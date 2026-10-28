@@ -43,7 +43,9 @@ that email, by any runtime role (only the schema owner, through a migration, cou
 the trigger). No platform route can change it. A mistyped address is corrected by
 provisioning again, not by editing the person.
 
-Accepted residual: an administrator with that permission sees the new link and could use it
+Closed by 0087 (email only, founder policy 2026-10-29): the console no longer sees the link — it
+is emailed to the recorded recipient and appears in no answer, log or audit entry, and a pending
+link can be revoked. Previously accepted residual: an administrator with that permission saw the new link and could use it
 themselves, taking the unclaimed login. This is inherent while links are shown in the console.
 The decision that removes it is N-2 (deliver setup links by email only), which is the founder's.
 Until then, grant `assign_initial_admin` only to administrators trusted with every unclaimed
@@ -69,6 +71,7 @@ audited.
 
 ## Still open
 
-- N-2 (founder): setup links shown once in the console versus email-only delivery.
+- N-2: decided for organization first-administrators (email only, 0087). Platform-administrator
+  invitations still show their link once in the console — whether to email them too is open.
 - D1 (hosting): rate limits key on `X-Forwarded-For`; their value depends on the host's trusted
   client-IP header. Per-administrator limits do not depend on it.
