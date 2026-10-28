@@ -70,5 +70,6 @@ audited.
 ## Still open
 
 - N-2 (founder): setup links shown once in the console versus email-only delivery.
-- D1 (hosting): rate limits key on `X-Forwarded-For`; their value depends on the host's trusted
-  client-IP header. Per-administrator limits do not depend on it.
+- D1 (hosting): rate limits key on the deployment's trusted client-address header
+  (`x-vercel-forwarded-for` on Vercel); pending the founder's topology confirmation. Per-administrator
+  limits do not depend on it.

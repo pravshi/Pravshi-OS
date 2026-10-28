@@ -14,7 +14,8 @@ import { env } from '@/env';
  *   development  not production (local development, CI, tests): x-forwarded-for, as the test
  *                suites and local tooling send it. No real client exists to spoof anything.
  *   none         production anywhere else (an unsupported web host): no header is trusted;
- *                every request is "unknown" and shares the tighter unknown bucket.
+ *                every request is "unknown" and shares one bucket — the application's
+ *                'unknown' subject and Better Auth's no-trusted-ip key. Rate limiting stays on.
  *
  * The worker host (Railway) serves no user request: its one HTTP route (/wake) is authorised
  * by a shared token and reads no client address.
@@ -55,8 +56,14 @@ export function clientAddressFromHeaders(
   return name ? forwardedIp(headers?.get(name)) : null;
 }
 
-/** Better Auth's own address resolution, made to agree with the application's. */
+/**
+ * Better Auth's own address resolution, made to agree with the application's. With no trusted
+ * header the list is empty, never disableIpTracking: Better Auth then resolves no address and
+ * keys its limiter on one shared no-trusted-ip bucket, whereas disableIpTracking switches its
+ * limiter off entirely (better-auth 1.7.14 rate-limiter: no address + disableIpTracking → no
+ * limit).
+ */
 export function betterAuthIpAddressOptions(source: ClientAddressSource = clientAddressSource()) {
   const name = CLIENT_ADDRESS_HEADER[source];
-  return name ? { ipAddressHeaders: [name] } : { disableIpTracking: true };
+  return { ipAddressHeaders: name ? [name] : [] };
 }

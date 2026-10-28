@@ -369,10 +369,12 @@ A Better Auth upgrade that adds a verification endpoint fails the pinned endpoin
 
 Still open:
 
-- **FU-1, the client address.** The route trusts the first `x-forwarded-for` entry, which is
-  sound only if the ingress overwrites that header. The deployment path is not verified; until
-  it is, per-address limits are a ceiling an attacker with many addresses can spread across. The
-  per-account bounds above do not depend on it.
+- **FU-1, the client address.** The address now comes only from the deployment's trusted header
+  (`src/lib/auth/client-address.ts`, D1): `x-vercel-forwarded-for` on Vercel, nothing on any
+  other production host. Pending: the founder's confirmation of the topology (Vercel direct,
+  Cloudflare DNS only) and a preview check that external requests record a non-null address —
+  if the header were missing, every client would share one bucket. The per-account bounds above
+  do not depend on it.
 - **FU-3 / F-MFA-5.** `authz.check_rate_limit` can admit concurrent first uses of a fresh
   bucket; the fix is a migration, which needs its own approval.
 - **Enrolment is not audited in `login_events`.** Enrolment confirmations through the library's

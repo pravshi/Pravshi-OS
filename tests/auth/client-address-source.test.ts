@@ -69,6 +69,11 @@ describe('Better Auth agrees with the application', () => {
     expect(betterAuthIpAddressOptions('development')).toEqual({
       ipAddressHeaders: ['x-forwarded-for'],
     });
-    expect(betterAuthIpAddressOptions('none')).toEqual({ disableIpTracking: true });
+    // Never disableIpTracking: that turns Better Auth's limiter off. An empty list resolves no
+    // address, so every request shares the limiter's one no-trusted-ip bucket.
+    expect(betterAuthIpAddressOptions('none')).toEqual({ ipAddressHeaders: [] });
+    for (const s of ['vercel', 'development', 'none'] as const) {
+      expect(betterAuthIpAddressOptions(s)).not.toHaveProperty('disableIpTracking');
+    }
   });
 });

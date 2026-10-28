@@ -123,6 +123,11 @@ Topology this assumes (DEPLOYMENT.md): the web app on Vercel directly, Cloudflar
 cloud). If a proxy is ever put in front of Vercel, the header stays Vercel's own — re-check
 before enabling one. Vercel's paid "trusted proxy" feature is not used.
 
+Never deploy a web host off Vercel with `NODE_ENV` other than `production`: it would trust a
+client-set `x-forwarded-for` (development source). Before production, check on a preview
+deployment that external requests record a non-null address (`login_events.ip_address`, audit
+`actor_ip`); a missing header would put every client in one shared rate-limit bucket.
+
 ### Observability — not yet configured
 
 | Variable                 | Required     | Notes                                                                                                                                                                                                                                            |

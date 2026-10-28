@@ -24,6 +24,12 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     expect(ipOfHeaders.slice(0, 200)).toMatch(/return clientAddressFromHeaders\(headers\);/);
   });
 
+  it("Better Auth's own limiter resolves the address from the same trusted header", () => {
+    // Without this line Better Auth falls back to its default x-forwarded-for (D1-3).
+    expect(SERVER).toMatch(/ipAddress: betterAuthIpAddressOptions\(\),/);
+    expect(SERVER).not.toMatch(/disableIpTracking/);
+  });
+
   it('no auth-plane or audit code reads a forwarding header directly', () => {
     for (const file of ['lib/auth/login-events.ts', 'lib/auth/server.ts', 'lib/audit/log.ts']) {
       expect(read(file), file).not.toMatch(/get\(\s*'x-(vercel-)?forwarded-for'\s*\)/);
