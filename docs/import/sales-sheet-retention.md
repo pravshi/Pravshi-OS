@@ -11,8 +11,9 @@ itself is a separate change that needs the founder's explicit approval of this e
 | Data | Where | Personal data? | Under this policy |
 | ---- | ----- | -------------- | ----------------- |
 | Import metadata — who, when, file name and SHA-256, mapping, status, counts | `crm_imports` | The importer's id; the file name may name a person | **Kept** — the record that the import happened |
-| Row-level results — row status, ids of records created or linked, error reasons (never values) | `crm_import_rows` (minus values), `crm_import_row_plans` | No values | **Kept** |
+| Row-level results — row status, ids of records created or linked, error reasons (never values) | `crm_import_rows` (minus values and keys), `crm_import_row_plans` (skip, record ids) | No values | **Kept** |
 | Raw spreadsheet values — every cell of every row | `crm_import_rows.source_values` | Yes: names, emails, phones, deal values | **Cleared** when due |
+| Within-file identity keys — normalised company names/domains and contact names/emails | `crm_import_rows.company_key`, `contact_key` | Yes | **Cleared** when due |
 | Duplicate decisions — entity keys built from normalised names/emails | `crm_import_decisions` | Yes | **Cleared** (rows deleted) when due |
 | The header row (column names) | `crm_imports.header` | No | Kept (0081 requires it) |
 | Audit history — `crm.import.*` entries | `audit_logs` | Ids, counts, file name/hash | **Never touched**: audit has its own retention |
@@ -20,9 +21,11 @@ itself is a separate change that needs the founder's explicit approval of this e
 
 ## When the clock starts
 
-- **Finished imports** (completed, completed with errors, failed, cancelled): 90 days after the
-  import reached that state (`completed_at`).
-- **Never confirmed** (still `PREVIEWED`): 90 days after upload.
+- **Finished imports** (completed, completed with errors, failed): 90 days after the import
+  reached that state (`completed_at`).
+- **Never confirmed** (still `PREVIEWED`), and **cancelled** imports: 90 days after upload.
+  0081 records no completion time for a cancellation, and a cancelled import never wrote
+  anything, so nothing is gained by keeping its values longer.
 - **In progress** (`QUEUED`, `RUNNING`): never due. An abandoned import is first failed by
   `crm_import_fail_abandoned` (0081), which starts its clock.
 - **Floor:** never earlier than `expires_at`, which 0081 records at upload (upload + 90 days). A
@@ -42,9 +45,11 @@ row errors are kept.
 - A worker maintenance step (beside `crm_import_fail_abandoned`), batched, limited per run,
   idempotent: clearing an already-cleared import changes nothing.
 - One `SECURITY DEFINER` function on the worker plane, in its own migration, that for each due
-  import: sets every row's `source_values` to `[]`, deletes its `crm_import_decisions`, and stamps
-  a new `values_cleared_at` on `crm_imports` (0081's guard must allow exactly that change, and
-  the row guard exactly the values change — both need a reviewed migration).
+  import: sets every row's `source_values` to `[]` and its `company_key` / `contact_key` to
+  null, deletes its `crm_import_decisions`, and stamps a new `values_cleared_at` on
+  `crm_imports`. Three guards refuse this today and each needs a reviewed change: 0081's import
+  guard (exactly the stamp), 0081's row guard (exactly the values and keys), and 0088's
+  decisions guard (a DELETE by the cleanup, which has no person and runs after PREVIEWED).
 - **Audit:** one `crm.import.values_cleared` entry per import (ids and counts, never values) in
   the same transaction; a failed import is recorded as `crm.import.retention_failed` with a fixed
   code and retried next run; a run that fails as a whole leaves nothing half-cleared (one

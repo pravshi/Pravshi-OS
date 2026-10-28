@@ -39,9 +39,13 @@ describe('when an import becomes due', () => {
   });
 
   it('a finished import: 90 days after it finished — not after upload', () => {
-    for (const s of ['COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED'] as const) {
+    for (const s of ['COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED'] as const) {
       expect(retentionDueAt(imp(s, plus(t0, 30)))).toEqual(plus(t0, 120));
     }
+  });
+
+  it('a cancelled import: 90 days after upload (0081 records no completion time for it)', () => {
+    expect(retentionDueAt(imp('CANCELLED', null))).toEqual(plus(t0, 90));
   });
 
   it('never earlier than the expires_at recorded at upload', () => {
@@ -64,7 +68,12 @@ describe('what is decided at a given time', () => {
   it('clears only raw spreadsheet values and the keys derived from them', () => {
     const d = retentionDecision(imp('COMPLETED', t0), plus(t0, 365));
     if (d.action !== 'CLEAR') throw new Error('expected CLEAR');
-    expect(d.clears).toEqual(['crm_import_rows.source_values', 'crm_import_decisions']);
+    expect(d.clears).toEqual([
+      'crm_import_rows.source_values',
+      'crm_import_rows.company_key',
+      'crm_import_rows.contact_key',
+      'crm_import_decisions',
+    ]);
     expect(CLEARED).not.toContain('audit_logs');
   });
 

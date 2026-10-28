@@ -11,7 +11,8 @@ import { DecisionInput, getDecisionPreview, setDecision } from '@/lib/import/sal
 /**
  * /api/crm/imports/:id/decisions — duplicate decisions (0088).
  * GET  crm.import → the preview recomputed from the recorded rows and the decisions: counts
- *      (exactly what confirm compares), undecided possible duplicates by entity key, rows the
+ *      (what confirm compares once the import has a decision; an undecided import is confirmed
+ *      against its upload preview), undecided possible duplicates by entity key, rows the
  *      decisions skip or make invalid, and the decisions. Row values are never returned; an
  *      entity key does carry a normalised company / contact name or email from the file, and is
  *      seen only by the importer or a GLOBAL holder of crm.import (the 0088 policies).

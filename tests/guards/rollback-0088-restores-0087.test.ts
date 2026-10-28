@@ -5,8 +5,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
 
 /**
  * scripts/db/rollback/0088_crm_import_decisions.down.sql: refuses unless the database is at
- * 0088, and drops exactly the table and the function 0088 creates (the trigger and policies go
- * with the table).
+ * 0088 and while an import with a confirmed plan is queued or running, and drops exactly the two
+ * tables and two guard functions 0088 creates (triggers and policies go with their tables).
  */
 const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
 const M0088 = read('drizzle', '0088_crm_import_decisions.sql');
@@ -32,7 +32,9 @@ describe('0088 does what its rollback undoes', () => {
     expect(heads).toEqual([
       'begin;',
       "set local lock_timeout = '5s';",
-      expect.stringContaining('from drizzle.__drizzle_migrations) <> 88'),
+      expect.stringMatching(
+        /__drizzle_migrations\) <> 88[\s\S]*status in \('QUEUED', 'RUNNING'\)[\s\S]*crm_import_row_plans/,
+      ),
       'drop table public.crm_import_row_plans;',
       'drop function public.crm_import_row_plans_guard();',
       'drop table public.crm_import_decisions;',

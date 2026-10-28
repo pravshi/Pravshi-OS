@@ -500,18 +500,22 @@ tenant data, only Better Auth's own self-service endpoints);
   request, and refuses (fails closed) when it cannot — so 0086 must be applied BEFORE that code
   is deployed, and that code must be rolled back BEFORE (or with) this rollback, or every
   sign-in, tenant users' included, is refused. It refuses unless the database is at 0086, and needs Nani's explicit
+  approval and a run-record entry.
   `scripts/db/rollback/0087_org_admin_setup_email.down.sql` drops the two functions 0087 adds
   (the re-issue's recipient lookup and link revocation) and restores `platform.record_failure`
   verbatim from 0086. What it re-opens: a pending first-administrator link can no longer be
   revoked without re-issuing; the 0087 application code's re-issue fails (no recipient lookup) —
   roll the application back with it. It refuses unless the database is at 0087, and needs Nani's
   explicit approval and a run-record entry.
-  `scripts/db/rollback/0088_crm_import_decisions.down.sql` drops the duplicate-decision table
-  (every recorded decision goes with it) and its guard function. A PREVIEWED import falls back
-  to 0081's behaviour (undecided possible duplicates are skipped unless included per row); the
-  0088 application code reads the table — roll the application back with it. It refuses unless
-  the database is at 0088, and needs Nani's explicit approval and a run-record entry.
-  approval and a run-record entry.
+  `scripts/db/rollback/0088_crm_import_decisions.down.sql` drops the two tables 0088 adds
+  (`crm_import_decisions`, `crm_import_row_plans` — every recorded decision and confirmed row
+  plan goes with them) and their two guard functions. A PREVIEWED import falls back to 0081's
+  behaviour (undecided possible duplicates are skipped unless included per row); a finished
+  import keeps its results. It refuses while an import with a confirmed plan is QUEUED or
+  RUNNING (that import would lose its plan and skip its "use the existing" and "create new"
+  rows): let it finish, or cancel it, first. The 0088 application code reads both tables — roll
+  the application back with it. It refuses unless the database is at 0088, and needs Nani's
+  explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -588,7 +592,7 @@ re-apply.
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
 | 86  | `0087_org_admin_setup_email` | 1791602728057 | `3c065917786a51685f1b624e1eec693be117147b42ee37415fd3cba45c2194d4` |
-| 87  | `0088_crm_import_decisions` | 1791603728057 | `c5653bb745d51d598cee86393048e5d20f5786cc07fcce1e6d6d1cd856de84bf` |
+| 87  | `0088_crm_import_decisions` | 1791603728057 | `ec99006f1a9386a72e4d23faf2809afae937e1a44614abe0acfa0ba0b5365ca9` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

@@ -32,7 +32,6 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
 import { MAPPINGS, resolveHeader, type MappingSpec, type TargetField } from './mapping';
-import { normaliseKey } from './preview';
 import { buildCandidate } from './rows';
 
 const BATCH = 100;
@@ -110,18 +109,26 @@ export function rowReason(error: unknown): string | null {
   return null;
 }
 
-/** The confirmed plan of a decided import (0088), per row; null when the import has none. */
-type RowPlan = { skip: boolean; companyExistingByName: boolean; contactExistingByName: boolean };
+/**
+ * The confirmed plan of a decided import (0088), per row; null when the import has none. The
+ * existing company / contact a "use the existing" decision chose is recorded by id at
+ * confirmation: the commit links to exactly that record, never re-matches a name.
+ */
+type RowPlan = {
+  skip: boolean;
+  companyExistingId: string | null;
+  contactExistingId: string | null;
+};
 type RowPlans = ReadonlyMap<number, RowPlan> | null;
 
 async function loadPlans(tx: Tx, importId: string): Promise<RowPlans> {
   const res = await tx.execute<{
     row_number: number;
     skip: boolean;
-    company_existing_by_name: boolean;
-    contact_existing_by_name: boolean;
+    company_existing_id: string | null;
+    contact_existing_id: string | null;
   }>(sql`
-    select p.row_number, p.skip, p.company_existing_by_name, p.contact_existing_by_name
+    select p.row_number, p.skip, p.company_existing_id, p.contact_existing_id
     from public.crm_import_row_plans p where p.import_id = ${importId}::uuid
   `);
   if (res.rows.length === 0) return null;
@@ -130,52 +137,40 @@ async function loadPlans(tx: Tx, importId: string): Promise<RowPlans> {
       r.row_number,
       {
         skip: r.skip,
-        companyExistingByName: r.company_existing_by_name,
-        contactExistingByName: r.contact_existing_by_name,
+        companyExistingId: r.company_existing_id,
+        contactExistingId: r.contact_existing_id,
       },
     ]),
   );
 }
 
-/** Same normalisation as the preview's keys (normaliseKey), in SQL. */
-const NORMALISED = (col: string) =>
-  sql.raw(`regexp_replace(lower(btrim(${col})), '\\s+', ' ', 'g')`);
+/** A plan that does anything beyond 0081's own rules (links by decision, or skips). */
+const linksByDecision = (p: RowPlan) =>
+  p.companyExistingId !== null || p.contactExistingId !== null;
 
-/**
- * "Use the existing company": the one live company of this name. Decided at preview against a
- * single match; if that is no longer true when the commit runs, the row fails — never a guess.
- */
-async function existingCompanyByName(tx: Tx, orgId: string, name: string): Promise<string> {
+/** "Use the existing company": the confirmed one, if it is still live and visible. */
+async function confirmedCompany(tx: Tx, id: string): Promise<string> {
   const res = await tx.execute<{ id: string }>(sql`
-    select c.id from public.companies c
-    where c.org_id = ${orgId}::uuid and c.deleted_at is null
-      and ${NORMALISED('c.name')} = ${normaliseKey(name)}
-    limit 2
+    select c.id from public.companies c where c.id = ${id}::uuid and c.deleted_at is null
   `);
   if (res.rows.length === 0) {
-    throw new RowRefusal('the existing company of this name is no longer visible to you');
+    throw new RowRefusal('the existing company you chose is no longer visible to you');
   }
-  if (res.rows.length > 1) throw new RowRefusal('more than one company now has this name');
   return res.rows[0]!.id;
 }
 
-/** "Use the existing contact": the one live contact of this name under the row's company. */
-async function existingContactByName(
+/** "Use the existing contact": the confirmed one, if it is still live and visible. */
+async function confirmedContact(
   tx: Tx,
-  orgId: string,
-  companyId: string,
-  fullName: string,
+  id: string,
 ): Promise<{ id: string; company_id: string | null }> {
   const res = await tx.execute<{ id: string; company_id: string | null }>(sql`
     select c.id, c.company_id from public.contacts c
-    where c.org_id = ${orgId}::uuid and c.company_id = ${companyId}::uuid and c.deleted_at is null
-      and ${NORMALISED("c.first_name || ' ' || c.last_name")} = ${normaliseKey(fullName)}
-    limit 2
+    where c.id = ${id}::uuid and c.deleted_at is null
   `);
   if (res.rows.length === 0) {
-    throw new RowRefusal('the existing contact of this name is no longer visible to you');
+    throw new RowRefusal('the existing contact you chose is no longer visible to you');
   }
-  if (res.rows.length > 1) throw new RowRefusal('more than one contact now has this name');
   return res.rows[0]!;
 }
 
@@ -263,8 +258,8 @@ async function applyRow(
     if (visible.rows.length === 0) {
       throw new RowRefusal('the company an earlier row created is no longer visible to you');
     }
-  } else if (plan?.companyExistingByName) {
-    companyId = await existingCompanyByName(tx, ctx.orgId, company.name);
+  } else if (plan?.companyExistingId) {
+    companyId = await confirmedCompany(tx, plan.companyExistingId);
   } else if (company.domain) {
     companyId = (
       await tx.execute<{ id: string }>(sql`
@@ -310,13 +305,8 @@ async function applyRow(
       if (!found) {
         throw new RowRefusal('the contact an earlier row created is no longer visible to you');
       }
-    } else if (plan?.contactExistingByName) {
-      found = await existingContactByName(
-        tx,
-        ctx.orgId,
-        companyId,
-        `${cand.contact.firstName} ${cand.contact.lastName}`,
-      );
+    } else if (plan?.contactExistingId) {
+      found = await confirmedContact(tx, plan.contactExistingId);
     } else if (cand.contact.email) {
       found = (
         await tx.execute<{ id: string; company_id: string | null }>(sql`
@@ -442,11 +432,26 @@ async function applyBatchFast(
   spec: MappingSpec,
   plans: RowPlans = null,
 ): Promise<void> {
-  // Rows that were possible duplicates follow a decision the set-based path does not apply:
-  // a decided import runs such a batch row by row. Every other row's plan is 0081's.
-  if (plans && rows.some(hasPossibleDuplicate)) throw new FastPathDeclined();
+  // A decided import follows its confirmed plan: a planned skip is skipped here too, whatever
+  // the row looked like at upload (the organization may have changed since). A row that links
+  // by decision, or was a possible duplicate at upload, follows a decision this set-based path
+  // does not apply: such a batch runs row by row. Every other row's plan is 0081's.
+  if (
+    plans &&
+    rows.some((row) => {
+      const p = plans.get(row.row_number);
+      return p !== undefined && !p.skip && (linksByDecision(p) || hasPossibleDuplicate(row));
+    })
+  ) {
+    throw new FastPathDeclined();
+  }
   const work = rows.map((row) => {
-    if (hasPossibleDuplicate(row) && !row.include) return { row, cand: null };
+    if (plans) {
+      const p = plans.get(row.row_number);
+      if (!p || p.skip) return { row, cand: null };
+    } else if (hasPossibleDuplicate(row) && !row.include) {
+      return { row, cand: null };
+    }
     const cand = buildCandidate(row.row_number, row.source_values, index, spec, header.length);
     if (cand.errors.length > 0 || !cand.company || cand.ownerEmail === null) {
       throw new FastPathDeclined();

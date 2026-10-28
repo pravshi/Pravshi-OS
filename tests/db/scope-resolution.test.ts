@@ -946,7 +946,7 @@ describe('RLS', () => {
     // integration_inbound_events and integration_sync_checkpoints — none of
     // them scope-driven (they branch on authz.has), so with_scope below
     // stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(111); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies
+    expect(Number(rows[0]!.n)).toBe(117); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert)
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM
@@ -954,7 +954,7 @@ describe('RLS', () => {
     // deals branch on scope_for for view/edit. The Track B migrations add eight more —
     // the select and update policies on activities, company_contacts, company_links and
     // contact_links branch on scope_for for view/edit. The rest stay relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(26); // 0081: four scope-driven crm_imports(/_rows) policies
+    expect(Number(rows[0]!.with_scope)).toBe(28); // 0081: four scope-driven crm_imports(/_rows) policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans
   });
 });
 

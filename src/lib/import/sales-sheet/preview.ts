@@ -38,11 +38,14 @@ export interface OrgSnapshot {
   /** `${normalisedFullName}|${normalisedCompanyKey}` */
   contactNameCompany: ReadonlySet<string>;
   /**
-   * How many live companies carry each normalised name. "Use the existing company" for a
-   * name-only match is refused when more than one does: the user must add a domain (or create a
-   * new one) — the import never guesses which (duplicate resolution). Absent: every match counts 1.
+   * Normalised name → the ids of the live companies that carry it. "Use the existing company"
+   * for a name-only match needs exactly one: with several the user must add a domain (or create
+   * a new one) — the import never guesses which (duplicate resolution). The id found is the one
+   * the confirmed plan records and the commit links to.
    */
-  companyNameCounts?: ReadonlyMap<string, number>;
+  companyIdsByName: ReadonlyMap<string, readonly string[]>;
+  /** `${normalisedFullName}|${normalisedCompanyKey}` → the ids of the live contacts it names. */
+  contactIdsByNameCompany: ReadonlyMap<string, readonly string[]>;
   /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
@@ -65,6 +68,13 @@ export interface PlannedRow {
   /** Within-file identity (AC-D4): rows with the same key are one record. */
   companyKey: string;
   contactKey: string | null;
+  /**
+   * The existing company / contact a "use the existing" decision resolved to for THIS row —
+   * directly, or through an earlier row of the same entity. The confirmed plan records these
+   * ids (0088); null when the row does not link by decision.
+   */
+  existingCompanyId: string | null;
+  existingContactId: string | null;
   /** The row's values as the file had them (stored with the import, AC-A3). */
   values: string[];
 }
@@ -223,9 +233,18 @@ export function planPreview(
     deals: new Set<string>(),
   };
   // Within-file identity (AC-D4): the first committing row creates, later rows with the same key
-  // link. Contacts map to the company key they were first seen under.
-  const fileCompanies = new Map<string, { rowNumber: number; industry: string | null }>();
-  const fileContacts = new Map<string, string>();
+  // link. Contacts map to the company key they were first seen under. A decision travels with
+  // the entity: later rows of a company decided new are rows of a new company, and later rows
+  // of one decided existing link to that same existing record.
+  interface FileEntity {
+    existingId: string | null;
+    decidedNew: boolean;
+  }
+  const fileCompanies = new Map<
+    string,
+    FileEntity & { rowNumber: number; industry: string | null }
+  >();
+  const fileContacts = new Map<string, FileEntity & { companyKey: string }>();
   const fileDeals = new Set<string>();
 
   for (const { rowNumber, values } of parsed.rows) {
@@ -271,21 +290,30 @@ export function planPreview(
     const companyDecision =
       companyOutcome === 'POSSIBLE_DUPLICATE' ? decisions.companies.get(companyKey) : undefined;
     let skip = companyDecision === 'SKIP';
+    let existingCompanyId = seen?.existingId ?? null;
     if (companyDecision === 'LINK_EXISTING') {
-      if ((snapshot.companyNameCounts?.get(normaliseKey(company.name)) ?? 1) > 1) {
+      const ids = snapshot.companyIdsByName.get(normaliseKey(company.name)) ?? [];
+      if (ids.length === 1) {
+        existingCompanyId = ids[0]!;
+      } else {
         errors.push({
           rowNumber,
           column: spec.columns.companyName?.header ?? 'companyName',
           reason:
-            'matches more than one existing company; add the domain, create a new one, or skip',
+            ids.length > 1
+              ? 'matches more than one existing company; add the domain, create a new one, or skip'
+              : 'no longer matches an existing company',
         });
       }
       companyOutcome = 'LINK';
     } else if (companyDecision === 'CREATE_NEW') {
       companyOutcome = 'CREATE';
     }
-    /** A company this file creates anew has no existing contacts or deals to collide with. */
-    const newCompany = companyDecision === 'CREATE_NEW';
+    /**
+     * A company this file creates anew — on this row or an earlier one — has no existing
+     * contacts or deals to collide with.
+     */
+    const newCompany = companyDecision === 'CREATE_NEW' || (seen?.decidedNew ?? false);
 
     // Contact: email is the natural key; name + company is a possible duplicate. An email that
     // already belongs to a contact under another company is a row error: the commit would refuse
@@ -293,16 +321,21 @@ export function planPreview(
     let contactOutcome: Outcome | null = null;
     let contactKey = '';
     let linksExistingContact = false;
-    /** The user decided this possible-duplicate contact is a new person. */
+    /** The user decided this possible-duplicate contact is a new person (here or earlier). */
     let contactDecidedNew = false;
+    let existingContactId: string | null = null;
     if (cand.contact) {
       const fullName = normaliseKey(`${cand.contact.firstName} ${cand.contact.lastName}`);
       const email = cand.contact.email ? normaliseKey(cand.contact.email) : null;
       contactKey = email ? `email:${email}` : `name:${fullName}|${companyKey}`;
       const inFile = fileContacts.get(contactKey);
       const existing = email ? snapshot.contactEmails.get(email) : undefined;
+      if (inFile !== undefined) {
+        existingContactId = inFile.existingId;
+        contactDecidedNew = inFile.decidedNew;
+      }
       if (inFile !== undefined || existing !== undefined) {
-        if ((inFile ?? existing) !== companyKey) {
+        if ((inFile !== undefined ? inFile.companyKey : existing) !== companyKey) {
           errors.push({
             rowNumber,
             column: spec.columns.contactEmail?.header ?? 'contactEmail',
@@ -323,8 +356,22 @@ export function planPreview(
       if (contactOutcome === 'POSSIBLE_DUPLICATE') {
         const d = decisions.contacts.get(contactKey);
         if (d === 'SKIP') skip = true;
-        else if (d === 'LINK_EXISTING') contactOutcome = 'LINK';
-        else if (d === 'CREATE_NEW') {
+        else if (d === 'LINK_EXISTING') {
+          contactOutcome = 'LINK';
+          const ids = snapshot.contactIdsByNameCompany.get(`${fullName}|${companyKey}`) ?? [];
+          if (ids.length === 1) {
+            existingContactId = ids[0]!;
+          } else {
+            errors.push({
+              rowNumber,
+              column: spec.columns.contactLastName?.header ?? 'contactLastName',
+              reason:
+                ids.length > 1
+                  ? 'matches more than one existing contact of this company; add the email, create a new one, or skip'
+                  : 'no longer matches an existing contact',
+            });
+          }
+        } else if (d === 'CREATE_NEW') {
           contactOutcome = 'CREATE';
           contactDecidedNew = true;
         }
@@ -385,8 +432,21 @@ export function planPreview(
           reason: `differs from row ${seen.rowNumber} for the same company; row ${seen.rowNumber} wins`,
         });
       }
-      if (!seen) fileCompanies.set(companyKey, { rowNumber, industry: company.industry ?? null });
-      if (cand.contact && !fileContacts.has(contactKey)) fileContacts.set(contactKey, companyKey);
+      if (!seen) {
+        fileCompanies.set(companyKey, {
+          rowNumber,
+          industry: company.industry ?? null,
+          existingId: existingCompanyId,
+          decidedNew: newCompany,
+        });
+      }
+      if (cand.contact && !fileContacts.has(contactKey)) {
+        fileContacts.set(contactKey, {
+          companyKey,
+          existingId: existingContactId,
+          decidedNew: contactDecidedNew,
+        });
+      }
       if (cand.deal) fileDeals.add(dealKey);
     }
 
@@ -416,6 +476,8 @@ export function planPreview(
       ownerPersonId,
       companyKey,
       contactKey: cand.contact ? contactKey : null,
+      existingCompanyId,
+      existingContactId: cand.contact ? existingContactId : null,
       values,
     });
   }

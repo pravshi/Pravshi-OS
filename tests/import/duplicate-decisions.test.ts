@@ -17,11 +17,15 @@ import {
 } from '@/lib/import/sales-sheet/preview';
 
 const OWNER = '11111111-1111-4111-8111-111111111111';
+const EXISTING_CO = 'c0000000-0000-4000-8000-000000000001';
+const ASHA_ID = 'a0000000-0000-4000-8000-000000000001';
 const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
   companyDomains: new Set(),
   companyNames: new Set([normaliseKey('Name Only Ltd')]),
   contactEmails: new Map(),
   contactNameCompany: new Set([`${normaliseKey('Asha Rao')}|name:name only ltd`]),
+  companyIdsByName: new Map([[normaliseKey('Name Only Ltd'), [EXISTING_CO]]]),
+  contactIdsByNameCompany: new Map([[`${normaliseKey('Asha Rao')}|name:name only ltd`, [ASHA_ID]]]),
   dealKeys: new Set(['renewal|name:name only ltd|name:asha rao|name:name only ltd']),
   activeOwnersByEmail: new Map([['owner.one@pravshi.example', OWNER]]),
   completedFileHashes: new Set(),
@@ -133,7 +137,9 @@ describe('decisions the import refuses rather than guess', () => {
   it('"use the existing company" when more than one company has that name', () => {
     const p = preview(
       decide({ companies: [[COMPANY, 'LINK_EXISTING']] }),
-      snapshot({ companyNameCounts: new Map([[normaliseKey('Name Only Ltd'), 2]]) }),
+      snapshot({
+        companyIdsByName: new Map([[normaliseKey('Name Only Ltd'), [EXISTING_CO, OWNER]]]),
+      }),
     );
     expect(p.invalidRows.map((r) => r.rowNumber)).toEqual([2, 3]);
     expect(p.invalidRows[0]!.errors[0]!.reason).toMatch(/more than one existing company/);
@@ -161,5 +167,75 @@ describe('decisions the import refuses rather than guess', () => {
     const after = preview(decide({ companies: [['name:fresh co', 'SKIP']] }));
     expect(outcomes(after)).toEqual(outcomes(before));
     expect(after.skippedRows).toEqual([]);
+  });
+});
+
+describe('a decision travels with its entity to later rows (review DR-2, DR-3)', () => {
+  const B = (rows: string) =>
+    bytes(
+      'Company,Contact First Name,Contact Last Name,Contact Email,Deal Title,Owner Email\n' + rows,
+    );
+  const O = 'owner.one@pravshi.example';
+  const run = (file: Uint8Array, decisions: ImportDecisions, snap = snapshot()) =>
+    buildPreview(file, REPRESENTATIVE_MAPPING, snap, DEFAULT_LIMITS, decisions);
+
+  it('later rows of a company marked new: an existing contact email is refused, as on its first row', () => {
+    const p = run(
+      B(`Name Only Ltd,Cy,Lee,,,${O}\nName Only Ltd,Bob,Lee,bob@x.example,,${O}\n`),
+      decide({ companies: [[COMPANY, 'CREATE_NEW']] }),
+      snapshot({ contactEmails: new Map([['bob@x.example', COMPANY]]) }),
+    );
+    expect(p.validRows.map((r) => r.rowNumber)).toEqual([2]);
+    expect(p.invalidRows.map((r) => r.rowNumber)).toEqual([3]);
+    expect(p.invalidRows[0]!.errors.map((e) => e.reason)).toContain(
+      'belongs to a contact of the existing company; use the existing company, or skip',
+    );
+  });
+
+  it('later rows of a company marked new: the old company’s contact and deal never collide', () => {
+    const p = run(
+      B(`Name Only Ltd,Cy,Lee,,,${O}\nName Only Ltd,Asha,Rao,,Renewal,${O}\n`),
+      decide({ companies: [[COMPANY, 'CREATE_NEW']] }),
+    );
+    expect(outcomes(p)).toEqual([
+      [2, 'CREATE', 'CREATE', null],
+      [3, 'LINK', 'CREATE', 'CREATE'],
+    ]);
+    expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [] });
+    expect(p.validRows.every((r) => r.existingCompanyId === null)).toBe(true);
+  });
+
+  it('"use the existing" records the chosen ids on every row of that entity', () => {
+    const p = run(
+      B(`Name Only Ltd,Asha,Rao,,,${O}\nName Only Ltd,Asha,Rao,,,${O}\n`),
+      decide({ companies: [[COMPANY, 'LINK_EXISTING']], contacts: [[ASHA, 'LINK_EXISTING']] }),
+    );
+    expect(p.validRows.map((r) => [r.existingCompanyId, r.existingContactId])).toEqual([
+      [EXISTING_CO, ASHA_ID],
+      [EXISTING_CO, ASHA_ID],
+    ]);
+  });
+
+  it('a contact decision a company decision made moot is not applied (no stale link)', () => {
+    // Decided "use the existing Asha", then the company was marked new: Asha is a new contact
+    // of the new company; the plan must not link the old one.
+    const p = preview(
+      decide({ companies: [[COMPANY, 'CREATE_NEW']], contacts: [[ASHA, 'LINK_EXISTING']] }),
+    );
+    expect(outcomes(p)[0]).toEqual([2, 'CREATE', 'CREATE', 'CREATE']);
+    expect(p.validRows[0]!.existingContactId).toBeNull();
+  });
+
+  it('"use the existing contact" is refused when the name matches several of that company', () => {
+    const p = preview(
+      decide({ companies: [[COMPANY, 'LINK_EXISTING']], contacts: [[ASHA, 'LINK_EXISTING']] }),
+      snapshot({
+        contactIdsByNameCompany: new Map([
+          [`${normaliseKey('Asha Rao')}|name:name only ltd`, [ASHA_ID, OWNER]],
+        ]),
+      }),
+    );
+    expect(p.invalidRows.map((r) => r.rowNumber)).toEqual([2]);
+    expect(p.invalidRows[0]!.errors[0]!.reason).toMatch(/more than one existing contact/);
   });
 });
