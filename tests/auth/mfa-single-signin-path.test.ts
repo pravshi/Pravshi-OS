@@ -39,6 +39,13 @@ vi.mock('@/lib/auth/login-lockout', () => ({
   clearLoginLockout: async () => undefined,
 }));
 vi.mock('@/lib/auth/login-person-check', () => ({ loginPersonActive: async () => true }));
+// The platform's two sign-in questions (0086) are database calls, like the person check above;
+// this suite runs on an in-memory adapter and asks neither. They are exercised against a real
+// database in tests/serial/platform-console.test.ts.
+vi.mock('@/lib/auth/platform-login', () => ({
+  loginMaySignIn: async () => true,
+  endStaleAdminSession: async () => false,
+}));
 vi.mock('@/lib/auth/login-events', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/auth/login-events')>()),
   recordLoginEvent,
