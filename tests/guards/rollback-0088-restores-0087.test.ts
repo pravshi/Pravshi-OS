@@ -32,10 +32,11 @@ describe('0088 does what its rollback undoes', () => {
     expect(heads).toEqual([
       'begin;',
       "set local lock_timeout = '5s';",
+      // The history first (at another level the locked tables may not exist), then the lock,
+      // then the queued-import check.
+      expect.stringContaining('from drizzle.__drizzle_migrations) <> 88'),
       'lock table public.crm_imports, public.crm_import_row_plans, public.crm_import_decisions in share row exclusive mode;',
-      expect.stringMatching(
-        /__drizzle_migrations\) <> 88[\s\S]*status in \('QUEUED', 'RUNNING'\)[\s\S]*crm_import_row_plans/,
-      ),
+      expect.stringMatching(/status in \('QUEUED', 'RUNNING'\)[\s\S]*crm_import_row_plans/),
       'drop table public.crm_import_row_plans;',
       'drop function public.crm_import_row_plans_guard();',
       'drop table public.crm_import_decisions;',

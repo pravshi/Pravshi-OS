@@ -17,17 +17,23 @@ begin;
 
 set local lock_timeout = '5s';
 
--- Taken before the check: a confirmation in flight (its plan written, not yet committed) holds
--- crm_imports and crm_import_row_plans; this waits for it, then sees it QUEUED and refuses. And
--- none can start between the check and the drops.
-lock table public.crm_imports, public.crm_import_row_plans, public.crm_import_decisions
-  in share row exclusive mode;
-
+-- First where the database is: at any other level the tables below may not exist.
 do $$
 begin
   if (select count(*) from drizzle.__drizzle_migrations) <> 88 then
     raise exception '0088 rollback refused: the database is not at 0088 (roll back later migrations first)';
   end if;
+end;
+$$;
+
+-- Then the lock, before the import check: a confirmation in flight (its plan written, not yet
+-- committed) holds crm_imports and crm_import_row_plans; this waits for it, then sees it QUEUED
+-- and refuses. And none can start between the check and the drops.
+lock table public.crm_imports, public.crm_import_row_plans, public.crm_import_decisions
+  in share row exclusive mode;
+
+do $$
+begin
   if exists (select 1 from public.crm_imports i
              where i.status in ('QUEUED', 'RUNNING')
                and exists (select 1 from public.crm_import_row_plans p where p.import_id = i.id)) then
