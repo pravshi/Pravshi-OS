@@ -218,6 +218,16 @@ Database migrations: 0063–0086 (production still pending — see the
 
 ### Security
 
+- better-auth 1.7.3 → 1.7.14 (founder-approved, 2026-10-29), clearing GHSA-965c-763c-88jm
+  (critical) and GHSA-r4xp-prcw-77qf (high). Neither was exploitable here: both need Magic Link
+  with OAuth providers, or the OAuth Proxy plugin, and Pravshi uses only the two-factor plugin;
+  the release audit gate failed regardless. The lockfile changes only the Better Auth family
+  (`@better-auth/*` 1.7.14, `@better-auth/utils` 0.5.1, `@better-fetch/fetch` 1.3.3,
+  `better-call` 1.4.4). From 1.7.7 on, a failed session lookup throws an error whose cause is
+  the database driver's error, which carries the session token in its message; every
+  server-side lookup now goes through `getSessionSafely` (`src/lib/auth/safe-session.ts`),
+  which fails closed with a fixed error and no cause. A guard test refuses any other direct
+  `auth.api.getSession` call.
 - A workflow can no longer sign its webhooks with a deployment-level secret
   (`WEBHOOK_SIGNING_SECRET_<REF>`, named by the webhook action's `signatureSecretRef`). Those
   secrets belong to the deployment, not to an organization: any organization that knew a ref

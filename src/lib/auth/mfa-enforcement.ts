@@ -1,7 +1,7 @@
+import { getSessionSafely } from './safe-session';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { sql } from 'drizzle-orm';
-import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
 
 /**
@@ -48,7 +48,7 @@ export async function mfaEnrollmentRequired(authUserId: string): Promise<boolean
  */
 export async function requireMfaEnrolled(): Promise<void> {
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionSafely(h);
   if (!session?.user?.id) redirect('/login');
   if (await mfaEnrollmentRequired(session.user.id)) {
     redirect('/me/security?enrollment=required');

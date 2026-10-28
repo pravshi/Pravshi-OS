@@ -60,7 +60,7 @@ export const sessionAssuranceFor = (path: string | undefined): 'aal1' | 'aal2' =
  * login_events trace, so they are closed to HTTP here — without touching the
  * auth.api.* calls the mediated route makes, which reach the same endpoints.
  *
- * Two facts about the installed library (1.7.3) make that distinction possible:
+ * Two facts about the installed library (1.7.x; re-verified on 1.7.14) make that distinction possible:
  *
  *   * disabledPaths is checked only in the HTTP router's onRequest (api/index.mjs),
  *     before the rate limiter and before any endpoint; auth.api.* never passes there.
@@ -84,7 +84,7 @@ export const HTTP_DISABLED_AUTH_PATHS = [
   '/two-factor/verify-otp',
 ] as const;
 
-/** The two-factor plugin's challenge cookie (TWO_FACTOR_COOKIE_NAME in 1.7.3). */
+/** The two-factor plugin's challenge cookie (TWO_FACTOR_COOKIE_NAME in 1.7.x; re-verified on 1.7.14). */
 export const TWO_FACTOR_CHALLENGE_COOKIE = 'two_factor';
 
 /** The slice of a hook context the routed-challenge check reads. */
@@ -132,7 +132,7 @@ export function isRoutedSignInChallengeVerification(ctx: VerificationHookContext
  * delay below keeps the locked branch from answering faster than a wrong
  * password, which pays for scrypt verification inside the endpoint. (The
  * library itself dummy-hashes on the unknown-user branches — verified in the
- * 1.7.3 sign-in endpoint source — so ordinary failure timing needs no floor.)
+ * 1.7.x sign-in endpoint source (re-verified on 1.7.14) — so ordinary failure timing needs no floor.)
  *
  * The after-hook reads the outcome off the dispatch context: a thrown
  * credential failure lands in ctx.context.returned as an APIError; a success
@@ -487,7 +487,7 @@ export const auth = betterAuth({
        * store). The single legitimate way to request a reset is the mediated
        * /api/auth/forgot-password route.
        *
-       * Path note: in the installed Better Auth (1.7.3) the endpoint lives at
+       * Path note: in the installed Better Auth (1.7.x; re-verified on 1.7.14) the endpoint lives at
        * /request-password-reset; /forget-password is the legacy spelling the
        * library no longer routes (it survives only in its rate-limiter's
        * path list). Both are refused: the live one because it must be, the

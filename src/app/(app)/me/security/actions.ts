@@ -1,9 +1,9 @@
 'use server';
 
+import { getSessionSafely } from '@/lib/auth/safe-session';
 import { randomUUID } from 'node:crypto';
 import { headers } from 'next/headers';
 import { sql } from 'drizzle-orm';
-import { auth } from '@/lib/auth/server';
 import { requirePermission } from '@/lib/authz/require-permission';
 import { changePassword, ChangePasswordError } from '@/lib/auth/change-password';
 import { requestMetadata } from '@/lib/audit/log';
@@ -36,7 +36,7 @@ export async function changePasswordAction(
     minScope: 'SELF',
   });
   const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const session = await getSessionSafely(h);
   const authUserId = session?.user?.id;
   const currentToken = session?.session?.token;
   if (!authUserId || !currentToken) throw new Error('Not signed in.');

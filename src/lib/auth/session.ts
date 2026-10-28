@@ -1,5 +1,5 @@
+import { getSessionSafely } from './safe-session';
 import { sql } from 'drizzle-orm';
-import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
 import type { AuthContext } from '@/lib/db/context';
 
@@ -51,13 +51,13 @@ import type { AuthContext } from '@/lib/db/context';
  * request carries no live session.
  */
 export async function currentSessionToken(headers: Headers): Promise<string | null> {
-  const session = await auth.api.getSession({ headers });
+  const session = await getSessionSafely(headers);
   const token = session?.session?.token;
   return typeof token === 'string' && token.length > 0 ? token : null;
 }
 
 export async function resolveAuthContext(headers: Headers): Promise<AuthContext | null> {
-  const session = await auth.api.getSession({ headers });
+  const session = await getSessionSafely(headers);
   if (!session?.user?.id) return null;
 
   // The library already refuses an expired session; this is the PRAVSHI OS half.

@@ -1,6 +1,6 @@
+import { getSessionSafely } from './safe-session';
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
 
 /**
@@ -55,7 +55,7 @@ export function countsAsActivity(headers: Headers, method: string): boolean {
 export async function readRequestSession(
   headers: Headers,
 ): Promise<{ authUserId: string; sessionId: string; tokenSha256: string } | null> {
-  const session = await auth.api.getSession({ headers });
+  const session = await getSessionSafely(headers);
   const userId = session?.user?.id;
   const sessionId = session?.session?.id;
   const token = session?.session?.token;

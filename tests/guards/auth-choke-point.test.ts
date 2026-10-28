@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * bypassed by Better Auth's built-in endpoints. The sign-in controls —
  * per-account lockout and login-event recording — therefore live in the
  * hooks of src/lib/auth/server.ts, which the library's dispatch runs for
- * auth.api.* calls and [...all] HTTP requests alike (better-auth 1.7.3,
+ * auth.api.* calls and [...all] HTTP requests alike (better-auth 1.7.x, re-verified on 1.7.14,
  * dispatchAuthEndpoint). The mediated login route delegates through the
  * same pipeline and records nothing itself, which is what makes every
  * outcome land in public.login_events exactly once.
