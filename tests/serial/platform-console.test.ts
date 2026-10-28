@@ -1390,6 +1390,67 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       expect(replay).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
     }
     expect((await setupState())!.c).toBeNull();
+
+    // A re-issue whose recipient is gone (the pending person deleted) is refused and rolled
+    // back whole — the hash and its times stay as they were, nothing is sent (review EM-2).
+    const pendingPerson = (
+      await owner.query<{ p: string }>(
+        `select person_id p from platform.org_admin_setup where org_id = $1`,
+        [gOrg],
+      )
+    ).rows[0]!.p;
+    const beforeGone = await setupState();
+    const outboxGone = mail.sent.length;
+    await owner.query(`update public.people set deleted_at = now() where id = $1`, [pendingPerson]);
+    try {
+      const gone = await call('reissue', 'POST', { cookie: adminCookie, path: reissuePath });
+      expect(gone).toMatchObject({ status: 409, body: { error: 'CANNOT_REISSUE' } });
+    } finally {
+      await owner.query(`update public.people set deleted_at = null where id = $1`, [
+        pendingPerson,
+      ]);
+    }
+    expect(await setupState()).toEqual(beforeGone);
+    expect(mail.sent.length).toBe(outboxGone);
+
+    // A revocation that waits on the row while a re-issue commits (review F-EM-1), made
+    // deterministic: this session holds the row lock and commits a fresh issue (new issued_at,
+    // a live expiry) while the revocation waits. Its time is read after the lock, so it ends
+    // the fresh link — never an expiry before the issue (23514, a 500) or a live link left.
+    const holder = await owner.connect();
+    let revokeWhileLocked: Promise<{ status: number; body: Record<string, unknown> }>;
+    try {
+      await holder.query('begin');
+      await holder.query(`select 1 from platform.org_admin_setup where org_id = $1 for update`, [
+        gOrg,
+      ]);
+      revokeWhileLocked = call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Revoked while a re-issue commits' },
+      });
+      await new Promise((r) => setTimeout(r, 1500)); // the revocation is now waiting on the lock
+      await holder.query(
+        `update platform.org_admin_setup
+         set issued_at = clock_timestamp(), expires_at = clock_timestamp() + interval '72 hours'
+         where org_id = $1`,
+        [gOrg],
+      );
+      await holder.query('commit');
+    } finally {
+      holder.release();
+    }
+    const lockedRevoke = await revokeWhileLocked!;
+    expect(lockedRevoke.status).toBe(200);
+    const afterRace = await owner.query<{ live: boolean; ordered: boolean }>(
+      `select expires_at > clock_timestamp() live, expires_at > issued_at ordered
+       from platform.org_admin_setup where org_id = $1`,
+      [gOrg],
+    );
+    expect(afterRace.rows[0]).toEqual({ live: false, ordered: true });
+    expect(
+      (await auditFor()).filter((r) => r.action === 'platform.organization.admin_setup_revoked'),
+    ).toHaveLength(2);
   });
 
   it('no tenant database login can execute the 0087 functions (runtime, not only the migration check)', async () => {
@@ -1411,12 +1472,17 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
           `select platform.revoke_org_admin_setup('${orgId}'::uuid, 'role check', gen_random_uuid())`,
         ]) {
           let code = 'NO ERROR';
+          let message = '';
           try {
             await c.query(statement);
           } catch (e) {
             code = String((e as { code?: unknown }).code);
+            message = String((e as { message?: unknown }).message);
           }
           expect(code, `${role}: ${statement.slice(7, 50)}`).toBe('42501');
+          // The grant boundary itself — not the function's own permission check, which would
+          // also answer 42501 had the role wrongly been granted EXECUTE.
+          expect(message, role).toMatch(/permission denied for (function|schema)/);
         }
       } finally {
         await c.end();
@@ -1429,10 +1495,25 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
        cross join pg_roles r
        where n.nspname = 'platform'
          and p.proname in ('org_admin_setup_recipient', 'revoke_org_admin_setup')
-         and r.rolname in ('app_user', 'app_auth', 'app_worker', 'app_admin', 'public')
+         and r.rolname in ('app_user', 'app_auth', 'app_worker', 'app_admin')
          and has_function_privilege(r.oid, p.oid, 'execute')`,
     );
     expect(grants.rows).toEqual([]);
+    // PUBLIC (grantee 0) holds nothing either; only app_platform and the owner do.
+    const grantees = await owner.query<{ fn: string; grantee: string }>(
+      `select p.proname fn, coalesce(r.rolname, 'PUBLIC') grantee
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       left join pg_roles r on r.oid = a.grantee
+       where n.nspname = 'platform'
+         and p.proname in ('org_admin_setup_recipient', 'revoke_org_admin_setup')
+         and a.privilege_type = 'EXECUTE' and r.oid is distinct from p.proowner
+       order by 1, 2`,
+    );
+    expect(grantees.rows).toEqual([
+      { fn: 'org_admin_setup_recipient', grantee: 'app_platform' },
+      { fn: 'revoke_org_admin_setup', grantee: 'app_platform' },
+    ]);
   });
 
   it('no organization setup token ever appears in an API answer or in the audit', async () => {

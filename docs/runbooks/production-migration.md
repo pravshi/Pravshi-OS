@@ -581,7 +581,7 @@ re-apply.
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
-| 86  | `0087_org_admin_setup_email` | 1791602728057 | `1cdb8b03dab15d7c8c648c7ed465d90dd56a0aca99501aacbae8feb5b04b697b` |
+| 86  | `0087_org_admin_setup_email` | 1791602728057 | `d295bbaa7b135d728a5951259ab0cbb51ca1abad3554750214be125afebbee73` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

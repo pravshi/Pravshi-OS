@@ -49,12 +49,15 @@ as $$
 declare
   v_actor uuid := platform.require_permission('platform.organizations.assign_initial_admin');
   v_setup platform.org_admin_setup%rowtype;
-  v_now timestamptz := clock_timestamp();
+  v_now timestamptz;
 begin
   if p_reason is null or length(btrim(p_reason)) not between 3 and 500 then
     raise exception 'platform: a reason is required (3-500 characters)' using errcode = '22023';
   end if;
   select * into v_setup from platform.org_admin_setup s where s.org_id = p_org_id for update;
+  -- The time is read AFTER the lock: a re-issue or revocation that committed while this waited
+  -- is then always in the past — never an expiry before its issue, never a second revocation.
+  v_now := clock_timestamp();
   if not found then
     raise exception 'platform: this organization was not provisioned by the platform' using errcode = 'P0002';
   end if;
