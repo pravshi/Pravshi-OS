@@ -467,6 +467,13 @@ export async function reissueAdminSetup(
           'Only an invitation that was never used can be re-issued here. An administrator who ' +
           'already set up a login is recovered by the operator.',
       },
+      '42501': {
+        status: 403,
+        code: 'FORBIDDEN',
+        message:
+          'Only the administrator who sent this invitation, still holding every permission it ' +
+          'grants, can re-issue it. Otherwise ask the operator.',
+      },
     },
     (tx) =>
       tx.execute<{ expires_at: Date | string }>(sql`

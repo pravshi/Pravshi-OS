@@ -201,6 +201,29 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     return link;
   };
   const tokenOf = (link: string) => new URL(link).hash.replace(/^#token=/, '');
+
+  /** Completes a platform setup link, enrols TOTP, and signs in at aal2: the new admin's cookie. */
+  const activateAdmin = async (email: string, link: string): Promise<string> => {
+    const done = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: tokenOf(link), password: PASSWORD },
+    });
+    expect(done.status, 'setup').toBe(200);
+    const { auth } = await import('@/lib/auth/server');
+    const enrolCookie = await signIn(email, PASSWORD);
+    const enabled = await auth.api.enableTwoFactor({
+      body: { password: PASSWORD },
+      headers: new Headers({ cookie: enrolCookie }),
+    });
+    if (enabled.method !== 'totp') throw new Error('expected a TOTP enrolment');
+    const secret = new URL(enabled.totpURI).searchParams.get('secret')!;
+    const verified = (await auth.api.verifyTOTP({
+      body: { code: totpAt(secret) },
+      headers: new Headers({ cookie: enrolCookie }),
+      asResponse: true,
+    })) as Response;
+    expect(verified.ok).toBe(true);
+    return signIn(email, PASSWORD, secret);
+  };
   const auditRows = async () =>
     (
       await owner.query<{ action: string; result: string; reason_code: string | null }>(
@@ -831,6 +854,52 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     );
     expect(audited.rows).toHaveLength(1);
     expect(audited.rows[0]!.actor_admin_id).not.toBeNull();
+  });
+
+  it('a re-issue never hands anyone more than an invitation of their own could (S2-1)', async () => {
+    const invite = (cookie: string, key: string, email: string, permissions: string[]) =>
+      call('/api/platform/admins', 'POST', {
+        cookie,
+        body: { idempotencyKey: `${key}-${RUN}`, email, fullName: key, permissions },
+      });
+    // A limited administrator: can manage administrators, nothing else beyond the views.
+    const limitedEmail = `limited.${RUN}@platform.example`;
+    const limitedInvite = await invite(adminCookie, 'limited', limitedEmail, [
+      'platform.admins.manage',
+    ]);
+    expect(limitedInvite.status).toBe(201);
+    const limited = await activateAdmin(limitedEmail, limitedInvite.body.setupLink as string);
+
+    // A stronger invitation, sent by someone else, never used.
+    const strong = await invite(adminCookie, 'strong', `strong.${RUN}@platform.example`, [
+      'platform.organizations.create',
+    ]);
+    expect(strong.status).toBe(201);
+    const strongId = strong.body.adminId as string;
+    const tokenBefore = await owner.query<{ h: string }>(
+      `select encode(token_hash, 'hex') h from platform.setup_tokens where admin_id = $1`,
+      [strongId],
+    );
+    const takeover = await call('adminSetup', 'POST', {
+      cookie: limited,
+      path: `/api/platform/admins/${strongId}/setup`,
+    });
+    expect(takeover).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    expect(takeover.body.setupLink).toBeUndefined();
+    const tokenAfter = await owner.query<{ h: string }>(
+      `select encode(token_hash, 'hex') h from platform.setup_tokens where admin_id = $1`,
+      [strongId],
+    );
+    expect(tokenAfter.rows).toEqual(tokenBefore.rows);
+
+    // Their own invitation, within what they hold: allowed.
+    const own = await invite(limited, 'own', `own.${RUN}@platform.example`, []);
+    expect(own.status).toBe(201);
+    const ownReissue = await call('adminSetup', 'POST', {
+      cookie: limited,
+      path: `/api/platform/admins/${own.body.adminId as string}/setup`,
+    });
+    expect(ownReissue.status).toBe(200);
   });
 
   it("Better Auth's own routes apply the platform's session limits to administrators only", async () => {

@@ -19,7 +19,10 @@ Database migrations: 0063–0086 (production still pending — see the
   is not configured it answers 404 like any unknown path; a pending first administrator's email
   is fixed until their setup completes; administrator invitations are idempotent, and an unused
   one can be re-issued from the console. **Deploy order:** apply 0086 before deploying this
-  code — every sign-in asks the database a question 0086 adds, and refuses when it cannot.
+  code — every sign-in and every Better Auth request that carries a session, tenant users'
+  included, asks the database a question 0086 adds, and fails closed when it cannot; roll the
+  code back before (or with) 0086's rollback. A re-issue of an unused administrator invitation
+  is allowed only to the administrator who sent it, while they hold every permission it grants.
 - Platform administrator console (ADR-008, migration 0086). `/platform` for platform
   administrators only: the organizations (metadata only), provisioning with type selection and
   a one-time setup link for the first administrator, re-issuing that link, suspend and
