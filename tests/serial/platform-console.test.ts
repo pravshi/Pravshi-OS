@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client, Pool } from '@neondatabase/serverless';
 import { DB_READY } from '../workflows/helpers';
@@ -1162,6 +1162,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       body: { reason: 'Sent to the wrong person' },
     });
     expect(revoked.status).toBe(200);
+    // EM-1: the stored hash is replaced, not only expired — a completion already under way
+    // cannot match the revoked link.
+    const stored = await owner.query<{ h: Buffer }>(
+      `select token_hash h from platform.org_admin_setup where org_id = $1`,
+      [revOrg],
+    );
+    expect(stored.rows[0]!.h.toString('hex')).not.toBe(
+      createHash('sha256').update(revToken, 'utf8').digest('hex'),
+    );
     const dead = await call('/api/setup/organization/complete', 'POST', {
       body: { token: revToken, password: ORG_ADMIN_PASSWORD },
     });

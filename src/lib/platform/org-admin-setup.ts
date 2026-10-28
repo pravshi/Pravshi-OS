@@ -85,24 +85,13 @@ export async function provisionAndEmail(
 
 export async function reissueAndEmail(req: PlatformRequest, orgId: string): Promise<SetupDelivery> {
   requireEmail();
+  // The recipient is the database's — the pending person's work email, fixed until setup
+  // completes — read in the same transaction as the new hash.
   const r = await reissueOrgAdminSetup(req, orgId);
-  // The recipient is the database's: the pending person's work email, fixed until setup completes.
-  const rows = await runPlatformOperation(
-    req,
-    'platform.organization.admin_setup_reissue',
-    {},
-    (tx) =>
-      tx.execute<{ email: string; full_name: string; org_name: string }>(
-        sql`select email, full_name, org_name from platform.org_admin_setup_recipient(${orgId}::uuid)`,
-      ),
-    { targetOrgId: orgId, permission: 'platform.organizations.assign_initial_admin' },
-  );
-  const to = rows.rows[0];
-  if (!to) throw new PlatformError(409, 'CANNOT_REISSUE', 'The setup is no longer pending.');
   return deliver(req, 'platform.organization.admin_setup_reissue', orgId, {
-    to: to.email,
-    fullName: to.full_name,
-    orgName: to.org_name,
+    to: r.recipient.email,
+    fullName: r.recipient.fullName,
+    orgName: r.recipient.orgName,
     token: r.setupToken,
     expiresAt: r.setupExpiresAt,
   });

@@ -30,7 +30,8 @@ begin
   from platform.org_admin_setup s
   join public.people p on p.id = s.person_id and p.org_id = s.org_id
   join public.organizations o on o.id = s.org_id
-  where s.org_id = p_org_id and s.consumed_at is null and o.deleted_at is null;
+  where s.org_id = p_org_id and s.consumed_at is null and o.deleted_at is null
+    and p.deleted_at is null;
 end;
 $$;
 
@@ -64,7 +65,14 @@ begin
     return v_setup.expires_at; -- already dead: nothing to revoke, no second entry
   end if;
 
-  update platform.org_admin_setup s set expires_at = v_now where s.org_id = p_org_id;
+  -- Expire it AND replace its hash with a digest of fresh random values no one holds: a
+  -- completion that started before this revocation (and re-reads the row after it) then finds
+  -- no matching hash, rather than a link whose expiry is still later than its own start time.
+  update platform.org_admin_setup s
+  set expires_at = v_now,
+      token_hash = sha256(convert_to(gen_random_uuid()::text || gen_random_uuid()::text
+                                     || clock_timestamp()::text, 'UTF8'))
+  where s.org_id = p_org_id;
 
   perform platform.write_audit('platform_admin', v_actor, 'platform.organization.admin_setup_revoked',
     'SUCCESS', null, p_org_id, 'person', v_setup.person_id, p_request_id, null,
