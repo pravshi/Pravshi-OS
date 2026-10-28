@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -26,14 +26,27 @@ describe('A1 review: every client address the auth plane uses is validated', () 
 
   it("Better Auth's own limiter resolves the address from the same trusted header", () => {
     // Without this line Better Auth falls back to its default x-forwarded-for (D1-3).
-    expect(SERVER).toMatch(/ipAddress: betterAuthIpAddressOptions\(\),/);
+    // Inside Better Auth's `advanced` block — elsewhere it would be ignored.
+    const start = SERVER.indexOf('\n  advanced: {');
+    expect(start).toBeGreaterThan(0);
+    const advanced = SERVER.slice(start, SERVER.indexOf('\n  },', start));
+    expect(advanced).toContain('ipAddress: betterAuthIpAddressOptions(),');
     expect(SERVER).not.toMatch(/disableIpTracking/);
   });
 
-  it('no auth-plane or audit code reads a forwarding header directly', () => {
-    for (const file of ['lib/auth/login-events.ts', 'lib/auth/server.ts', 'lib/audit/log.ts']) {
-      expect(read(file), file).not.toMatch(/get\(\s*'x-(vercel-)?forwarded-for'\s*\)/);
-    }
+  it('no code outside the D1 module names a client-address header (review F-D1-3)', () => {
+    // Every file under src/, however it spells the name: a route or helper that read one of
+    // these directly would bypass the deployment's trusted-header choice.
+    const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
+    const files = (readdirSync('src', { recursive: true }) as string[])
+      .map((f) => f.replace(/\\/g, '/'))
+      .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/auth/client-address.ts');
+    expect(files.length).toBeGreaterThan(100);
+    const offenders = files.filter((f) =>
+      // Comments may name a header; code may not.
+      ADDRESS_HEADER.test(read(f).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')),
+    );
+    expect(offenders).toEqual([]);
   });
 });
 
