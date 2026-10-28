@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DeliveryNotice, type DeliveryShown } from './delivery-notice';
 import { newIdempotencyKey, platformApi, signInAgain } from './platform-api';
 
 interface Organization {
@@ -29,32 +30,7 @@ interface OrganizationType {
 }
 
 /** The outcome of an email-only setup-link delivery — never the link itself. */
-type Shown = { title: string; emailed: boolean; recipient: string; expiresAt: string } | null;
-
-function DeliveryNotice({
-  shown,
-  onDismiss,
-}: {
-  shown: NonNullable<Shown>;
-  onDismiss: () => void;
-}) {
-  return (
-    <div
-      role="status"
-      className={`rounded-lg border p-5 ${shown.emailed ? 'border-line bg-white' : 'border-amber-300 bg-amber-50 text-amber-950'}`}
-    >
-      <p className="font-medium">{shown.title}</p>
-      <p className="mt-1 text-sm">
-        {shown.emailed
-          ? `The setup link was emailed to ${shown.recipient}. It works once and expires ${new Date(shown.expiresAt).toLocaleString()}. Links are never shown in the console.`
-          : `The email to ${shown.recipient} was not accepted by the mail service. The link was not delivered; re-issue it to send a new one.`}
-      </p>
-      <Button className="mt-3" size="sm" variant="outline" onClick={onDismiss}>
-        Done
-      </Button>
-    </div>
-  );
-}
+type Shown = DeliveryShown | null;
 
 function ErrorLine({ code, message }: { code: string; message: string }) {
   return (

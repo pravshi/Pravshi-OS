@@ -86,3 +86,52 @@ describe('the setup email', () => {
     );
   });
 });
+
+describe('the platform-administrator invitation email (email only, founder decision 2026-10-29)', () => {
+  const ADMIN_LINK =
+    'https://os.pravshi.com/platform/setup#token=ADMINSENTINELtokenADMINSENTINELtokenADMINSE';
+  const invitation = {
+    to: 'new.admin@platform.example',
+    fullName: 'New <Admin>',
+    link: ADMIN_LINK,
+    expiresAt: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  it('carries the link to the recipient, escaped, with its expiry', async () => {
+    const { buildPlatformAdminSetupEmail } = await import('@/lib/platform/setup-email');
+    const m = buildPlatformAdminSetupEmail(invitation);
+    expect(m.subject).toBe('Your Pravshi OS platform administrator invitation');
+    expect(m.html).toContain(ADMIN_LINK);
+    expect(m.html).toContain('New &lt;Admin&gt;');
+    expect(m.text).toContain(ADMIN_LINK);
+    expect(m.text).toContain('Sun, 01 Nov 2026');
+  });
+
+  it('a refused or thrown send logs only the error name — never the link or the address', async () => {
+    const { sendPlatformAdminSetupEmail } = await import('@/lib/platform/setup-email');
+    send.mockResolvedValueOnce({
+      error: { name: 'validation_error', message: `bad ${ADMIN_LINK}` },
+    });
+    const refused = await capture(() => sendPlatformAdminSetupEmail(invitation));
+    send.mockRejectedValueOnce(
+      new Error(`down while sending ${ADMIN_LINK} to new.admin@platform.example`),
+    );
+    const thrown = await capture(() => sendPlatformAdminSetupEmail(invitation));
+    for (const { result, logged } of [refused, thrown]) {
+      expect(result).toBe(false);
+      expect(JSON.stringify(logged)).not.toContain('ADMINSENTINEL');
+      expect(JSON.stringify(logged)).not.toContain('new.admin@platform.example');
+    }
+  });
+
+  it('an accepted send goes to the invited address', async () => {
+    const { sendPlatformAdminSetupEmail } = await import('@/lib/platform/setup-email');
+    send.mockResolvedValueOnce({ data: { id: 'msg_2' }, error: null });
+    const { result, logged } = await capture(() => sendPlatformAdminSetupEmail(invitation));
+    expect(result).toBe(true);
+    expect(logged).toEqual([]);
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: 'new.admin@platform.example' }),
+    );
+  });
+});

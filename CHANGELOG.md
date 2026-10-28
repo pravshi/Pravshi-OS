@@ -34,8 +34,15 @@ Database migrations: 0063–0088 (production still pending — see the
   `EMAIL_FROM`) provisioning and re-issue are refused before anything is created. An undelivered
   email is audited (ERROR, `EMAIL_DELIVERY_FAILED`) and fixed by re-issuing. A pending link can now
   be revoked without issuing another (reason required, audited). Prepared rollback:
-  `scripts/db/rollback/0087_org_admin_setup_email.down.sql`. Platform-administrator invitations
-  still show their link once in the console (unchanged).
+  `scripts/db/rollback/0087_org_admin_setup_email.down.sql`.
+- Platform-administrator invitations by email only (founder decision 2026-10-29; no migration).
+  Inviting or re-issuing emails the link to the invitation's own address (which nothing changes
+  after the invitation); the API answers `{emailed, recipient, setupExpiresAt}` and never the
+  link, and the console shows only the delivery outcome. Single use, 72-hour expiry and revocation
+  (revoking the administrator) are unchanged. Without Resend configured both are refused before
+  anything is created (503); an undelivered email is audited (ERROR, `EMAIL_DELIVERY_FAILED`); a
+  replayed invitation sends nothing. The operator CLI still prints its link to the operator's own
+  terminal (first administrator, break-glass recovery).
 
 - Worker liveness (REL-11). A job's lease renewal proved only that the worker process was
   alive: a handler that never returned kept its lease, so the job was never reaped and
