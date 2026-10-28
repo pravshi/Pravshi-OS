@@ -499,13 +499,13 @@ tenant data, only Better Auth's own self-service endpoints);
   request, and refuses (fails closed) when it cannot — so 0086 must be applied BEFORE that code
   is deployed, and that code must be rolled back BEFORE (or with) this rollback, or every
   sign-in, tenant users' included, is refused. It refuses unless the database is at 0086, and needs Nani's explicit
+  approval and a run-record entry.
   `scripts/db/rollback/0087_org_admin_setup_email.down.sql` drops the two functions 0087 adds
   (the re-issue's recipient lookup and link revocation) and restores `platform.record_failure`
   verbatim from 0086. What it re-opens: a pending first-administrator link can no longer be
   revoked without re-issuing; the 0087 application code's re-issue fails (no recipient lookup) —
   roll the application back with it. It refuses unless the database is at 0087, and needs Nani's
   explicit approval and a run-record entry.
-  approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -581,7 +581,7 @@ re-apply.
 | 83  | `0084_platform_provisioning` | 1791599728057 | `a1f8ee12574d688739402ed3c67467f75d93b68c19a0b40bc5dbdd8d81924415` |
 | 84  | `0085_login_email_case` | 1791600728057 | `37c2bd61f48909b8a19aef9a7e92a801de8726136b7d2222bce556cc5b5223c2` |
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
-| 86  | `0087_org_admin_setup_email` | 1791602728057 | `3c065917786a51685f1b624e1eec693be117147b42ee37415fd3cba45c2194d4` |
+| 86  | `0087_org_admin_setup_email` | 1791602728057 | `1cdb8b03dab15d7c8c648c7ed465d90dd56a0aca99501aacbae8feb5b04b697b` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

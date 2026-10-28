@@ -270,7 +270,11 @@ export async function provisionOrganization(
 export async function reissueOrgAdminSetup(
   req: PlatformRequest,
   orgId: string,
-): Promise<{ setupToken: string; setupExpiresAt: string }> {
+): Promise<{
+  setupToken: string;
+  setupExpiresAt: string;
+  recipient: { email: string; fullName: string; orgName: string };
+}> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
   const rows = await runPlatformOperation(
@@ -284,17 +288,33 @@ export async function reissueOrgAdminSetup(
           'The organization is not active, or its first administrator already completed setup.',
       },
     },
-    (tx) =>
-      tx.execute<{ expires_at: Date | string }>(sql`
+    // One transaction: the new hash commits only together with the address the new link is
+    // sent to — a failed lookup leaves the old link in place and nothing changed.
+    async (tx) => {
+      const issued = await tx.execute<{ expires_at: Date | string }>(sql`
         select platform.reissue_org_admin_setup(${orgId}::uuid, decode(${digest}, 'hex'),
                                                 ${req.requestId}::uuid) as expires_at
-      `),
+      `);
+      const to = await tx.execute<{ email: string; full_name: string; org_name: string }>(
+        sql`select email, full_name, org_name from platform.org_admin_setup_recipient(${orgId}::uuid)`,
+      );
+      // No pending recipient: refused like any other "cannot re-issue" (55000), rolled back.
+      if (!to.rows[0]) throw Object.assign(new Error('no pending recipient'), { code: '55000' });
+      return { expires: issued.rows[0]?.expires_at, to: to.rows[0] };
+    },
     { targetOrgId: orgId, permission: 'platform.organizations.assign_initial_admin' },
   );
-  const expires = rows.rows[0]?.expires_at;
-  if (!expires)
+  if (!rows.expires)
     throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
-  return { setupToken: token, setupExpiresAt: new Date(expires).toISOString() };
+  return {
+    setupToken: token,
+    setupExpiresAt: new Date(rows.expires).toISOString(),
+    recipient: {
+      email: rows.to.email,
+      fullName: rows.to.full_name,
+      orgName: rows.to.org_name,
+    },
+  };
 }
 
 export async function setOrganizationStatus(
