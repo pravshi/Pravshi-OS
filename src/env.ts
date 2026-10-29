@@ -56,6 +56,8 @@ const runtimeSchema = z.object({
     .optional(),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'test', 'production']),
+  /** Set to '1' by Vercel in every deployment; selects the trusted client-address header (D1). */
+  VERCEL: z.string().optional(),
   HEALTH_CHECK_TOKEN: z.string().min(32).optional(),
   SENTRY_DSN: z.string().url().optional(),
   /**

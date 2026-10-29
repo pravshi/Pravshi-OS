@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -12,15 +12,43 @@ const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
 const EVENTS = read('lib/auth/login-events.ts');
+const ADDRESS = read('lib/auth/client-address.ts');
 
 describe('A1 review: every client address the auth plane uses is validated', () => {
-  it('clientIp and the hooks read the forwarded address through forwardedIp', () => {
-    expect(EVENTS).toMatch(/export function forwardedIp[\s\S]*?isIP\(first\) !== 0/);
-    expect(EVENTS).toMatch(/return forwardedIp\(req\.headers\.get\('x-forwarded-for'\)\)/);
+  it('clientIp and the hooks read the trusted header (D1) through forwardedIp', () => {
+    // One validator, in the D1 module; the trusted header's value always passes through it.
+    expect(ADDRESS).toMatch(/export function forwardedIp[\s\S]*?isIP\(first\) !== 0/);
+    expect(ADDRESS).toMatch(/return name \? forwardedIp\(headers\?\.get\(name\)\) : null;/);
+    expect(EVENTS).toMatch(/return clientAddressFromHeaders\(req\.headers\);/);
     const ipOfHeaders = SERVER.slice(SERVER.indexOf('function ipOfHeaders'));
-    expect(ipOfHeaders.slice(0, 200)).toMatch(
-      /return forwardedIp\(headers\?\.get\('x-forwarded-for'\)\)/,
+    expect(ipOfHeaders.slice(0, 200)).toMatch(/return clientAddressFromHeaders\(headers\);/);
+  });
+
+  it("Better Auth's own limiter resolves the address from the same trusted header", () => {
+    // Without this line Better Auth falls back to its default x-forwarded-for (D1-3).
+    // Inside Better Auth's `advanced` block — elsewhere it would be ignored.
+    const start = SERVER.indexOf('\n  advanced: {');
+    expect(start).toBeGreaterThan(0);
+    const advanced = SERVER.slice(start, SERVER.indexOf('\n  },', start));
+    expect(advanced).toContain('ipAddress: betterAuthIpAddressOptions(),');
+    expect(SERVER).not.toMatch(/disableIpTracking/);
+  });
+
+  it('no code outside the D1 module names a client-address header (review F-D1-3)', () => {
+    // Every file under src/, however it spells the name: a route or helper that read one of
+    // these directly would bypass the deployment's trusted-header choice.
+    const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
+    const files = (readdirSync('src', { recursive: true }) as string[])
+      .map((f) => f.replace(/\\/g, '/'))
+      .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/auth/client-address.ts');
+    expect(files.length).toBeGreaterThan(100);
+    const offenders = files.filter((f) =>
+      // Comments may name a header; code may not. Only comments that START a line are dropped
+      // (a block comment, or a whole-line //): a '//' inside a string, such as a URL, never
+      // hides the rest of its line. A trailing comment on a code line still counts — stricter.
+      ADDRESS_HEADER.test(read(f).replace(/^\s*\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*/gm, '')),
     );
+    expect(offenders).toEqual([]);
   });
 });
 

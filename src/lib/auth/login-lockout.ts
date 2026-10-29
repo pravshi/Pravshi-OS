@@ -47,8 +47,8 @@ export async function isLockedOut(email: string): Promise<boolean> {
  * inside the function. Never throws and never changes the generic client response.
  * A failure here means attempts stop counting toward a lockout, so it alerts.
  * Meanwhile the login route's rate limit still bounds guesses per client address
- * (IPv6 per /64) — as far as the forwarded address can be trusted, which on Vercel
- * the platform sets. An invalid address is recorded as NULL rather than failing
+ * (IPv6 per /64) — as far as the client address can be trusted: on Vercel it is
+ * x-vercel-forwarded-for, which the platform sets (client-address.ts). An invalid address is recorded as NULL rather than failing
  * the cast (forwardedIp), so a forged header cannot stop the counting.
  */
 export async function noteLoginFailure(

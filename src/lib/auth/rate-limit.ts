@@ -76,8 +76,8 @@ function ipv6Groups(ip: string): number[] | null {
 }
 
 /**
- * checkIpRateLimit for the request's client address (Vercel's x-forwarded-for, via
- * clientIp, validated). A route throttles with this without handling the address
+ * checkIpRateLimit for the request's client address (the deployment's trusted header —
+ * x-vercel-forwarded-for on Vercel — via clientAddressFromHeaders, validated). A route throttles with this without handling the address
  * itself — the login route must hold nothing that could record an attempt (auth
  * choke point). Throws when the limiter cannot answer; the caller decides how to
  * fail closed.
