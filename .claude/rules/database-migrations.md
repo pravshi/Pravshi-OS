@@ -34,9 +34,9 @@ paths:
   production runbook's Appendix A row and pinned counts (`tests/guards/production-runbook-journal.test.ts`
   enforces them), forbidden-case tests, and a rehearsal on a disposable database from the
   previous `main` state with representative rows.
-- Rollback scripts exist only for 0073 and 0075 on `main`, plus 0077's, which ships with its
-  migration (`scripts/db/rollback/`); a migration that needs one prepares it in the same
-  change. None is invented at incident time.
+- Rollback scripts exist on `main` for 0073, 0075 and every migration from 0077 to 0088
+  (`scripts/db/rollback/`); each ships with its migration, and a migration that needs one
+  prepares it in the same change. None is invented at incident time.
 - Re-running `scripts/db/roles.sql` re-grants select/insert/update on every public table to
   `app_user`, undoing table-level revokes made by migrations (0002 organizations/people, 0077
   deal_stage_history). RLS policies are the durable control; never rely on a revoke alone.
@@ -44,7 +44,7 @@ paths:
 ## Roles
 
 - Logins: `app_owner` (migrations), `app_user` (runtime), `app_auth` (credential store),
-  `app_worker` (worker plane), `app_admin` (bootstrap). All `NOBYPASSRLS`; `roles.sql` asserts
+  `app_worker` (worker plane), `app_platform` (platform console), `app_admin` (bootstrap). All `NOBYPASSRLS`; `roles.sql` asserts
   none holds `SUPERUSER`, `BYPASSRLS`, `CREATEROLE` or `CREATEDB`.
 - On Neon the branch owner creates roles and is auto-granted ADMIN on them (PostgreSQL 16+). The
   membership rule (0070/0072/0073 and runbook step 3) admits only that database owner, and never

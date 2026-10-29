@@ -27,7 +27,7 @@ enforced by PostgreSQL (forced RLS, separate logins) and by a permission-first a
 - **Authorization:** `withPermission()` / `requirePermission()` before any work; scope rules;
   protected-role rules; MFA (`aal2`) where required; no frontend-only checks.
 - **Database privilege:** `withAuthorizedDb()` as the only runtime path; login separation
-  (`app_user`, `app_auth`, `app_worker`, `app_admin`, `app_owner`); no `BYPASSRLS`/`SUPERUSER`;
+  (`app_user`, `app_auth`, `app_worker`, `app_platform`, `app_admin`, `app_owner`); no `BYPASSRLS`/`SUPERUSER`;
   SECURITY DEFINER functions with `search_path = ''`, re-derived actor and organization, narrow
   EXECUTE grants, no trusted actor/organization parameters.
 - **Principal forgery:** any column or parameter that decides whose authority work runs under

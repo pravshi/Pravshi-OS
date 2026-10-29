@@ -33,8 +33,8 @@ only when the lead explicitly authorizes it, from disposable local PostgreSQL da
 - **Roles and grants:** role attributes, membership rule (database owner only, never an `app_*`
   role), EXECUTE grants on definer functions, table grants per login, `search_path`.
 - **Runbook consistency:** Appendix A rows, pinned counts and max `created_at`, Step 0 query
-  ordering, expected runner output, exit codes, prepared rollback scripts (0073, 0075, and any
-  shipped with the migration under review, such as 0077's).
+  ordering, expected runner output, exit codes, prepared rollback scripts (0073, 0075, 0077–0088,
+  and any shipped with the migration under review).
 - **Upgrade safety:** lock order, long locks, data assumptions on lived-in databases, failure
   doctrine (forward-fix), and whether a rehearsal from the previous `main` state was done.
 

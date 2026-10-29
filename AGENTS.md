@@ -18,15 +18,18 @@ enforced are the database (separate logins, forced RLS), the CI guards and human
   [ADR-006](docs/architecture/adr/006-v1-scope-business-os.md).
 - **The HR and operations blueprint is deferred** as a separate future product. Its documents
   are preserved; do not delete them and do not silently restore HR modules to V1 (ADR-006).
-- **Founder decisions of 2026-10-16** (to be recorded as ADR-007, prepared on branch
-  `docs/v1-founder-decisions` and not yet merged at the time of writing):
+- **Founder decisions of 2026-10-16**, recorded in
+  [ADR-007](docs/architecture/adr/007-v1-founder-product-decisions.md) and amended on 2026-10-27
+  by [ADR-008](docs/architecture/adr/008-v1-platform-and-import-decisions.md) (both on `main`):
   - one login belongs to exactly one organization in V1;
-  - organizations are provisioned by a separate, audited platform Super Admin authority —
-    implement it only from an **approved** design (the proposal is pending founder review);
+  - organizations are provisioned by a separate, audited platform administrator authority — built
+    (the platform console, ADR-008); extend it only from an **approved** design;
   - free-trial and paid organizations share the core capabilities and identical isolation and
     security guarantees; plans, entitlements, billing and usage limits are deferred;
-  - the Sales Sheet import is in V1, built only from approved requirements and the real
-    source-column mapping (not yet supplied).
+  - the Sales Sheet import is in V1 and is built (migrations 0081 and 0088) against a
+    representative mapping only. The real source-column mapping has not been supplied, so
+    validation against the real sheet is **pending**: never claim it is validated, and never
+    invent a mapping.
 - V1 comes before any later product work (including "Pro Max"), until V1 passes its
   acceptance gate.
 - Never invent a product decision. If a requirement is ambiguous, stop and ask.
@@ -92,8 +95,8 @@ to the next.
 - Every protected route uses `withPermission()` / `requirePermission()` first. Frontend checks
   are UX only. Fail closed: no context means zero rows or a refusal, never a default allow.
 - Keep the database logins separate: `app_user` (web runtime), `app_auth` (credential store),
-  `app_worker` (worker plane), `app_admin` (bootstrap only), `app_owner` (migrations only —
-  never in a runtime). No role may gain `BYPASSRLS`, `SUPERUSER`, `CREATEROLE` or `CREATEDB`.
+  `app_worker` (worker plane), `app_platform` (platform console), `app_admin` (bootstrap only),
+  `app_owner` (migrations only — never in a runtime). No role may gain `BYPASSRLS`, `SUPERUSER`, `CREATEROLE` or `CREATEDB`.
 - A guard failure is a security failure: fix the cause, never weaken the guard or a test.
 
 **Databases and migrations**
@@ -126,8 +129,8 @@ to the next.
   Do not implement product changes in the primary `Pravshi-OS` worktree (it holds the agent
   rules and private files), never switch branches in a worktree you do not own, and never
   modify, prune or delete another agent's branch or worktree.
-- A new worktree has none of these rule files: they are committed only on the local branch in
-  the primary worktree. Before an agent starts in one, run
+- A new worktree has none of these rule files: they are committed only on the branch
+  `chore/claude-engineering-system` (not on `main`), which the primary worktree has checked out. Before an agent starts in one, run
   `node scripts/agents/sync-worktree-rules.mjs <worktree>` from the primary worktree; it copies
   the committed rules, excluded from Git and verified by sha256 (`--check` verifies only). Never
   edit the copies — change the rules in the primary — and never run `git clean -x` in a
@@ -137,7 +140,8 @@ to the next.
 - Stage files explicitly. Never stage `audit-output/`, `.coordination/`, scratch logs, `.env*`
   or secrets; both private paths are excluded locally in `.git/info/exclude`. Run the secret
   scan after committing (`node scripts/guards/secret-scan.mjs`; it reads HEAD).
-- The repository is **public**: every pushed line is world-readable.
+- Assume the repository is **public** (the founder switches its visibility): every pushed line
+  is world-readable.
 
 ## 6. Working together
 
