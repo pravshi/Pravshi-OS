@@ -3,6 +3,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 import { DB_READY, RUN, mkOrg, mkPerson } from '../workflows/helpers';
 import { assignRoleId, mkCustomRole } from '../authz/fixtures';
+import {
+  companyKeyOf,
+  contactNameKey,
+  dealKeyOf,
+  repeatDealKeyOf,
+} from '@/lib/import/sales-sheet/preview';
+
+/** A company named without a domain, keyed as the import keys it (review R-15). */
+const CO = (name: string) => companyKeyOf(null, name);
 
 /**
  * Sales Sheet duplicate resolution against a live database (0088): decisions per company,
@@ -189,13 +198,13 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const v = await upload(
       HEADER + `${company},Asha,Rao,Renewal,${OWNER}\n` + `${company},Ben,Roy,Upsell,${OWNER}\n`,
     );
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     let p = await svc.getDecisionPreview(authOf(org, importer), v.id);
     expect(p.unresolved.companies).toEqual([ck]);
     // Each decision answers the recomputed preview: the company decided, Asha and her deal surface.
     p = await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
-    const ak = `name:asha rao|${ck}`;
-    const dk = `renewal|${ck}|${ak}`;
+    const ak = contactNameKey('asha rao', ck);
+    const dk = dealKeyOf('renewal', ck, ak);
     expect(p.unresolved).toEqual({ companies: [], contacts: [ak], deals: [dk] });
     p = await decide(v.id, 'CONTACT', ak, 'LINK_EXISTING');
     expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [dk] });
@@ -220,7 +229,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const v = await upload(
       HEADER + `${company},Asha,Rao,Deal A,${OWNER}\n` + `${company},Ben,Roy,Deal B,${OWNER}\n`,
     );
-    const p = await decide(v.id, 'COMPANY', `name:${key(company)}`, 'CREATE_NEW');
+    const p = await decide(v.id, 'COMPANY', CO(company), 'CREATE_NEW');
     // A company declared new has no existing contacts: Asha stops being a possible duplicate.
     expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [] });
     await confirmWith(v.id, v.fileSha256);
@@ -244,9 +253,9 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
         `${openCo},${OWNER}\n` +
         `${name('Brand New')},${OWNER}\n`,
     );
-    const p = await decide(v.id, 'COMPANY', `name:${key(skipCo)}`, 'SKIP');
+    const p = await decide(v.id, 'COMPANY', CO(skipCo), 'SKIP');
     expect(p.skippedRows).toEqual([2]);
-    expect(p.unresolved.companies).toEqual([`name:${key(openCo)}`]);
+    expect(p.unresolved.companies).toEqual([CO(openCo)]);
     await confirmWith(v.id, v.fileSha256);
     await commit.runImportCommit(ctxOf(importer), v.id, randomUUID());
     expect((await rowsOf(v.id)).map((r) => r.status)).toEqual(['SKIPPED', 'SKIPPED', 'CREATED']);
@@ -259,7 +268,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     await existing(twin);
     await existing(twin);
     const v = await upload('Company,Owner Email\n' + `${twin},${OWNER}\n`);
-    const p = await decide(v.id, 'COMPANY', `name:${key(twin)}`, 'LINK_EXISTING');
+    const p = await decide(v.id, 'COMPANY', CO(twin), 'LINK_EXISTING');
     expect(p.invalidRows).toEqual([2]);
 
     // Confirmed against one match; a second appears before the commit runs: the plan names the
@@ -267,7 +276,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const late = name('Late Twin Ltd');
     const chosen = await existing(late);
     const w = await upload('Company,Owner Email\n' + `${late},${OWNER}\n`, 'late.csv');
-    await decide(w.id, 'COMPANY', `name:${key(late)}`, 'LINK_EXISTING');
+    await decide(w.id, 'COMPANY', CO(late), 'LINK_EXISTING');
     await confirmWith(w.id, w.fileSha256);
     await existing(late);
     await commit.runImportCommit(ctxOf(importer), w.id, randomUUID());
@@ -278,7 +287,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const gone = name('Gone Ltd');
     const goneCo = await existing(gone);
     const x = await upload('Company,Owner Email\n' + `${gone},${OWNER}\n`, 'gone.csv');
-    await decide(x.id, 'COMPANY', `name:${key(gone)}`, 'LINK_EXISTING');
+    await decide(x.id, 'COMPANY', CO(gone), 'LINK_EXISTING');
     await confirmWith(x.id, x.fileSha256);
     await owner.query(`update public.companies set deleted_at = now() where id = $1`, [
       goneCo.companyId,
@@ -307,7 +316,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
       'Company,Contact First Name,Contact Last Name,Contact Email,Owner Email\n' +
         `${company},Bob,Lee,bob.${tag}@x.example,${OWNER}\n`,
     );
-    const p = await decide(v.id, 'COMPANY', `name:${key(company)}`, 'CREATE_NEW');
+    const p = await decide(v.id, 'COMPANY', CO(company), 'CREATE_NEW');
     expect(p.invalidRows).toEqual([2]);
   });
 
@@ -315,7 +324,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Guarded Ltd');
     await existing(company);
     const v = await upload('Company,Owner Email\n' + `${company},${OWNER}\n`);
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     await expect(decide(v.id, 'COMPANY', ck, 'SKIP', colleague)).rejects.toMatchObject({
       code: 'NOT_IMPORTER',
     });
@@ -359,7 +368,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Frozen Ltd');
     await existing(company);
     const v = await upload('Company,Owner Email\n' + `${company},${OWNER}\n`);
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     await decide(v.id, 'COMPANY', ck, 'CREATE_NEW');
     const seen = await confirmWith(v.id, v.fileSha256);
     await expect(decide(v.id, 'COMPANY', ck, 'SKIP')).rejects.toMatchObject({
@@ -435,7 +444,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Raced Ltd');
     await existing(company);
     const v = await upload('Company,Owner Email\n' + `${company},${OWNER}\n`);
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     const both = await Promise.allSettled([
       decide(v.id, 'COMPANY', ck, 'CREATE_NEW'),
       decide(v.id, 'COMPANY', ck, 'SKIP'),
@@ -512,9 +521,9 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     await existing(a);
     await existing(b);
     let p = await svc.getDecisionPreview(authOf(org, importer), v.id);
-    expect(p.unresolved.companies.sort()).toEqual([`name:${key(a)}`, `name:${key(b)}`].sort());
+    expect(p.unresolved.companies.sort()).toEqual([CO(a), CO(b)].sort());
     // B is decided (skip); A stays undecided — so the import is a decided one with a plan.
-    p = await decide(v.id, 'COMPANY', `name:${key(b)}`, 'SKIP');
+    p = await decide(v.id, 'COMPANY', CO(b), 'SKIP');
     await confirmWith(v.id, v.fileSha256);
     const paths = await commitObserved(v.id);
     expect(paths).toEqual(['FAST']);
@@ -527,8 +536,8 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Moot Ltd');
     const ex = await existing(company, [['Asha', 'Rao']]);
     const v = await upload(HEADER + `${company},Asha,Rao,,${OWNER}\n`);
-    const ck = `name:${key(company)}`;
-    const ak = `name:asha rao|${ck}`;
+    const ck = CO(company);
+    const ak = contactNameKey('asha rao', ck);
     // Undecided company: Asha may be its existing contact — decided "use the existing".
     await decide(v.id, 'CONTACT', ak, 'LINK_EXISTING');
     // Then the company is declared new: Asha is a new contact of the new company.
@@ -559,7 +568,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const v = await upload(
       HEADER + `${company},Cy,Lee,,${OWNER}\n` + `${company},Asha,Rao,Renewal,${OWNER}\n`,
     );
-    const p = await decide(v.id, 'COMPANY', `name:${key(company)}`, 'CREATE_NEW');
+    const p = await decide(v.id, 'COMPANY', CO(company), 'CREATE_NEW');
     expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [] });
     expect(p.invalidRows).toEqual([]);
     await confirmWith(v.id, v.fileSha256);
@@ -584,7 +593,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     // must not count as valid.
     const late = await mkPerson(owner, org, 'DupLateOwner');
     await owner.query(`update public.people set work_email = $2 where id = $1`, [late, lateOwner]);
-    const p = await decide(v.id, 'COMPANY', `name:${key(company)}`, 'CREATE_NEW');
+    const p = await decide(v.id, 'COMPANY', CO(company), 'CREATE_NEW');
     expect(p.invalidRows).toEqual([3]);
     expect(p.counts.validRows).toBe(1);
     expect(p.counts.companies).toEqual({ create: 1, link: 0, possibleDuplicate: 0 });
@@ -594,7 +603,7 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Isolated Ltd');
     await existing(company);
     const v = await upload('Company,Owner Email\n' + `${company},${OWNER}\n`);
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     await decide(v.id, 'COMPANY', ck, 'CREATE_NEW');
     // A GLOBAL holder of crm.import who is not the importer reads the decisions.
     const seen = await svc.getDecisionPreview(authOf(org, colleague), v.id);
@@ -682,8 +691,8 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
     const company = name('Race Pair Ltd');
     const ex = await existing(company, [['Asha', 'Rao']]);
     const v = await upload(HEADER + `${company},Asha,Rao,,${OWNER}\n`);
-    const ck = `name:${key(company)}`;
-    const ak = `name:asha rao|${ck}`;
+    const ck = CO(company);
+    const ak = contactNameKey('asha rao', ck);
     await Promise.allSettled([
       decide(v.id, 'CONTACT', ak, 'LINK_EXISTING'),
       decide(v.id, 'COMPANY', ck, 'CREATE_NEW'),
@@ -724,11 +733,11 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
       [org, importer, companyId, k.rows[0]!.id, pipe.rows[0]!.pid, pipe.rows[0]!.sid],
     );
     const v = await upload(HEADER + `${company},John,Smith,Renewal,${OWNER}\n`, 'domain.csv');
-    const ck = `name:${key(company)}`;
+    const ck = CO(company);
     let p = await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
     // Linked to the domain company, its John and his deal are possible duplicates, not new.
-    const jk = `name:john smith|${ck}`;
-    const dk = `renewal|${ck}|${jk}`;
+    const jk = contactNameKey('john smith', ck);
+    const dk = dealKeyOf('renewal', ck, jk);
     expect(p.unresolved).toEqual({ companies: [], contacts: [jk], deals: [dk] });
     p = await decide(v.id, 'CONTACT', jk, 'LINK_EXISTING');
     p = await decide(v.id, 'DEAL', dk, 'SKIP');
@@ -775,9 +784,9 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
       HEADER + `${company},John,Smith,Renewal,${OWNER}\n`,
       'email-contact.csv',
     );
-    const ck = `name:${key(company)}`;
-    const jk = `name:john smith|${ck}`;
-    const dk = `renewal|${ck}|${jk}`;
+    const ck = CO(company);
+    const jk = contactNameKey('john smith', ck);
+    const dk = dealKeyOf('renewal', ck, jk);
     await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
     const p = await decide(v.id, 'CONTACT', jk, 'LINK_EXISTING');
     // Linked to that John, his Renewal is a possible duplicate — never created silently.
@@ -800,14 +809,14 @@ describe.skipIf(!DB_READY)('Sales Sheet duplicate decisions (0088, live DB)', ()
       HEADER + `${company},Asha,Rao,Renewal,${OWNER}\n` + `${company},Asha,Rao,Renewal,${OWNER}\n`,
       'repeat.csv',
     );
-    const ck = `name:${key(company)}`;
-    const ak = `name:asha rao|${ck}`;
-    const dk = `renewal|${ck}|${ak}`;
+    const ck = CO(company);
+    const ak = contactNameKey('asha rao', ck);
+    const dk = dealKeyOf('renewal', ck, ak);
     await decide(v.id, 'COMPANY', ck, 'LINK_EXISTING');
     await decide(v.id, 'CONTACT', ak, 'LINK_EXISTING');
     const p = await decide(v.id, 'DEAL', dk, 'CREATE_NEW');
     // The selected deal is created once; the repeat (row 3) is flagged under its own key.
-    expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [`${dk}|repeat:3`] });
+    expect(p.unresolved).toEqual({ companies: [], contacts: [], deals: [repeatDealKeyOf(dk, 3)] });
     // The deal decision does not decide the repeat: deciding the repeat key is separate.
     await confirmWith(v.id, v.fileSha256);
     await commit.runImportCommit(ctxOf(importer), v.id, randomUUID());

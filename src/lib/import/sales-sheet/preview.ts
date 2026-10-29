@@ -29,13 +29,42 @@ import { DEFAULT_LIMITS, ImportFileError, decodeUtf8, parseCsv, type ImportLimit
 import { resolveHeader, type MappingSpec } from './mapping';
 import { buildCandidate, type RowCandidate, type RowError } from './rows';
 
-/** The importing organization's existing keys, all already normalised by normaliseKey(). */
+// ── Entity keys (review R-15) ───────────────────────────────────────────────────────
+// A key is a JSON array of tagged, normalised parts — never values joined with a separator a
+// value could contain. Each component's parts are spliced in flat (not nested), and each tag
+// fixes how many parts follow it, so no value — however many quotes, brackets or "|" it holds —
+// can make two different entities share a key. Upload (crm_import_rows), preview, the snapshot
+// and decisions all build keys here, and only here.
+//   company  ["domain", d] | ["name", n]
+//   contact  ["email", e]  | ["name", fullName, ...company]
+//   deal     ["deal", title, ...company, ...contact?]
+//   repeat   ["repeat", row, ...deal]   (R-3: a row repeating a deal the file creates)
+
+const keyOf = (...parts: (string | number)[]) => JSON.stringify(parts);
+const partsOf = (key: string): (string | number)[] => JSON.parse(key) as (string | number)[];
+
+/** Company: its domain when it has one, else its name. Inputs are raw; normalised here. */
+export const companyKeyOf = (domain: string | null | undefined, name: string) =>
+  domain ? keyOf('domain', normaliseKey(domain)) : keyOf('name', normaliseKey(name));
+/** Contact with an email: the email alone (already normalised). */
+export const contactEmailKey = (email: string) => keyOf('email', email);
+/** Contact without one: the normalised full name under its company. */
+export const contactNameKey = (fullName: string, companyKey: string) =>
+  keyOf('name', fullName, ...partsOf(companyKey));
+/** Deal: normalised title, company, and contact ('' when the row has none). */
+export const dealKeyOf = (title: string, companyKey: string, contactKey: string) =>
+  keyOf('deal', title, ...partsOf(companyKey), ...(contactKey ? partsOf(contactKey) : []));
+/** A row repeating a deal an earlier row of the file creates (R-3). */
+export const repeatDealKeyOf = (dealKey: string, rowNumber: number) =>
+  keyOf('repeat', rowNumber, ...partsOf(dealKey));
+
+/** The importing organization's existing keys, all built by the key functions above. */
 export interface OrgSnapshot {
   companyDomains: ReadonlySet<string>;
   companyNames: ReadonlySet<string>;
   /** Normalised contact email → the company key of that contact's company (null: none). */
   contactEmails: ReadonlyMap<string, string | null>;
-  /** `${normalisedFullName}|${normalisedCompanyKey}` */
+  /** contactNameKey(normalisedFullName, companyKey) of every contact under a company. */
   contactNameCompany: ReadonlySet<string>;
   /**
    * Normalised name → the ids of the live companies that carry it. "Use the existing company"
@@ -44,21 +73,21 @@ export interface OrgSnapshot {
    * the confirmed plan records and the commit links to.
    */
   companyIdsByName: ReadonlyMap<string, readonly string[]>;
-  /** `${normalisedFullName}|${normalisedCompanyKey}` → the ids of the live contacts it names. */
+  /** contactNameKey(normalisedFullName, companyKey) → the ids of the live contacts it names. */
   contactIdsByNameCompany: ReadonlyMap<string, readonly string[]>;
   /**
-   * Live company id → the key its own contacts and deals are recorded under (`domain:…` when it
-   * has a domain, else `name:…`). A row that names a company by name only and is linked to an
+   * Live company id → the key its own contacts and deals are recorded under (its domain when it
+   * has one, else its name). A row that names a company by name only and is linked to an
    * existing one by decision is compared with THAT company's contacts and deals (review R-1).
    */
   companyKeyById: ReadonlyMap<string, string>;
   /**
    * Live contact id → the contact part of the keys its deals are filed under in dealKeys
-   * (`email:…` when it has an email, else `name:…|<company key>`). A row whose contact is linked
+   * (its email when it has one, else its name under its company). A row whose contact is linked
    * to an existing one by decision is compared with THAT contact's deals (review R-11).
    */
   contactKeyById: ReadonlyMap<string, string>;
-  /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
+  /** dealKeyOf(normalisedTitle, companyKey, contactKey) of every live deal under a company. */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
   activeOwnersByEmail: ReadonlyMap<string, string>;
@@ -292,9 +321,7 @@ export function planPreview(
     // Company: domain is the natural key; a name-only match is a possible duplicate — for every
     // row that names it, not only the first (AC-D1).
     const company = cand.company;
-    const companyKey = company.domain
-      ? `domain:${normaliseKey(company.domain)}`
-      : `name:${normaliseKey(company.name)}`;
+    const companyKey = companyKeyOf(company.domain, company.name);
     let companyOutcome: Outcome;
     const seen = fileCompanies.get(companyKey);
     if (seen) {
@@ -357,8 +384,8 @@ export function planPreview(
     if (cand.contact) {
       const fullName = normaliseKey(`${cand.contact.firstName} ${cand.contact.lastName}`);
       const email = cand.contact.email ? normaliseKey(cand.contact.email) : null;
-      contactKey = email ? `email:${email}` : `name:${fullName}|${companyKey}`;
-      existingContactKey = email ? contactKey : `name:${fullName}|${existingKey}`;
+      contactKey = email ? contactEmailKey(email) : contactNameKey(fullName, companyKey);
+      existingContactKey = email ? contactKey : contactNameKey(fullName, existingKey);
       const inFile = fileContacts.get(contactKey);
       const existing = email ? snapshot.contactEmails.get(email) : undefined;
       if (inFile !== undefined) {
@@ -378,7 +405,7 @@ export function planPreview(
       } else if (
         !email &&
         !newCompany &&
-        snapshot.contactNameCompany.has(`${fullName}|${existingKey}`)
+        snapshot.contactNameCompany.has(contactNameKey(fullName, existingKey))
       ) {
         contactOutcome = 'POSSIBLE_DUPLICATE';
       } else {
@@ -389,7 +416,8 @@ export function planPreview(
         if (d === 'SKIP') skip = true;
         else if (d === 'LINK_EXISTING') {
           contactOutcome = 'LINK';
-          const ids = snapshot.contactIdsByNameCompany.get(`${fullName}|${existingKey}`) ?? [];
+          const ids =
+            snapshot.contactIdsByNameCompany.get(contactNameKey(fullName, existingKey)) ?? [];
           if (ids.length === 1) {
             existingContactId = ids[0]!;
           } else {
@@ -426,13 +454,17 @@ export function planPreview(
     //
     // R-3 (founder decision 2026-10-29): "create anyway" creates the selected deal ONCE. A row
     // repeating a deal an earlier row of this file creates is decided on its own — under a key
-    // of its own (`<deal key>|repeat:<row>`) — so one decision never creates the repeats.
+    // of its own (repeatDealKeyOf) — so one decision never creates the repeats.
     let dealOutcome: Outcome | null = null;
     let dealKey = '';
     let dealDecisionKey = '';
     if (cand.deal) {
-      dealKey = `${normaliseKey(cand.deal.title)}|${companyKey}|${contactKey}`;
-      const existingDealKey = `${normaliseKey(cand.deal.title)}|${existingKey}|${existingContactKey}`;
+      dealKey = dealKeyOf(normaliseKey(cand.deal.title), companyKey, contactKey);
+      const existingDealKey = dealKeyOf(
+        normaliseKey(cand.deal.title),
+        existingKey,
+        existingContactKey,
+      );
       // Only an explicit "create new" decision rules out the existing deals: a record the user
       // declared new has none.
       const againstExisting = !newCompany && !contactDecidedNew;
@@ -440,7 +472,7 @@ export function planPreview(
         (againstExisting && snapshot.dealKeys.has(existingDealKey)) || fileDeals.has(dealKey)
           ? 'POSSIBLE_DUPLICATE'
           : 'CREATE';
-      dealDecisionKey = fileDeals.has(dealKey) ? `${dealKey}|repeat:${rowNumber}` : dealKey;
+      dealDecisionKey = fileDeals.has(dealKey) ? repeatDealKeyOf(dealKey, rowNumber) : dealKey;
       if (dealOutcome === 'POSSIBLE_DUPLICATE') {
         const d = decisions.deals.get(dealDecisionKey);
         if (d === 'SKIP') skip = true;

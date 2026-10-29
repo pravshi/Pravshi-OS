@@ -9,6 +9,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Account } from '../authz/fixtures';
+import { companyKeyOf } from '@/lib/import/sales-sheet/preview';
 
 const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL_MIGRATE);
 const ALL: [string, string][] = [
@@ -92,7 +93,7 @@ describe.skipIf(!HAS_DB)('/api/crm/imports/:id/decisions routes (0088)', () => {
     return {
       id: view.id,
       sha: view.fileSha256,
-      key: `name:${company.trim().toLowerCase().replace(/\s+/g, ' ')}`,
+      key: companyKeyOf(null, company),
     };
   };
   const storedDecisions = async (id: string) =>

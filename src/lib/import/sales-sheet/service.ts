@@ -21,6 +21,10 @@ import { requestWorkerWake } from '@/lib/jobs/wake';
 import { MAPPINGS, REPRESENTATIVE_MAPPING, type MappingSpec } from './mapping';
 import {
   buildPreview,
+  companyKeyOf,
+  contactEmailKey,
+  contactNameKey,
+  dealKeyOf,
   planPreview,
   type DuplicateDecision,
   type ImportDecisions,
@@ -98,9 +102,6 @@ export interface ImportView {
 
 // ── Snapshot: the importing organization's keys, through RLS ─────────────────────
 
-const companyKeyOf = (domain: string | null, name: string) =>
-  domain ? `domain:${normaliseKey(domain)}` : `name:${normaliseKey(name)}`;
-
 function groupIds(pairs: [string, string][]): Map<string, string[]> {
   const m = new Map<string, string[]>();
   for (const [k, id] of pairs) m.set(k, [...(m.get(k) ?? []), id]);
@@ -160,8 +161,8 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     companyKey: string,
   ) =>
     email
-      ? `email:${normaliseKey(email)}`
-      : `name:${normaliseKey(`${first ?? ''} ${last ?? ''}`)}|${companyKey}`;
+      ? contactEmailKey(normaliseKey(email))
+      : contactNameKey(normaliseKey(`${first ?? ''} ${last ?? ''}`), companyKey);
 
   return {
     companyDomains: new Set(
@@ -182,7 +183,10 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
       contacts.rows
         .filter((c) => c.co_name !== null)
         .map((c) => [
-          `${normaliseKey(`${c.first_name} ${c.last_name}`)}|${companyKeyOf(c.co_domain, c.co_name!)}`,
+          contactNameKey(
+            normaliseKey(`${c.first_name} ${c.last_name}`),
+            companyKeyOf(c.co_domain, c.co_name!),
+          ),
           c.id,
         ]),
     ),
@@ -197,9 +201,11 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     contactNameCompany: new Set(
       contacts.rows
         .filter((c) => c.co_name !== null)
-        .map(
-          (c) =>
-            `${normaliseKey(`${c.first_name} ${c.last_name}`)}|${companyKeyOf(c.co_domain, c.co_name!)}`,
+        .map((c) =>
+          contactNameKey(
+            normaliseKey(`${c.first_name} ${c.last_name}`),
+            companyKeyOf(c.co_domain, c.co_name!),
+          ),
         ),
     ),
     dealKeys: new Set(
@@ -211,7 +217,7 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
             d.ct_email !== null || d.ct_first !== null
               ? contactKey(d.ct_email, d.ct_first, d.ct_last, ck)
               : '';
-          return `${normaliseKey(d.title)}|${ck}|${kk}`;
+          return dealKeyOf(normaliseKey(d.title), ck, kk);
         }),
     ),
     activeOwnersByEmail: new Map(owners.rows.map((o) => [normaliseKey(o.email), o.id])),

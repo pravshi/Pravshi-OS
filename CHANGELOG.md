@@ -24,7 +24,9 @@ Database migrations: 0063–0088 (production still pending — see the
   plan. An import with no decisions keeps 0081's behaviour: a row clean at upload is not
   re-checked against records created later. A "create anyway" decision on a deal creates it once: a row of the same file repeating
   that deal (same title, company and contact) is flagged under its own key and decided on its own
-  (R-3, founder decision 2026-10-29). Prepared rollback (refuses while a decided import is
+  (R-3, founder decision 2026-10-29). Entity keys (decision keys and the within-file identity stored with each row) are
+  JSON arrays of tagged parts, so a value containing a separator can never make two different
+  companies, contacts or deals share a key (review R-15). Prepared rollback (refuses while a decided import is
   queued or running): `scripts/db/rollback/0088_crm_import_decisions.down.sql`.
 - First-administrator setup links by email only (founder policy 2026-10-29, migration 0087). When
   the platform provisions an organization or re-issues its first administrator's link, the link is
