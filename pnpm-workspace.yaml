@@ -24,6 +24,7 @@ overrides:
   fast-uri@<3.1.8: 3.1.8 # GHSA-hrr3-gc8f-f4qj
   body-parser@<2.4.0: 2.4.0 # GHSA-27r3-jxmh-p828 (via shadcn > MCP SDK > express)
   undici@<7.30.1: 7.30.1 # GHSA-xjj6-f33q-929c (via shadcn > dotenvx)
+  systeminformation@<5.33.16: 5.33.16 # GHSA-3f7j-7jwc-fxfj, GHSA-4vjg-vx72-qq4g, GHSA-7648-jmwf-vw7j (via shadcn > dotenvx, which declares ^5.22.11)
   zod@<4.6.6: 4.6.6 # GHSA-mrhx-c7xc-m3w5 (zod 3 has no patch; shadcn >= 4.22.0 depends on zod 4, so none remains — do not lift a zod 3 consumer by override: shadcn 4.21 breaks on it, verified)
 
 auditConfig:
