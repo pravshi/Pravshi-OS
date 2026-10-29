@@ -65,6 +65,20 @@ answer, console view, log or audit entry. The operator CLI (first administrator,
 recovery) still prints its link to the operator's own terminal: it runs before any mail path
 exists.
 
+## Administrator addresses and undelivered invitations
+
+An invited administrator's address is trimmed at the API boundary and otherwise kept as typed:
+stored, emailed and shown exactly so. Identity is case-insensitive — the address is unique
+whatever its case (citext), and an address already used by a login or another administrator in
+any case is refused (`EMAIL_IN_USE`) — and the login created at setup is stored lower-cased
+(0083/0085), so sign-in works in any case. Nothing lower-cases or rewrites the address silently.
+
+An invitation or re-issue whose email the provider does not accept is recorded as
+`EMAIL_DELIVERY_FAILED` (ERROR) with no address, link or token. It names its administrator
+through the request: the same request id carries the `platform.admin.invited` (or
+`platform.admin.setup_reissued`) entry, whose target is the administrator's id. The administrator
+stays `PENDING_ENROLMENT` with no login until a link is used.
+
 ## Sessions ended by the platform's limits (S2-4)
 
 A session ended for being past the platform's limits is deleted without a login event or a

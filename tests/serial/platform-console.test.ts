@@ -144,7 +144,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       origin?: string | null;
       ip?: string;
     } = {},
-  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+  ): Promise<{ status: number; body: Record<string, unknown>; setCookie: string | null }> => {
     const headers: Record<string, string> = {
       'x-forwarded-for': opts.ip ?? nextIp(),
       'user-agent': 'vitest-platform-console',
@@ -167,7 +167,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     } catch {
       body = {};
     }
-    return { status: res.status, body };
+    return { status: res.status, body, setCookie: res.headers.get('set-cookie') };
   };
 
   /** Mediated sign-in (+ TOTP when the login has a factor): the session cookie. */
@@ -321,6 +321,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
   // Shared across the journey, in order.
   let firstAdminSecret = '';
   let adminCookie = '';
+  let limitedAdminCookie = '';
   let orgId = '';
   let orgSetupToken = '';
   let orgAdminEmail = '';
@@ -923,6 +924,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     ]);
     expect(limitedInvite.status).toBe(201);
     const limited = await activateAdmin(limitedEmail, linkSentTo(limitedEmail));
+    limitedAdminCookie = limited;
 
     // A stronger invitation, sent by someone else, never used.
     const strong = await invite(adminCookie, 'strong', `strong.${RUN}@platform.example`, [
@@ -1573,11 +1575,14 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     expect(mail.sent.length).toBe(sentBefore);
 
     // Not accepted by the provider: the invitation stands, the failure is audited, no link.
-    const failEmail = `mail.fail.admin.${RUN}@platform.example`;
+    // The address is typed with surrounding spaces and mixed case (review F-N2-3): it is trimmed
+    // at the boundary and kept as typed otherwise — stored, emailed and shown exactly so —
+    // while identity is case-insensitive and the login itself is stored lower-cased (0083/0085).
+    const failEmail = `Mail.Fail.Admin.${RUN}@Platform.Example`;
     mail.accept = false;
     let undelivered;
     try {
-      undelivered = await invite('mailfail', failEmail);
+      undelivered = await invite('mailfail', `  ${failEmail}  `);
     } finally {
       mail.accept = true;
     }
@@ -1594,6 +1599,63 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     ).toEqual([
       { action: 'platform.admin.invite', result: 'ERROR', reason_code: 'EMAIL_DELIVERY_FAILED' },
     ]);
+    // Stored as typed, trimmed; emailed to exactly that address.
+    const stored = await owner.query<{
+      email: string;
+      status: string;
+      auth_user_id: string | null;
+    }>(`select email::text as email, status, auth_user_id from platform.admins where id = $1`, [
+      failId,
+    ]);
+    expect(stored.rows[0]).toEqual({
+      email: failEmail,
+      status: 'PENDING_ENROLMENT',
+      auth_user_id: null,
+    });
+    expect(mail.sent.at(-1)!.to).toBe(failEmail);
+    // The failure entry names no address and no token; it is tied to the administrator through
+    // the request: the invitation's own SUCCESS entry, same request id, targets that admin id.
+    const failure = await owner.query<{
+      request_id: string;
+      target_type: string | null;
+      target_id: string | null;
+      metadata: Record<string, unknown>;
+    }>(
+      `select request_id, target_type, target_id, metadata from platform.audit_events
+       where action = 'platform.admin.invite' and reason_code = 'EMAIL_DELIVERY_FAILED'`,
+    );
+    expect(failure.rows).toHaveLength(1);
+    expect(failure.rows[0]).toMatchObject({ target_type: null, target_id: null, metadata: {} });
+    const invited = await owner.query<{ target_type: string; target_id: string }>(
+      `select target_type, target_id from platform.audit_events
+       where action = 'platform.admin.invited' and request_id = $1`,
+      [failure.rows[0]!.request_id],
+    );
+    expect(invited.rows).toEqual([{ target_type: 'platform_admin', target_id: failId }]);
+
+    // Identity is case-insensitive: the same address in another case (or padded) is the same
+    // administrator — refused, never a second one. (Sent by the limited administrator, who
+    // holds platform.admins.manage: the main administrator's hourly allowance is spent.)
+    for (const variant of [failEmail.toLowerCase(), `  ${failEmail.toUpperCase()} `]) {
+      const twin = await call('/api/platform/admins', 'POST', {
+        cookie: limitedAdminCookie,
+        body: {
+          idempotencyKey: `twin-${RUN}-${variant.trim() === failEmail.toLowerCase() ? 'l' : 'u'}`,
+          email: variant,
+          fullName: 'Twin',
+          permissions: [],
+        },
+      });
+      expect(twin, variant).toMatchObject({ status: 409, body: { error: 'EMAIL_IN_USE' } });
+    }
+    expect(
+      (
+        await owner.query<{ n: number }>(
+          `select count(*)::int n from platform.admins where lower(email::text) = lower($1)`,
+          [failEmail],
+        )
+      ).rows[0]!.n,
+    ).toBe(1);
 
     // Re-issue without email configured: 503, and the pending link is untouched.
     const tokenRow = async () =>
@@ -1633,11 +1695,59 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       body: { token: tokenOf(linkSentTo(failEmail)), password: PASSWORD },
     });
     expect(done.status).toBe(200);
-    // Single use: the same link again is refused.
+    // The login is the address lower-cased (0085); the administrator record keeps it as typed.
+    const login = await owner.query<{ id: string; email: string; accounts: number }>(
+      `select u.id, u.email::text as email,
+              (select count(*)::int from auth.auth_accounts a where a.user_id = u.id) accounts
+       from auth.auth_users u join platform.admins p on p.auth_user_id = u.id where p.id = $1`,
+      [failId],
+    );
+    expect(login.rows).toEqual([
+      { id: expect.any(String), email: failEmail.toLowerCase(), accounts: 1 },
+    ]);
+    const passwordBefore = await owner.query<{ password: string }>(
+      `select password from auth.auth_accounts where user_id = $1`,
+      [login.rows[0]!.id],
+    );
+
+    // Single use (review F-N2-2): the same link again — with another password — is refused with
+    // exactly SETUP_TOKEN_INVALID, sets no cookie, and changes neither the login nor its password.
+    const otherPassword = `${PASSWORD}-reuse`;
     const again = await call('/api/platform/setup/complete', 'POST', {
-      body: { token: tokenOf(linkSentTo(failEmail)), password: PASSWORD },
+      body: { token: tokenOf(linkSentTo(failEmail)), password: otherPassword },
     });
-    expect(again.status).toBeGreaterThanOrEqual(400);
+    expect(again).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    expect(again.setCookie).toBeNull();
+    const loginAfter = await owner.query<{ id: string; email: string; accounts: number }>(
+      `select u.id, u.email::text as email,
+              (select count(*)::int from auth.auth_accounts a where a.user_id = u.id) accounts
+       from auth.auth_users u join platform.admins p on p.auth_user_id = u.id where p.id = $1`,
+      [failId],
+    );
+    expect(loginAfter.rows).toEqual(login.rows);
+    expect(
+      (
+        await owner.query<{ password: string }>(
+          `select password from auth.auth_accounts where user_id = $1`,
+          [login.rows[0]!.id],
+        )
+      ).rows,
+    ).toEqual(passwordBefore.rows);
+    // The reused link's password does not sign in; the original does — in any case of the address.
+    const tryLogin = (email: string, password: string) =>
+      routes['/api/auth/login']!.POST!(
+        new Request(`${ORIGIN}/api/auth/login`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-forwarded-for': nextIp(),
+            origin: ORIGIN,
+          },
+          body: JSON.stringify({ email, password }),
+        }),
+      );
+    expect((await tryLogin(failEmail, otherPassword)).status).toBe(401);
+    expect((await tryLogin(failEmail.toUpperCase(), PASSWORD)).status).toBe(200);
   });
 
   it('no setup token — organization or platform administrator — ever appears in an API answer or in the audit', async () => {
