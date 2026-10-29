@@ -1,8 +1,39 @@
 import { spawnSync } from 'node:child_process';
-import { createHmac, randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Client, Pool } from '@neondatabase/serverless';
 import { DB_READY } from '../workflows/helpers';
+
+/**
+ * First-administrator setup links go out by email only (0087 policy). The mail provider is
+ * replaced here: what the platform hands it is captured, so the suite completes setup with the
+ * very link the recipient would receive, and can prove the link appears in no API answer.
+ */
+const mail = vi.hoisted(() => ({
+  configured: true,
+  accept: true,
+  sent: [] as { to: string; link: string }[],
+}));
+vi.mock('@/lib/platform/setup-email', () => ({
+  isSetupEmailConfigured: () => mail.configured,
+  sendOrgAdminSetupEmail: async (m: { to: string; link: string }) => {
+    mail.sent.push({ to: m.to, link: m.link });
+    return mail.accept;
+  },
+  // Platform-administrator invitations are email only too (founder decision 2026-10-29).
+  sendPlatformAdminSetupEmail: async (m: { to: string; link: string }) => {
+    mail.sent.push({ to: m.to, link: m.link });
+    return mail.accept;
+  },
+}));
+/** Every API answer body the suite saw, to prove no setup token ever appears in one. */
+const answers: string[] = [];
+/** The latest link emailed to an address. */
+const linkSentTo = (email: string): string => {
+  const m = [...mail.sent].reverse().find((x) => x.to.toLowerCase() === email.toLowerCase());
+  if (!m) throw new Error(`no setup email was sent to ${email}`);
+  return m.link;
+};
 
 /**
  * The platform console end to end (ADR-008): the operator CLI, the setup links, sign-in and
@@ -113,7 +144,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       origin?: string | null;
       ip?: string;
     } = {},
-  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+  ): Promise<{ status: number; body: Record<string, unknown>; setCookie: string | null }> => {
     const headers: Record<string, string> = {
       'x-forwarded-for': opts.ip ?? nextIp(),
       'user-agent': 'vitest-platform-console',
@@ -128,10 +159,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       }),
     );
-    return {
-      status: res.status,
-      body: ((await res.json().catch(() => ({}))) ?? {}) as Record<string, unknown>,
-    };
+    const text = await res.text();
+    answers.push(text);
+    let body: Record<string, unknown> = {};
+    try {
+      body = (JSON.parse(text) ?? {}) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    return { status: res.status, body, setCookie: res.headers.get('set-cookie') };
   };
 
   /** Mediated sign-in (+ TOTP when the login has a factor): the session cookie. */
@@ -263,6 +299,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       suspend: await import('@/app/api/platform/organizations/[orgId]/suspend/route'),
       reactivate: await import('@/app/api/platform/organizations/[orgId]/reactivate/route'),
       reissue: await import('@/app/api/platform/organizations/[orgId]/admin-setup/route'),
+      revokeSetup:
+        await import('@/app/api/platform/organizations/[orgId]/admin-setup/revoke/route'),
       '/api/platform/admins': await import('@/app/api/platform/admins/route'),
       revoke: await import('@/app/api/platform/admins/[adminId]/revoke/route'),
       adminSetup: await import('@/app/api/platform/admins/[adminId]/setup/route'),
@@ -283,6 +321,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
   // Shared across the journey, in order.
   let firstAdminSecret = '';
   let adminCookie = '';
+  let limitedAdminCookie = '';
   let orgId = '';
   let orgSetupToken = '';
   let orgAdminEmail = '';
@@ -398,8 +437,12 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(created.status).toBe(201);
     orgId = created.body.orgId as string;
-    const link = created.body.setupLink as string;
+    // Email only: the answer says where the link went, never the link.
+    expect(created.body).toMatchObject({ emailed: true, recipient: orgAdminEmail });
+    expect(created.body.setupLink).toBeUndefined();
+    const link = linkSentTo(orgAdminEmail);
     expect(link.startsWith(`${ORIGIN}/setup/organization#token=`)).toBe(true);
+    const sentBeforeReplay = mail.sent.length;
     orgSetupToken = tokenOf(link);
 
     const replay = await call('/api/platform/organizations', 'POST', {
@@ -408,6 +451,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(replay).toMatchObject({ status: 200, body: { replayed: true, orgId } });
     expect(replay.body.setupLink).toBeUndefined();
+    expect(mail.sent.length, 'a replay sends nothing').toBe(sentBeforeReplay);
     const conflict = await call('/api/platform/organizations', 'POST', {
       cookie: adminCookie,
       body: { ...request, name: 'Different' },
@@ -441,7 +485,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       call('/api/platform/organizations', 'POST', { cookie: adminCookie, body: raced }),
     ]);
     expect(both.map((r) => r.status).sort()).toEqual([200, 201]);
-    expect(both.filter((r) => r.body.setupLink)).toHaveLength(1);
+    expect(both.filter((r) => r.body.emailed === true)).toHaveLength(1);
+    expect(mail.sent.filter((m) => m.to === raced.adminEmail)).toHaveLength(1);
     expect(
       (
         await owner.query(`select count(*)::int n from public.organizations where slug = $1`, [
@@ -476,8 +521,10 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       path: `/api/platform/organizations/${orgId}/admin-setup`,
     });
     expect(reissued.status).toBe(200);
+    expect(reissued.body).toMatchObject({ emailed: true, recipient: orgAdminEmail });
+    expect(reissued.body.setupLink).toBeUndefined();
     const oldToken = orgSetupToken;
-    orgSetupToken = tokenOf(reissued.body.setupLink as string);
+    orgSetupToken = tokenOf(linkSentTo(orgAdminEmail));
 
     // An expired link is refused like any dead one; a re-issue replaces it (Priority 3).
     await owner.query(
@@ -496,7 +543,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(renewed.status).toBe(200);
     const expiredToken = orgSetupToken;
-    orgSetupToken = tokenOf(renewed.body.setupLink as string);
+    orgSetupToken = tokenOf(linkSentTo(orgAdminEmail));
     expect(orgSetupToken).not.toBe(expiredToken);
 
     const stale = await call('/api/setup/organization/complete', 'POST', {
@@ -670,6 +717,11 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       body: invitation,
     });
     expect(invited.status).toBe(201);
+    // Email only: the answer says where the link went, never what it is.
+    expect(invited.body).toMatchObject({ replayed: false, emailed: true, recipient: email });
+    expect(invited.body.setupLink).toBeUndefined();
+    expect(typeof invited.body.setupExpiresAt).toBe('string');
+    const sentBeforeRetry = mail.sent.length;
     const secondId = invited.body.adminId as string;
 
     // F-CONSOLE-11: the same request again (a lost answer, retried) replays — no second
@@ -680,6 +732,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(retried).toMatchObject({ status: 200, body: { replayed: true, adminId: secondId } });
     expect(retried.body.setupLink).toBeUndefined();
+    expect(mail.sent.length, 'a replayed invitation sends nothing').toBe(sentBeforeRetry);
     const changed = await call('/api/platform/admins', 'POST', {
       cookie: adminCookie,
       body: { ...invitation, fullName: 'Someone Else' },
@@ -690,7 +743,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
         .rows[0],
     ).toEqual({ n: 1 });
     const done = await call('/api/platform/setup/complete', 'POST', {
-      body: { token: tokenOf(invited.body.setupLink as string), password: PASSWORD },
+      body: { token: tokenOf(linkSentTo(email)), password: PASSWORD },
     });
     expect(done.status).toBe(200);
 
@@ -818,13 +871,15 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(invited.status).toBe(201);
     const id = invited.body.adminId as string;
-    const first = tokenOf(invited.body.setupLink as string);
+    const first = tokenOf(linkSentTo(email));
     const reissued = await call('adminSetup', 'POST', {
       cookie: adminCookie,
       path: `/api/platform/admins/${id}/setup`,
     });
     expect(reissued.status).toBe(200);
-    const second = tokenOf(reissued.body.setupLink as string);
+    expect(reissued.body).toMatchObject({ emailed: true, recipient: email });
+    expect(reissued.body.setupLink).toBeUndefined();
+    const second = tokenOf(linkSentTo(email));
     expect(second).not.toBe(first);
     const stale = await call('/api/platform/setup/complete', 'POST', {
       body: { token: first, password: PASSWORD },
@@ -868,7 +923,8 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       'platform.admins.manage',
     ]);
     expect(limitedInvite.status).toBe(201);
-    const limited = await activateAdmin(limitedEmail, limitedInvite.body.setupLink as string);
+    const limited = await activateAdmin(limitedEmail, linkSentTo(limitedEmail));
+    limitedAdminCookie = limited;
 
     // A stronger invitation, sent by someone else, never used.
     const strong = await invite(adminCookie, 'strong', `strong.${RUN}@platform.example`, [
@@ -1014,7 +1070,7 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
     });
     expect(reissued.status).toBe(200);
     const done = await call('/api/setup/organization/complete', 'POST', {
-      body: { token: tokenOf(reissued.body.setupLink as string), password: ORG_ADMIN_PASSWORD },
+      body: { token: tokenOf(linkSentTo(request.adminEmail)), password: ORG_ADMIN_PASSWORD },
     });
     expect(done.status).toBe(200);
     const login = await owner.query<{ email: string }>(
@@ -1037,6 +1093,674 @@ describe.skipIf(!ENABLED)('platform console (isolated live database)', () => {
       personId,
       `renamed.${RUN}@tenant.example`,
     ]);
+  });
+
+  it('setup links are email only: refused unconfigured, audited when undelivered, revocable', async () => {
+    const typeKey = (
+      await owner.query<{ type_key: string }>(
+        `select type_key from public.organizations where id = $1`,
+        [orgId],
+      )
+    ).rows[0]!.type_key;
+    const provision = (tag: string) =>
+      call('/api/platform/organizations', 'POST', {
+        cookie: adminCookie,
+        body: {
+          idempotencyKey: `console-${RUN}-${tag}`,
+          name: `Mail ${tag} ${RUN}`,
+          slug: `mail-${tag}-${RUN}`,
+          timezone: 'Asia/Kolkata',
+          typeKey,
+          adminFullName: `Mail ${tag} Founder`,
+          adminEmail: `mail.${tag}.${RUN}@tenant.example`,
+        },
+      });
+
+    // Not configured: refused before anything exists — no link nobody can receive.
+    mail.configured = false;
+    try {
+      const refused = await provision('off');
+      expect(refused).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    } finally {
+      mail.configured = true;
+    }
+    expect(
+      (
+        await owner.query(`select count(*)::int n from public.organizations where slug = $1`, [
+          `mail-off-${RUN}`,
+        ])
+      ).rows[0],
+    ).toEqual({ n: 0 });
+
+    // Not accepted by the provider: the organization stands, the failure is audited, no link.
+    mail.accept = false;
+    let undelivered;
+    try {
+      undelivered = await provision('fail');
+    } finally {
+      mail.accept = true;
+    }
+    expect(undelivered.status).toBe(201);
+    expect(undelivered.body).toMatchObject({ emailed: false });
+    expect(undelivered.body.setupLink).toBeUndefined();
+    const failedOrg = undelivered.body.orgId as string;
+    const failures = await owner.query<{ result: string; reason_code: string }>(
+      `select result, reason_code from platform.audit_events
+       where target_org_id = $1 and action = 'platform.organization.provision'`,
+      [failedOrg],
+    );
+    expect(failures.rows).toContainEqual({ result: 'ERROR', reason_code: 'EMAIL_DELIVERY_FAILED' });
+    // A re-issue sends a fresh one to the recorded recipient.
+    const resent = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${failedOrg}/admin-setup`,
+    });
+    expect(resent).toMatchObject({
+      status: 200,
+      body: { emailed: true, recipient: `mail.fail.${RUN}@tenant.example` },
+    });
+
+    // Revocation ends the pending link without issuing another; audited; re-issue works after.
+    const revocable = await provision('revoke');
+    expect(revocable.status).toBe(201);
+    const revOrg = revocable.body.orgId as string;
+    const revToken = tokenOf(linkSentTo(`mail.revoke.${RUN}@tenant.example`));
+    const noReason = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'x' },
+    });
+    expect(noReason.status).toBe(400);
+    const revoked = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'Sent to the wrong person' },
+    });
+    expect(revoked.status).toBe(200);
+    // EM-1: the stored hash is replaced, not only expired — a completion already under way
+    // cannot match the revoked link.
+    const stored = await owner.query<{ h: Buffer }>(
+      `select token_hash h from platform.org_admin_setup where org_id = $1`,
+      [revOrg],
+    );
+    expect(stored.rows[0]!.h.toString('hex')).not.toBe(
+      createHash('sha256').update(revToken, 'utf8').digest('hex'),
+    );
+    const dead = await call('/api/setup/organization/complete', 'POST', {
+      body: { token: revToken, password: ORG_ADMIN_PASSWORD },
+    });
+    expect(dead).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    const audited = await owner.query<{ actor_admin_id: string | null }>(
+      `select actor_admin_id from platform.audit_events
+       where target_org_id = $1 and action = 'platform.organization.admin_setup_revoked'`,
+      [revOrg],
+    );
+    expect(audited.rows).toHaveLength(1);
+    expect(audited.rows[0]!.actor_admin_id).not.toBeNull();
+    const again = await call('reissue', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup`,
+    });
+    expect(again).toMatchObject({ status: 200, body: { emailed: true } });
+    const done = await call('/api/setup/organization/complete', 'POST', {
+      body: {
+        token: tokenOf(linkSentTo(`mail.revoke.${RUN}@tenant.example`)),
+        password: ORG_ADMIN_PASSWORD,
+      },
+    });
+    expect(done.status).toBe(200);
+    const late = await call('revokeSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/organizations/${revOrg}/admin-setup/revoke`,
+      body: { reason: 'Too late to revoke' },
+    });
+    expect(late).toMatchObject({ status: 409, body: { error: 'CANNOT_REVOKE' } });
+  });
+
+  it('first-administrator link refusals change nothing: no permission, tenant user, bad target, no email; races and replays', async () => {
+    const typeKey = (
+      await owner.query<{ type_key: string }>(
+        `select type_key from public.organizations where id = $1`,
+        [orgId],
+      )
+    ).rows[0]!.type_key;
+    const guardEmail = `mail.guard.${RUN}@tenant.example`;
+    const prov = await call('/api/platform/organizations', 'POST', {
+      cookie: adminCookie,
+      body: {
+        idempotencyKey: `console-${RUN}-guard`,
+        name: `Mail guard ${RUN}`,
+        slug: `mail-guard-${RUN}`,
+        timezone: 'Asia/Kolkata',
+        typeKey,
+        adminFullName: 'Mail guard Founder',
+        adminEmail: guardEmail,
+      },
+    });
+    expect(prov.status).toBe(201);
+    const gOrg = prov.body.orgId as string;
+    const setupState = async () =>
+      (
+        await owner.query<{ h: string; e: string; c: string | null }>(
+          `select encode(token_hash, 'hex') h, expires_at::text e, consumed_at::text c
+           from platform.org_admin_setup where org_id = $1`,
+          [gOrg],
+        )
+      ).rows[0];
+    const auditFor = async () =>
+      (
+        await owner.query<{ action: string; result: string; reason_code: string | null }>(
+          `select action, result, reason_code from platform.audit_events
+           where target_org_id = $1 order by occurred_at, id`,
+          [gOrg],
+        )
+      ).rows;
+    const revokePath = `/api/platform/organizations/${gOrg}/admin-setup/revoke`;
+    const reissuePath = `/api/platform/organizations/${gOrg}/admin-setup`;
+    const before = await setupState();
+    let sentBefore = mail.sent.length;
+
+    // An administrator without platform.organizations.assign_initial_admin: 403, a DENIED entry,
+    // and the pending link, its expiry and the mail outbox exactly as they were.
+    const weakEmail = `nosetup.${RUN}@platform.example`;
+    const weakInvite = await call('/api/platform/admins', 'POST', {
+      cookie: adminCookie,
+      body: {
+        idempotencyKey: `nosetup-${RUN}`,
+        email: weakEmail,
+        fullName: 'No Setup Permission',
+        permissions: ['platform.organizations.suspend'],
+      },
+    });
+    expect(weakInvite.status).toBe(201);
+    const weak = await activateAdmin(weakEmail, linkSentTo(weakEmail));
+    sentBefore = mail.sent.length; // the weak administrator's own invitation was emailed
+    // The gate records a refusal before the route reads its target, so these carry no org id.
+    const auditBefore = await auditRows();
+    const deniedRevoke = await call('revokeSetup', 'POST', {
+      cookie: weak,
+      path: revokePath,
+      body: { reason: 'Not mine to revoke' },
+    });
+    expect(deniedRevoke).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    const deniedReissue = await call('reissue', 'POST', { cookie: weak, path: reissuePath });
+    expect(deniedReissue).toMatchObject({ status: 403, body: { error: 'FORBIDDEN' } });
+    expect(await setupState()).toEqual(before);
+    expect(mail.sent.length).toBe(sentBefore);
+    expect((await auditRows()).slice(auditBefore.length)).toEqual([
+      {
+        action: 'platform.organization.admin_setup_revoke',
+        result: 'DENIED',
+        reason_code: 'NO_PERMISSION',
+      },
+      {
+        action: 'platform.organization.admin_setup_reissue',
+        result: 'DENIED',
+        reason_code: 'NO_PERMISSION',
+      },
+    ]);
+
+    // No session: 401. A tenant user — even an organization's SUPER_ADMIN: 404. Nothing runs.
+    const anonymous = await call('revokeSetup', 'POST', {
+      path: revokePath,
+      body: { reason: 'Anonymous attempt' },
+    });
+    expect(anonymous.status).toBe(401);
+    const tenantCookie = await signIn(orgAdminEmail, ORG_ADMIN_PASSWORD);
+    for (const [route, path, body] of [
+      ['revokeSetup', revokePath, { reason: 'Tenant attempt' }],
+      ['reissue', reissuePath, undefined],
+    ] as const) {
+      expect((await call(route, 'POST', { cookie: tenantCookie, path, body })).status).toBe(404);
+    }
+
+    // Wrong or malformed targets and bodies, by an administrator who holds the permission.
+    const badTargets: [string, string, unknown, number][] = [
+      [
+        'revokeSetup',
+        `/api/platform/organizations/${randomUUID()}/admin-setup/revoke`,
+        { reason: 'Unknown organization' },
+        404,
+      ],
+      [
+        'revokeSetup',
+        '/api/platform/organizations/not-a-uuid/admin-setup/revoke',
+        { reason: 'Not a uuid' },
+        400,
+      ],
+      ['revokeSetup', revokePath, {}, 400],
+      ['revokeSetup', revokePath, { reason: 42 }, 400],
+      ['revokeSetup', revokePath, { reason: 'Valid reason', extra: true }, 400],
+      ['revokeSetup', revokePath, { reason: 'x'.repeat(501) }, 400],
+      ['reissue', `/api/platform/organizations/${randomUUID()}/admin-setup`, undefined, 404],
+      ['reissue', '/api/platform/organizations/not-a-uuid/admin-setup', undefined, 400],
+    ];
+    for (const [route, path, body, status] of badTargets) {
+      const r = await call(route, 'POST', { cookie: adminCookie, path, body });
+      expect(r.status, `${route} ${path} ${JSON.stringify(body)}`).toBe(status);
+      expect(JSON.stringify(r.body)).not.toMatch(/select |platform\.|sqlstate|token/i);
+    }
+    expect(await setupState()).toEqual(before);
+
+    // Re-issue without email configured: 503 before anything changes — the old link stays,
+    // nothing is sent, and no re-issue is recorded as done.
+    mail.configured = false;
+    let noMail;
+    try {
+      noMail = await call('reissue', 'POST', { cookie: adminCookie, path: reissuePath });
+    } finally {
+      mail.configured = true;
+    }
+    expect(noMail).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await setupState()).toEqual(before);
+    expect(mail.sent.length).toBe(sentBefore);
+    expect(
+      (await auditFor()).filter(
+        (r) => r.action === 'platform.organization.admin_setup_reissue' && r.result === 'SUCCESS',
+      ),
+    ).toEqual([]);
+    expect(
+      (
+        await call('/api/setup/organization/complete', 'POST', {
+          body: { token: 'not-a-real-token', password: ORG_ADMIN_PASSWORD },
+        })
+      ).status,
+    ).toBe(400);
+
+    // Two re-issues at once: both answer, two emails go out, exactly one link is live.
+    const [r1, r2] = await Promise.all([
+      call('reissue', 'POST', { cookie: adminCookie, path: reissuePath }),
+      call('reissue', 'POST', { cookie: adminCookie, path: reissuePath }),
+    ]);
+    expect([r1.status, r2.status]).toEqual([200, 200]);
+    const raced = mail.sent.slice(sentBefore).filter((m) => m.to === guardEmail);
+    expect(raced).toHaveLength(2);
+    const live = (await setupState())!.h;
+    const digests = raced.map((m) =>
+      createHash('sha256').update(tokenOf(m.link), 'utf8').digest('hex'),
+    );
+    expect(digests.filter((d) => d === live)).toHaveLength(1);
+    expect(digests).not.toContain(before!.h);
+
+    // Two revocations at once: both answer, one is recorded, and no link — old or new — works.
+    const [v1, v2] = await Promise.all([
+      call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Race one' },
+      }),
+      call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Race two' },
+      }),
+    ]);
+    expect([v1.status, v2.status]).toEqual([200, 200]);
+    expect(
+      (await auditFor()).filter((r) => r.action === 'platform.organization.admin_setup_revoked'),
+    ).toHaveLength(1);
+    for (const m of raced) {
+      const replay = await call('/api/setup/organization/complete', 'POST', {
+        body: { token: tokenOf(m.link), password: ORG_ADMIN_PASSWORD },
+      });
+      expect(replay).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    }
+    expect((await setupState())!.c).toBeNull();
+
+    // A re-issue whose recipient is gone (the pending person deleted) is refused and rolled
+    // back whole — the hash and its times stay as they were, nothing is sent (review EM-2).
+    const pendingPerson = (
+      await owner.query<{ p: string }>(
+        `select person_id p from platform.org_admin_setup where org_id = $1`,
+        [gOrg],
+      )
+    ).rows[0]!.p;
+    const beforeGone = await setupState();
+    const outboxGone = mail.sent.length;
+    await owner.query(`update public.people set deleted_at = now() where id = $1`, [pendingPerson]);
+    try {
+      const gone = await call('reissue', 'POST', { cookie: adminCookie, path: reissuePath });
+      expect(gone).toMatchObject({ status: 409, body: { error: 'CANNOT_REISSUE' } });
+    } finally {
+      await owner.query(`update public.people set deleted_at = null where id = $1`, [
+        pendingPerson,
+      ]);
+    }
+    expect(await setupState()).toEqual(beforeGone);
+    expect(mail.sent.length).toBe(outboxGone);
+
+    // A revocation that waits on the row while a re-issue commits (review F-EM-1), made
+    // deterministic: this session holds the row lock and commits a fresh issue (new issued_at,
+    // a live expiry) while the revocation waits. Its time is read after the lock, so it ends
+    // the fresh link — never an expiry before the issue (23514, a 500) or a live link left.
+    const holder = await owner.connect();
+    let revokeWhileLocked: Promise<{ status: number; body: Record<string, unknown> }>;
+    try {
+      await holder.query('begin');
+      await holder.query(`select 1 from platform.org_admin_setup where org_id = $1 for update`, [
+        gOrg,
+      ]);
+      const xid = (await holder.query<{ x: string }>(`select pg_current_xact_id()::xid::text x`))
+        .rows[0]!.x;
+      revokeWhileLocked = call('revokeSetup', 'POST', {
+        cookie: adminCookie,
+        path: revokePath,
+        body: { reason: 'Revoked while a re-issue commits' },
+      });
+      // Proven, not assumed (review F-EM-6): wait until a session is blocked on THIS
+      // transaction — the revocation, inside its FOR UPDATE — before the fresh issue commits.
+      let blocked = false;
+      for (let i = 0; i < 150 && !blocked; i += 1) {
+        const w = await owner.query<{ n: number }>(
+          `select count(*)::int n from pg_locks
+           where locktype = 'transactionid' and transactionid::text = $1 and not granted`,
+          [xid],
+        );
+        blocked = w.rows[0]!.n > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(blocked, 'the revocation must be waiting on the row lock').toBe(true);
+      await holder.query(
+        `update platform.org_admin_setup
+         set issued_at = clock_timestamp(), expires_at = clock_timestamp() + interval '72 hours'
+         where org_id = $1`,
+        [gOrg],
+      );
+      await holder.query('commit');
+    } finally {
+      holder.release();
+    }
+    const lockedRevoke = await revokeWhileLocked!;
+    expect(lockedRevoke.status).toBe(200);
+    const afterRace = await owner.query<{ live: boolean; ordered: boolean }>(
+      `select expires_at > clock_timestamp() live, expires_at > issued_at ordered
+       from platform.org_admin_setup where org_id = $1`,
+      [gOrg],
+    );
+    expect(afterRace.rows[0]).toEqual({ live: false, ordered: true });
+    expect(
+      (await auditFor()).filter((r) => r.action === 'platform.organization.admin_setup_revoked'),
+    ).toHaveLength(2);
+  });
+
+  it('no tenant database login can execute the 0087 functions (runtime, not only the migration check)', async () => {
+    const tenantLogins: [string, string][] = [
+      ['DATABASE_URL', 'app_user'],
+      ['DATABASE_URL_AUTH', 'app_auth'],
+      ['DATABASE_URL_WORKER', 'app_worker'],
+    ];
+    for (const [variable, role] of tenantLogins) {
+      const url = process.env[variable];
+      expect(url, `${variable} must be set for this check`).toBeTruthy();
+      const c = new Client({ connectionString: onDb(url!, dbName) });
+      await c.connect();
+      try {
+        const who = await c.query<{ u: string }>('select current_user u');
+        expect(who.rows[0]!.u).toBe(role);
+        for (const statement of [
+          `select * from platform.org_admin_setup_recipient('${orgId}'::uuid)`,
+          `select platform.revoke_org_admin_setup('${orgId}'::uuid, 'role check', gen_random_uuid())`,
+        ]) {
+          let code = 'NO ERROR';
+          let message = '';
+          try {
+            await c.query(statement);
+          } catch (e) {
+            code = String((e as { code?: unknown }).code);
+            message = String((e as { message?: unknown }).message);
+          }
+          expect(code, `${role}: ${statement.slice(7, 50)}`).toBe('42501');
+          // The grant boundary itself — not the function's own permission check, which would
+          // also answer 42501 had the role wrongly been granted EXECUTE.
+          expect(message, role).toMatch(/permission denied for (function|schema)/);
+        }
+      } finally {
+        await c.end();
+      }
+    }
+    // And what the catalog says, for every role that is not app_platform or the owner.
+    const grants = await owner.query<{ fn: string; grantee: string }>(
+      `select p.proname fn, r.rolname grantee
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       cross join pg_roles r
+       where n.nspname = 'platform'
+         and p.proname in ('org_admin_setup_recipient', 'revoke_org_admin_setup')
+         and r.rolname in ('app_user', 'app_auth', 'app_worker', 'app_admin')
+         and has_function_privilege(r.oid, p.oid, 'execute')`,
+    );
+    expect(grants.rows).toEqual([]);
+    // PUBLIC (grantee 0) holds nothing either; only app_platform and the owner do.
+    const grantees = await owner.query<{ fn: string; grantee: string }>(
+      `select p.proname fn, coalesce(r.rolname, 'PUBLIC') grantee
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+       left join pg_roles r on r.oid = a.grantee
+       where n.nspname = 'platform'
+         and p.proname in ('org_admin_setup_recipient', 'revoke_org_admin_setup')
+         and a.privilege_type = 'EXECUTE' and r.oid is distinct from p.proowner
+       order by 1, 2`,
+    );
+    expect(grantees.rows).toEqual([
+      { fn: 'org_admin_setup_recipient', grantee: 'app_platform' },
+      { fn: 'revoke_org_admin_setup', grantee: 'app_platform' },
+    ]);
+  });
+
+  it('platform-administrator invitations are email only: refused unconfigured, audited when undelivered', async () => {
+    const invite = (key: string, email: string) =>
+      call('/api/platform/admins', 'POST', {
+        cookie: adminCookie,
+        body: { idempotencyKey: `${key}-${RUN}`, email, fullName: key, permissions: [] },
+      });
+    const adminsWith = async (email: string) =>
+      (
+        await owner.query<{ n: number }>(
+          `select count(*)::int n from platform.admins where email = $1`,
+          [email],
+        )
+      ).rows[0]!.n;
+
+    // Not configured: refused before anything exists — no invitation nobody can receive.
+    const offEmail = `mail.off.admin.${RUN}@platform.example`;
+    const sentBefore = mail.sent.length;
+    mail.configured = false;
+    let refused;
+    try {
+      refused = await invite('mailoff', offEmail);
+    } finally {
+      mail.configured = true;
+    }
+    expect(refused).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await adminsWith(offEmail)).toBe(0);
+    expect(mail.sent.length).toBe(sentBefore);
+
+    // Not accepted by the provider: the invitation stands, the failure is audited, no link.
+    // The address is typed with surrounding spaces and mixed case (review F-N2-3): it is trimmed
+    // at the boundary and kept as typed otherwise — stored, emailed and shown exactly so —
+    // while identity is case-insensitive and the login itself is stored lower-cased (0083/0085).
+    const failEmail = `Mail.Fail.Admin.${RUN}@Platform.Example`;
+    mail.accept = false;
+    let undelivered;
+    try {
+      undelivered = await invite('mailfail', `  ${failEmail}  `);
+    } finally {
+      mail.accept = true;
+    }
+    expect(undelivered).toMatchObject({
+      status: 201,
+      body: { emailed: false, recipient: failEmail },
+    });
+    expect(undelivered.body.setupLink).toBeUndefined();
+    const failId = undelivered.body.adminId as string;
+    expect(
+      (await auditRows()).filter(
+        (r) => r.action === 'platform.admin.invite' && r.reason_code === 'EMAIL_DELIVERY_FAILED',
+      ),
+    ).toEqual([
+      { action: 'platform.admin.invite', result: 'ERROR', reason_code: 'EMAIL_DELIVERY_FAILED' },
+    ]);
+    // Stored as typed, trimmed; emailed to exactly that address.
+    const stored = await owner.query<{
+      email: string;
+      status: string;
+      auth_user_id: string | null;
+    }>(`select email::text as email, status, auth_user_id from platform.admins where id = $1`, [
+      failId,
+    ]);
+    expect(stored.rows[0]).toEqual({
+      email: failEmail,
+      status: 'PENDING_ENROLMENT',
+      auth_user_id: null,
+    });
+    expect(mail.sent.at(-1)!.to).toBe(failEmail);
+    // The failure entry names no address and no token; it is tied to the administrator through
+    // the request: the invitation's own SUCCESS entry, same request id, targets that admin id.
+    const failure = await owner.query<{
+      request_id: string;
+      target_type: string | null;
+      target_id: string | null;
+      metadata: Record<string, unknown>;
+    }>(
+      `select request_id, target_type, target_id, metadata from platform.audit_events
+       where action = 'platform.admin.invite' and reason_code = 'EMAIL_DELIVERY_FAILED'`,
+    );
+    expect(failure.rows).toHaveLength(1);
+    expect(failure.rows[0]).toMatchObject({ target_type: null, target_id: null, metadata: {} });
+    const invited = await owner.query<{ target_type: string; target_id: string }>(
+      `select target_type, target_id from platform.audit_events
+       where action = 'platform.admin.invited' and request_id = $1`,
+      [failure.rows[0]!.request_id],
+    );
+    expect(invited.rows).toEqual([{ target_type: 'platform_admin', target_id: failId }]);
+
+    // Identity is case-insensitive: the same address in another case (or padded) is the same
+    // administrator — refused, never a second one. (Sent by the limited administrator, who
+    // holds platform.admins.manage: the main administrator's hourly allowance is spent.)
+    for (const variant of [failEmail.toLowerCase(), `  ${failEmail.toUpperCase()} `]) {
+      const twin = await call('/api/platform/admins', 'POST', {
+        cookie: limitedAdminCookie,
+        body: {
+          idempotencyKey: `twin-${RUN}-${variant.trim() === failEmail.toLowerCase() ? 'l' : 'u'}`,
+          email: variant,
+          fullName: 'Twin',
+          permissions: [],
+        },
+      });
+      expect(twin, variant).toMatchObject({ status: 409, body: { error: 'EMAIL_IN_USE' } });
+    }
+    expect(
+      (
+        await owner.query<{ n: number }>(
+          `select count(*)::int n from platform.admins where lower(email::text) = lower($1)`,
+          [failEmail],
+        )
+      ).rows[0]!.n,
+    ).toBe(1);
+
+    // Re-issue without email configured: 503, and the pending link is untouched.
+    const tokenRow = async () =>
+      (
+        await owner.query<{ h: string; e: string }>(
+          `select encode(token_hash, 'hex') h, expires_at::text e from platform.setup_tokens
+           where admin_id = $1`,
+          [failId],
+        )
+      ).rows;
+    const before = await tokenRow();
+    const outbox = mail.sent.length;
+    mail.configured = false;
+    let noMail;
+    try {
+      noMail = await call('adminSetup', 'POST', {
+        cookie: adminCookie,
+        path: `/api/platform/admins/${failId}/setup`,
+      });
+    } finally {
+      mail.configured = true;
+    }
+    expect(noMail).toMatchObject({ status: 503, body: { error: 'EMAIL_NOT_CONFIGURED' } });
+    expect(await tokenRow()).toEqual(before);
+    expect(mail.sent.length).toBe(outbox);
+
+    // A re-issue sends a fresh link to the invitation's own address; the old one is dead.
+    const resent = await call('adminSetup', 'POST', {
+      cookie: adminCookie,
+      path: `/api/platform/admins/${failId}/setup`,
+    });
+    expect(resent).toMatchObject({ status: 200, body: { emailed: true, recipient: failEmail } });
+    expect(resent.body.setupLink).toBeUndefined();
+    expect(mail.sent.at(-1)!.to).toBe(failEmail);
+    expect(await tokenRow()).not.toEqual(before);
+    const done = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: tokenOf(linkSentTo(failEmail)), password: PASSWORD },
+    });
+    expect(done.status).toBe(200);
+    // The login is the address lower-cased (0085); the administrator record keeps it as typed.
+    const login = await owner.query<{ id: string; email: string; accounts: number }>(
+      `select u.id, u.email::text as email,
+              (select count(*)::int from auth.auth_accounts a where a.user_id = u.id) accounts
+       from auth.auth_users u join platform.admins p on p.auth_user_id = u.id where p.id = $1`,
+      [failId],
+    );
+    expect(login.rows).toEqual([
+      { id: expect.any(String), email: failEmail.toLowerCase(), accounts: 1 },
+    ]);
+    const passwordBefore = await owner.query<{ password: string }>(
+      `select password from auth.auth_accounts where user_id = $1`,
+      [login.rows[0]!.id],
+    );
+
+    // Single use (review F-N2-2): the same link again — with another password — is refused with
+    // exactly SETUP_TOKEN_INVALID, sets no cookie, and changes neither the login nor its password.
+    const otherPassword = `${PASSWORD}-reuse`;
+    const again = await call('/api/platform/setup/complete', 'POST', {
+      body: { token: tokenOf(linkSentTo(failEmail)), password: otherPassword },
+    });
+    expect(again).toMatchObject({ status: 400, body: { error: 'SETUP_TOKEN_INVALID' } });
+    expect(again.setCookie).toBeNull();
+    const loginAfter = await owner.query<{ id: string; email: string; accounts: number }>(
+      `select u.id, u.email::text as email,
+              (select count(*)::int from auth.auth_accounts a where a.user_id = u.id) accounts
+       from auth.auth_users u join platform.admins p on p.auth_user_id = u.id where p.id = $1`,
+      [failId],
+    );
+    expect(loginAfter.rows).toEqual(login.rows);
+    expect(
+      (
+        await owner.query<{ password: string }>(
+          `select password from auth.auth_accounts where user_id = $1`,
+          [login.rows[0]!.id],
+        )
+      ).rows,
+    ).toEqual(passwordBefore.rows);
+    // The reused link's password does not sign in; the original does — in any case of the address.
+    const tryLogin = (email: string, password: string) =>
+      routes['/api/auth/login']!.POST!(
+        new Request(`${ORIGIN}/api/auth/login`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-forwarded-for': nextIp(),
+            origin: ORIGIN,
+          },
+          body: JSON.stringify({ email, password }),
+        }),
+      );
+    expect((await tryLogin(failEmail, otherPassword)).status).toBe(401);
+    expect((await tryLogin(failEmail.toUpperCase(), PASSWORD)).status).toBe(200);
+  });
+
+  it('no setup token — organization or platform administrator — ever appears in an API answer or in the audit', async () => {
+    const tokens = mail.sent.map((m) => tokenOf(m.link));
+    expect(tokens.length).toBeGreaterThan(5);
+    const everything = answers.join(' ');
+    for (const t of tokens) expect(everything.includes(t), 'a token in an API answer').toBe(false);
+    const audit = await owner.query<{ m: string }>(
+      `select coalesce(string_agg(metadata::text || coalesce(reason_code, ''), ' '), '') m
+       from platform.audit_events`,
+    );
+    for (const t of tokens)
+      expect(audit.rows[0]!.m.includes(t), 'a token in the audit').toBe(false);
   });
 
   it('pages the audit trail newest first without gaps or repeats', async () => {

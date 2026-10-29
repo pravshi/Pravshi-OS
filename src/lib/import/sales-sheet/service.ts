@@ -18,9 +18,17 @@ import { z } from 'zod';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
 import { requestWorkerWake } from '@/lib/jobs/wake';
-import { REPRESENTATIVE_MAPPING, type MappingSpec } from './mapping';
+import { MAPPINGS, REPRESENTATIVE_MAPPING, type MappingSpec } from './mapping';
 import {
   buildPreview,
+  companyKeyOf,
+  contactEmailKey,
+  contactNameKey,
+  dealKeyOf,
+  planPreview,
+  type DuplicateDecision,
+  type ImportDecisions,
+  type Unresolved,
   failedRowsCsv,
   normaliseKey,
   type OrgSnapshot,
@@ -40,7 +48,8 @@ export type ImportServiceCode =
   | 'PREVIEW_MISMATCH'
   | 'ALREADY_IMPORTED'
   | 'NOT_PREVIEWED'
-  | 'INVALID_INCLUDE';
+  | 'INVALID_INCLUDE'
+  | 'INVALID_DECISION';
 
 const notImporter = () =>
   new ImportServiceError('NOT_IMPORTER', 'Only the person who uploaded this import can do that.');
@@ -93,23 +102,28 @@ export interface ImportView {
 
 // ── Snapshot: the importing organization's keys, through RLS ─────────────────────
 
-const companyKeyOf = (domain: string | null, name: string) =>
-  domain ? `domain:${normaliseKey(domain)}` : `name:${normaliseKey(name)}`;
+function groupIds(pairs: [string, string][]): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const [k, id] of pairs) m.set(k, [...(m.get(k) ?? []), id]);
+  return m;
+}
 
 async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
   const [companies, contacts, deals, owners, done] = await Promise.all([
-    tx.execute<{ domain: string | null; name: string }>(sql`
-      select c.domain, c.name from public.companies c
+    tx.execute<{ id: string; domain: string | null; name: string }>(sql`
+      select c.id, c.domain, c.name from public.companies c
       where c.org_id = ${orgId}::uuid and c.deleted_at is null
     `),
     tx.execute<{
+      id: string;
       email: string | null;
       first_name: string;
       last_name: string;
       co_domain: string | null;
       co_name: string | null;
     }>(sql`
-      select ct.email, ct.first_name, ct.last_name, co.domain as co_domain, co.name as co_name
+      select ct.id, ct.email, ct.first_name, ct.last_name, co.domain as co_domain,
+             co.name as co_name
       from public.contacts ct
       left join public.companies co on co.id = ct.company_id and co.deleted_at is null
       where ct.org_id = ${orgId}::uuid and ct.deleted_at is null
@@ -147,14 +161,35 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     companyKey: string,
   ) =>
     email
-      ? `email:${normaliseKey(email)}`
-      : `name:${normaliseKey(`${first ?? ''} ${last ?? ''}`)}|${companyKey}`;
+      ? contactEmailKey(normaliseKey(email))
+      : contactNameKey(normaliseKey(`${first ?? ''} ${last ?? ''}`), companyKey);
 
   return {
     companyDomains: new Set(
       companies.rows.filter((c) => c.domain).map((c) => normaliseKey(c.domain!)),
     ),
     companyNames: new Set(companies.rows.map((c) => normaliseKey(c.name))),
+    companyIdsByName: groupIds(companies.rows.map((c) => [normaliseKey(c.name), c.id])),
+    companyKeyById: new Map(companies.rows.map((c) => [c.id, companyKeyOf(c.domain, c.name)])),
+    contactKeyById: new Map(
+      contacts.rows
+        .filter((c) => c.co_name !== null)
+        .map((c) => [
+          c.id,
+          contactKey(c.email, c.first_name, c.last_name, companyKeyOf(c.co_domain, c.co_name!)),
+        ]),
+    ),
+    contactIdsByNameCompany: groupIds(
+      contacts.rows
+        .filter((c) => c.co_name !== null)
+        .map((c) => [
+          contactNameKey(
+            normaliseKey(`${c.first_name} ${c.last_name}`),
+            companyKeyOf(c.co_domain, c.co_name!),
+          ),
+          c.id,
+        ]),
+    ),
     contactEmails: new Map(
       contacts.rows
         .filter((c) => c.email)
@@ -166,9 +201,11 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
     contactNameCompany: new Set(
       contacts.rows
         .filter((c) => c.co_name !== null)
-        .map(
-          (c) =>
-            `${normaliseKey(`${c.first_name} ${c.last_name}`)}|${companyKeyOf(c.co_domain, c.co_name!)}`,
+        .map((c) =>
+          contactNameKey(
+            normaliseKey(`${c.first_name} ${c.last_name}`),
+            companyKeyOf(c.co_domain, c.co_name!),
+          ),
         ),
     ),
     dealKeys: new Set(
@@ -180,7 +217,7 @@ async function loadSnapshot(tx: Tx, orgId: string): Promise<OrgSnapshot> {
             d.ct_email !== null || d.ct_first !== null
               ? contactKey(d.ct_email, d.ct_first, d.ct_last, ck)
               : '';
-          return `${normaliseKey(d.title)}|${ck}|${kk}`;
+          return dealKeyOf(normaliseKey(d.title), ck, kk);
         }),
     ),
     activeOwnersByEmail: new Map(owners.rows.map((o) => [normaliseKey(o.email), o.id])),
@@ -388,6 +425,12 @@ export const ConfirmImportSchema = z.strictObject({
   allowReimport: z.boolean().default(false),
 });
 
+const countsOf = (p: Preview): PreviewCounts => ({
+  ...p.counts,
+  validRows: p.validRows.length,
+  invalidRows: p.invalidRows.length,
+});
+
 const sameCounts = (a: PreviewCounts, b: PreviewCounts) =>
   a.validRows === b.validRows &&
   a.invalidRows === b.invalidRows &&
@@ -430,10 +473,24 @@ export async function confirmImport(
     if (!row) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
     // Only the importer confirms (the 0081 guard refuses anyone else too).
     if (row.created_by !== auth.ctx.personId) throw notImporter();
-    if (
-      row.file_sha256 !== body.fileSha256 ||
-      !sameCounts(row.preview_counts.counts, body.counts)
-    ) {
+    // With duplicate decisions (0088) the preview the user saw is the recomputed one; once
+    // confirmed, a repeat is answered from the job (AC-I3) whatever the organization is now.
+    const decisions = await loadDecisions(tx, id);
+    const decided = decisions.companies.size + decisions.contacts.size + decisions.deals.size > 0;
+    if (decided && body.includeRows.length > 0) {
+      throw new ImportServiceError(
+        'INVALID_INCLUDE',
+        'This import is resolved by duplicate decisions; rows are not included one by one.',
+      );
+    }
+    const decidedPreview =
+      decided && row.status === 'PREVIEWED'
+        ? (await recompute(tx, auth.ctx.orgId, id, decisions)).preview
+        : null;
+    const expected = decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts;
+    const countsMatch =
+      decided && row.status !== 'PREVIEWED' ? true : sameCounts(expected, body.counts);
+    if (row.file_sha256 !== body.fileSha256 || !countsMatch) {
       throw new ImportServiceError(
         'PREVIEW_MISMATCH',
         'The confirmation does not match this import’s file and preview.',
@@ -502,6 +559,12 @@ export async function confirmImport(
     `);
     if ((inserted.rowCount ?? 0) !== 1) throw new Error('INTERNAL: crm_import job not created');
 
+    // A decided import records the plan the user just confirmed, row by row, before it is
+    // queued (0088): the commit applies exactly this, whatever the organization looks like when
+    // it runs or re-runs.
+    if (decidedPreview) {
+      await recordRowPlans(tx, auth.ctx.orgId, id, decidedPreview);
+    }
     await tx.execute(sql`
       update public.crm_imports
       set status = 'QUEUED', job_id = ${jobId}::uuid, allow_reimport = ${body.allowReimport}
@@ -521,8 +584,11 @@ export async function confirmImport(
           fileName: row.file_name,
           fileSha256: row.file_sha256,
           dataRows: row.data_rows,
-          validRows: row.preview_counts.counts.validRows,
-          invalidRows: row.preview_counts.counts.invalidRows,
+          // A decided import starts from the counts confirmed, not the upload's (R-6).
+          validRows: (decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts)
+            .validRows,
+          invalidRows: (decidedPreview ? countsOf(decidedPreview) : row.preview_counts.counts)
+            .invalidRows,
           includedRows: include.length,
           reimport: earlier !== null,
         })}::jsonb,
@@ -591,4 +657,299 @@ export async function failedRowsFor(auth: Authorization, id: string): Promise<st
       })),
     );
   });
+}
+
+// ── Duplicate decisions (0088) ───────────────────────────────────────────────────
+
+export type DecisionKind = 'COMPANY' | 'CONTACT' | 'DEAL';
+
+export const DecisionInput = z.strictObject({
+  kind: z.enum(['COMPANY', 'CONTACT', 'DEAL']),
+  key: z.string().min(3).max(1200),
+  /** null clears the decision: the entity is undecided again. */
+  decision: z.enum(['LINK_EXISTING', 'CREATE_NEW', 'SKIP']).nullable(),
+});
+
+export interface DecisionPreview {
+  /** Exactly what confirm compares (PreviewCounts): send these back to confirm. */
+  counts: PreviewCounts;
+  unresolved: Unresolved;
+  skippedRows: number[];
+  invalidRows: number[];
+  decisions: { kind: DecisionKind; key: string; decision: DuplicateDecision }[];
+}
+
+const KIND_FIELD = { COMPANY: 'companies', CONTACT: 'contacts', DEAL: 'deals' } as const;
+
+type MutableDecisions = {
+  companies: Map<string, DuplicateDecision>;
+  contacts: Map<string, DuplicateDecision>;
+  deals: Map<string, Exclude<DuplicateDecision, 'LINK_EXISTING'>>;
+};
+
+/** The decisions recorded for an import, as the preview and the commit take them. */
+export async function loadDecisions(tx: Tx, importId: string): Promise<ImportDecisions> {
+  const res = await tx.execute<{
+    kind: DecisionKind;
+    entity_key: string;
+    decision: DuplicateDecision;
+  }>(sql`
+    select d.kind, d.entity_key, d.decision from public.crm_import_decisions d
+    where d.import_id = ${importId}::uuid
+  `);
+  const out: MutableDecisions = { companies: new Map(), contacts: new Map(), deals: new Map() };
+  for (const r of res.rows) {
+    if (r.kind === 'DEAL') {
+      if (r.decision !== 'LINK_EXISTING') out.deals.set(r.entity_key, r.decision);
+    } else if (r.kind === 'COMPANY') {
+      out.companies.set(r.entity_key, r.decision);
+    } else {
+      out.contacts.set(r.entity_key, r.decision);
+    }
+  }
+  return out;
+}
+
+/** The preview recomputed from the recorded rows, today's organization and the decisions. */
+async function recompute(
+  tx: Tx,
+  orgId: string,
+  importId: string,
+  decisions: ImportDecisions,
+): Promise<{ preview: Preview; status: string; createdBy: string }> {
+  const head = await tx.execute<{
+    status: string;
+    created_by: string;
+    mapping_id: string;
+    file_sha256: string;
+    header: string[];
+  }>(sql`
+    select i.status, i.created_by, i.mapping_id, i.file_sha256, i.header
+    from public.crm_imports i
+    where i.id = ${importId}::uuid and i.org_id = ${orgId}::uuid
+  `);
+  const h = head.rows[0];
+  if (!h) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  const spec = MAPPINGS[h.mapping_id];
+  if (!spec) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  const rows = await tx.execute<{
+    row_number: number;
+    status: string;
+    source_values: string[];
+    errors: { column: string | null; reason: string }[] | null;
+  }>(sql`
+    select r.row_number, r.status, r.source_values, r.errors from public.crm_import_rows r
+    where r.import_id = ${importId}::uuid order by r.row_number
+  `);
+  const snapshot = await loadSnapshot(tx, orgId);
+  // Only PENDING rows are planned: a row the upload found invalid stays invalid — it is never
+  // committed, so it must neither count nor take part in the file's identity.
+  const preview = planPreview(
+    {
+      fileSha256: h.file_sha256,
+      header: h.header,
+      rows: rows.rows
+        .filter((r) => r.status === 'PENDING')
+        .map((r) => ({ rowNumber: r.row_number, values: r.source_values })),
+    },
+    spec,
+    snapshot,
+    decisions,
+  );
+  const uploadInvalid = rows.rows
+    .filter((r) => r.status !== 'PENDING')
+    .map((r) => ({
+      rowNumber: r.row_number,
+      errors: (r.errors ?? []).map((e) => ({ rowNumber: r.row_number, ...e })),
+      values: r.source_values,
+    }));
+  if (uploadInvalid.length > 0) {
+    preview.invalidRows = [...preview.invalidRows, ...uploadInvalid].sort(
+      (a, b) => a.rowNumber - b.rowNumber,
+    );
+  }
+  return { preview, status: h.status, createdBy: h.created_by };
+}
+
+function decisionPreview(preview: Preview, decisions: ImportDecisions): DecisionPreview {
+  const list: DecisionPreview['decisions'] = [];
+  for (const [key, decision] of decisions.companies) list.push({ kind: 'COMPANY', key, decision });
+  for (const [key, decision] of decisions.contacts) list.push({ kind: 'CONTACT', key, decision });
+  for (const [key, decision] of decisions.deals) list.push({ kind: 'DEAL', key, decision });
+  return {
+    counts: countsOf(preview),
+    unresolved: preview.unresolved,
+    skippedRows: preview.skippedRows,
+    invalidRows: preview.invalidRows.map((r) => r.rowNumber),
+    decisions: list,
+  };
+}
+
+export async function getDecisionPreview(
+  auth: Authorization,
+  id: string,
+): Promise<DecisionPreview> {
+  if (!UUID.test(id)) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    const decisions = await loadDecisions(tx, id);
+    const { preview } = await recompute(tx, auth.ctx.orgId, id, decisions);
+    return decisionPreview(preview, decisions);
+  });
+}
+
+/**
+ * Records (or clears) one decision and answers the recomputed preview. Only the importer, only
+ * while the import is PREVIEWED (the 0088 guard decides; this checks first for a clear answer).
+ * A key must name a possible duplicate of THIS import — judged as if it had no decision — so a
+ * decision cannot be planted for an entity the import never raised.
+ */
+export async function setDecision(
+  auth: Authorization,
+  id: string,
+  input: z.infer<typeof DecisionInput>,
+): Promise<DecisionPreview> {
+  if (!UUID.test(id)) throw new ImportServiceError('NOT_FOUND', 'Import not found.');
+  if (input.kind === 'DEAL' && input.decision === 'LINK_EXISTING') {
+    throw new ImportServiceError('INVALID_DECISION', 'A deal can be created anew or skipped.');
+  }
+  return withAuthorizedDb(auth.ctx, async (tx) => {
+    // One decision at a time per import: each is validated against the decisions before it.
+    // Whoever crm_imports_update lets lock the row (the importer, a GLOBAL holder) waits here;
+    // anyone else locks nothing — and only the importer gets past the check below anyway.
+    await tx.execute(sql`
+      select 1 from public.crm_imports i
+      where i.id = ${id}::uuid and i.org_id = ${auth.ctx.orgId}::uuid
+      for update
+    `);
+    const current = await loadDecisions(tx, id);
+    const without: MutableDecisions = {
+      companies: new Map(current.companies),
+      contacts: new Map(current.contacts),
+      deals: new Map(current.deals),
+    };
+    without[KIND_FIELD[input.kind]].delete(input.key);
+    const base = await recompute(tx, auth.ctx.orgId, id, without);
+    if (base.createdBy !== auth.ctx.personId) throw notImporter();
+    if (base.status !== 'PREVIEWED') {
+      throw new ImportServiceError(
+        'NOT_PREVIEWED',
+        'Decisions are made before the import is confirmed.',
+      );
+    }
+    // Clearing is always allowed: a decision another decision made moot can still be removed.
+    if (
+      input.decision !== null &&
+      !base.preview.unresolved[KIND_FIELD[input.kind]].includes(input.key)
+    ) {
+      throw new ImportServiceError(
+        'INVALID_DECISION',
+        'That is not a possible duplicate of this import, or another decision already settles it.',
+      );
+    }
+    // The 0088 guard decides at the write; a confirmation that commits between the check
+    // above and this write is refused there. Its refusal is answered like the check's — never
+    // as the driver's error, whose message carries the query's parameters (the entity key).
+    try {
+      if (input.decision === null) {
+        await tx.execute(sql`
+          delete from public.crm_import_decisions
+          where import_id = ${id}::uuid and kind = ${input.kind} and entity_key = ${input.key}
+        `);
+      } else {
+        await tx.execute(sql`
+          insert into public.crm_import_decisions
+            (org_id, import_id, kind, entity_key, decision, decided_by)
+          values (${auth.ctx.orgId}::uuid, ${id}::uuid, ${input.kind}, ${input.key},
+                  ${input.decision}, ${auth.ctx.personId}::uuid)
+          on conflict (import_id, kind, entity_key) do update set decision = excluded.decision
+        `);
+      }
+    } catch (error) {
+      const code = sqlstateOf(error);
+      // The key-format check (a key the import itself could not have raised) is not the
+      // guard's state refusal: answered as an invalid decision, never with the key (R-2).
+      if (code === '23514' && constraintOf(error) === 'crm_import_decisions_key_format') {
+        throw new ImportServiceError('INVALID_DECISION', 'That key cannot be decided.');
+      }
+      if (code === '23514') {
+        throw new ImportServiceError(
+          'NOT_PREVIEWED',
+          'Decisions are made before the import is confirmed.',
+        );
+      }
+      if (code === '42501') throw notImporter();
+      throw new Error(`import decision not recorded (${code ?? 'no sqlstate'})`);
+    }
+    const after = await loadDecisions(tx, id);
+    const { preview } = await recompute(tx, auth.ctx.orgId, id, after);
+    return decisionPreview(preview, after);
+  });
+}
+
+/**
+ * The confirmed plan of a decided import (0088 crm_import_row_plans), for every row still
+ * PENDING: a row the decisions skip, or that still has an undecided possible duplicate, or that
+ * the decisions make invalid, is skipped; otherwise it records the existing company / contact
+ * the row's "use the existing" decision resolved to — by id, resolved at confirmation against
+ * the organization then — or none. The user confirms the counts, not the ids (R-7).
+ */
+async function recordRowPlans(
+  tx: Tx,
+  orgId: string,
+  importId: string,
+  preview: Preview,
+): Promise<void> {
+  type Plan = { skip: boolean; company: string | null; contact: string | null };
+  const SKIP: Plan = { skip: true, company: null, contact: null };
+  const plans = new Map<number, Plan>();
+  for (const r of preview.validRows) {
+    const undecided = [r.company, r.contact, r.deal].includes('POSSIBLE_DUPLICATE');
+    plans.set(
+      r.rowNumber,
+      undecided
+        ? SKIP
+        : { skip: false, company: r.existingCompanyId, contact: r.existingContactId },
+    );
+  }
+  const pending = await tx.execute<{ row_number: number }>(sql`
+    select r.row_number from public.crm_import_rows r
+    where r.import_id = ${importId}::uuid and r.status = 'PENDING'
+  `);
+  // Skipped and invalid rows are not valid rows: they, and anything unplanned, skip.
+  const records = pending.rows.map((r) => {
+    const plan = plans.get(r.row_number) ?? SKIP;
+    return {
+      row_number: r.row_number,
+      skip: plan.skip,
+      company_existing_id: plan.company,
+      contact_existing_id: plan.contact,
+    };
+  });
+  if (records.length === 0) return;
+  await tx.execute(sql`
+    insert into public.crm_import_row_plans
+      (org_id, import_id, row_number, skip, company_existing_id, contact_existing_id)
+    select ${orgId}::uuid, ${importId}::uuid, x.row_number, x.skip,
+           x.company_existing_id, x.contact_existing_id
+    from jsonb_to_recordset(${JSON.stringify(records)}::jsonb)
+      as x(row_number int, skip boolean, company_existing_id uuid, contact_existing_id uuid)
+  `);
+}
+
+/** drizzle wraps the driver error: the SQLSTATE is on the error or its cause. */
+function sqlstateOf(error: unknown): string | null {
+  for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+  }
+  return null;
+}
+
+/** The violated constraint's name, on the error or its cause. */
+function constraintOf(error: unknown): string | null {
+  for (let e: unknown = error; e; e = (e as { cause?: unknown }).cause) {
+    const constraint = (e as { constraint?: unknown }).constraint;
+    if (typeof constraint === 'string') return constraint;
+  }
+  return null;
 }

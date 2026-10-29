@@ -657,6 +657,22 @@
       "tag": "0086_platform_console",
       "breakpoints": true,
       "hash": "1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a"
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791602728057,
+      "tag": "0087_org_admin_setup_email",
+      "breakpoints": true,
+      "hash": "d295bbaa7b135d728a5951259ab0cbb51ca1abad3554750214be125afebbee73"
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791603728057,
+      "tag": "0088_crm_import_decisions",
+      "breakpoints": true,
+      "hash": "7274424fe91442381379791f5600941e84b4d044fa806efa118dd3d03b90fa5c"
     }
   ]
 }

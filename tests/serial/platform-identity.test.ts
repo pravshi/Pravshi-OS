@@ -246,11 +246,13 @@ describe.skipIf(!ENABLED)('platform identity (0083, isolated live database)', ()
       'app_platform platform.list_audit_events',
       'app_platform platform.list_organization_types',
       'app_platform platform.list_organizations',
+      'app_platform platform.org_admin_setup_recipient',
       'app_platform platform.provision_organization',
       'app_platform platform.record_failure',
       'app_platform platform.reissue_admin_setup',
       'app_platform platform.reissue_org_admin_setup',
       'app_platform platform.revoke_admin',
+      'app_platform platform.revoke_org_admin_setup',
       'app_platform platform.set_organization_status',
       'app_platform platform.whoami',
     ]);

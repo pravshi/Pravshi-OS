@@ -29,15 +29,65 @@ import { DEFAULT_LIMITS, ImportFileError, decodeUtf8, parseCsv, type ImportLimit
 import { resolveHeader, type MappingSpec } from './mapping';
 import { buildCandidate, type RowCandidate, type RowError } from './rows';
 
-/** The importing organization's existing keys, all already normalised by normaliseKey(). */
+// ── Entity keys (review R-15) ───────────────────────────────────────────────────────
+// A key is a JSON array of tagged, normalised parts — never values joined with a separator a
+// value could contain. Each component's parts are spliced in flat (not nested), and each tag
+// fixes how many parts follow it, so no value — however many quotes, brackets or "|" it holds —
+// can make two different entities share a key. Upload (crm_import_rows), preview, the snapshot
+// and decisions all build keys here, and only here.
+//   company  ["domain", d] | ["name", n]
+//   contact  ["email", e]  | ["name", fullName, ...company]
+//   deal     ["deal", title, ...company, ...contact?]
+//   repeat   ["repeat", row, ...deal]   (R-3: a row repeating a deal the file creates)
+
+const keyOf = (...parts: (string | number)[]) => JSON.stringify(parts);
+const partsOf = (key: string): (string | number)[] => JSON.parse(key) as (string | number)[];
+
+/** Company: its domain when it has one, else its name. Inputs are raw; normalised here. */
+export const companyKeyOf = (domain: string | null | undefined, name: string) =>
+  domain ? keyOf('domain', normaliseKey(domain)) : keyOf('name', normaliseKey(name));
+/** Contact with an email: the email alone (already normalised). */
+export const contactEmailKey = (email: string) => keyOf('email', email);
+/** Contact without one: the normalised full name under its company. */
+export const contactNameKey = (fullName: string, companyKey: string) =>
+  keyOf('name', fullName, ...partsOf(companyKey));
+/** Deal: normalised title, company, and contact ('' when the row has none). */
+export const dealKeyOf = (title: string, companyKey: string, contactKey: string) =>
+  keyOf('deal', title, ...partsOf(companyKey), ...(contactKey ? partsOf(contactKey) : []));
+/** A row repeating a deal an earlier row of the file creates (R-3). */
+export const repeatDealKeyOf = (dealKey: string, rowNumber: number) =>
+  keyOf('repeat', rowNumber, ...partsOf(dealKey));
+
+/** The importing organization's existing keys, all built by the key functions above. */
 export interface OrgSnapshot {
   companyDomains: ReadonlySet<string>;
   companyNames: ReadonlySet<string>;
   /** Normalised contact email → the company key of that contact's company (null: none). */
   contactEmails: ReadonlyMap<string, string | null>;
-  /** `${normalisedFullName}|${normalisedCompanyKey}` */
+  /** contactNameKey(normalisedFullName, companyKey) of every contact under a company. */
   contactNameCompany: ReadonlySet<string>;
-  /** `${normalisedTitle}|${normalisedCompanyKey}|${normalisedContactKey}` */
+  /**
+   * Normalised name → the ids of the live companies that carry it. "Use the existing company"
+   * for a name-only match needs exactly one: with several the user must add a domain (or create
+   * a new one) — the import never guesses which (duplicate resolution). The id found is the one
+   * the confirmed plan records and the commit links to.
+   */
+  companyIdsByName: ReadonlyMap<string, readonly string[]>;
+  /** contactNameKey(normalisedFullName, companyKey) → the ids of the live contacts it names. */
+  contactIdsByNameCompany: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Live company id → the key its own contacts and deals are recorded under (its domain when it
+   * has one, else its name). A row that names a company by name only and is linked to an
+   * existing one by decision is compared with THAT company's contacts and deals (review R-1).
+   */
+  companyKeyById: ReadonlyMap<string, string>;
+  /**
+   * Live contact id → the contact part of the keys its deals are filed under in dealKeys
+   * (its email when it has one, else its name under its company). A row whose contact is linked
+   * to an existing one by decision is compared with THAT contact's deals (review R-11).
+   */
+  contactKeyById: ReadonlyMap<string, string>;
+  /** dealKeyOf(normalisedTitle, companyKey, contactKey) of every live deal under a company. */
   dealKeys: ReadonlySet<string>;
   /** Normalised email → person id, ACTIVE people of the importing organization only. */
   activeOwnersByEmail: ReadonlyMap<string, string>;
@@ -45,8 +95,15 @@ export interface OrgSnapshot {
   completedFileHashes: ReadonlySet<string>;
 }
 
-/** Trimmed, case-folded, internal whitespace collapsed (AC-D1). */
-export const normaliseKey = (s: string) => s.trim().toLocaleLowerCase('en').replace(/\s+/g, ' ');
+/**
+ * Trimmed, case-folded, internal whitespace collapsed (AC-D1). Control characters count as
+ * whitespace: a key never carries one (the 0088 key-format check refuses them).
+ */
+export const normaliseKey = (s: string) =>
+  s
+    .toLocaleLowerCase('en')
+    .replace(/[\s\p{Cc}]+/gu, ' ')
+    .trim();
 
 export type Outcome = 'CREATE' | 'LINK' | 'POSSIBLE_DUPLICATE';
 
@@ -59,6 +116,13 @@ export interface PlannedRow {
   /** Within-file identity (AC-D4): rows with the same key are one record. */
   companyKey: string;
   contactKey: string | null;
+  /**
+   * The existing company / contact a "use the existing" decision resolved to for THIS row —
+   * directly, or through an earlier row of the same entity. The confirmed plan records these
+   * ids (0088); null when the row does not link by decision.
+   */
+  existingCompanyId: string | null;
+  existingContactId: string | null;
   /** The row's values as the file had them (stored with the import, AC-A3). */
   values: string[];
 }
@@ -67,6 +131,34 @@ export interface TableCounts {
   create: number;
   link: number;
   possibleDuplicate: number;
+}
+
+/**
+ * A user's decision about one possible duplicate (duplicate resolution). Companies and contacts
+ * are decided once per entity — every row that names it follows — and deals once per deal key.
+ *
+ *   LINK_EXISTING  use the existing record (companies and contacts only)
+ *   CREATE_NEW     create a new record although a similar one exists
+ *   SKIP           import nothing from the rows that need it
+ */
+export type DuplicateDecision = 'LINK_EXISTING' | 'CREATE_NEW' | 'SKIP';
+
+export interface ImportDecisions {
+  companies: ReadonlyMap<string, DuplicateDecision>;
+  contacts: ReadonlyMap<string, DuplicateDecision>;
+  deals: ReadonlyMap<string, Exclude<DuplicateDecision, 'LINK_EXISTING'>>;
+}
+
+export const NO_DECISIONS: ImportDecisions = {
+  companies: new Map(),
+  contacts: new Map(),
+  deals: new Map(),
+};
+
+export interface Unresolved {
+  companies: string[];
+  contacts: string[];
+  deals: string[];
 }
 
 export interface Preview {
@@ -85,6 +177,13 @@ export interface Preview {
   conflicts: RowError[];
   /** Possible duplicates that would fail if included: they can only be skipped. */
   notIncludableRows: number[];
+  /** Rows a SKIP decision excludes. */
+  skippedRows: number[];
+  /**
+   * Possible duplicates still undecided, by entity key. While any remain, a commit would skip
+   * their rows: nothing is ever created as a duplicate without an explicit decision.
+   */
+  unresolved: Unresolved;
 }
 
 export class ImportRefusal extends Error {
@@ -111,6 +210,7 @@ export function buildPreview(
   spec: MappingSpec,
   snapshot: OrgSnapshot,
   limits: ImportLimits = DEFAULT_LIMITS,
+  decisions: ImportDecisions = NO_DECISIONS,
 ): Preview {
   const fileSha256 = createHash('sha256').update(bytes).digest('hex');
   let parsed;
@@ -143,15 +243,56 @@ export function buildPreview(
     );
   }
 
+  return planPreview(
+    { fileSha256, header: parsed.header, rows: parsed.rows },
+    spec,
+    snapshot,
+    decisions,
+  );
+}
+
+/**
+ * The preview of already-parsed rows: what the upload computes from the file, and what the
+ * decision API recomputes from the rows the import recorded (the raw file is never kept) after
+ * each duplicate decision. Same rules, same result for the same rows.
+ */
+export function planPreview(
+  input: {
+    fileSha256: string;
+    header: string[];
+    rows: readonly { rowNumber: number; values: string[] }[];
+  },
+  spec: MappingSpec,
+  snapshot: OrgSnapshot,
+  decisions: ImportDecisions = NO_DECISIONS,
+): Preview {
+  const { fileSha256 } = input;
+  const parsed = { header: input.header, rows: input.rows };
+  const resolution = resolveHeader(parsed.header, spec);
   const counts = { companies: emptyCounts(), contacts: emptyCounts(), deals: emptyCounts() };
   const validRows: PlannedRow[] = [];
   const invalidRows: Preview['invalidRows'] = [];
   const conflicts: RowError[] = [];
   const notIncludableRows: number[] = [];
+  const skippedRows: number[] = [];
+  const unresolved = {
+    companies: new Set<string>(),
+    contacts: new Set<string>(),
+    deals: new Set<string>(),
+  };
   // Within-file identity (AC-D4): the first committing row creates, later rows with the same key
-  // link. Contacts map to the company key they were first seen under.
-  const fileCompanies = new Map<string, { rowNumber: number; industry: string | null }>();
-  const fileContacts = new Map<string, string>();
+  // link. Contacts map to the company key they were first seen under. A decision travels with
+  // the entity: later rows of a company decided new are rows of a new company, and later rows
+  // of one decided existing link to that same existing record.
+  interface FileEntity {
+    existingId: string | null;
+    decidedNew: boolean;
+  }
+  const fileCompanies = new Map<
+    string,
+    FileEntity & { rowNumber: number; industry: string | null }
+  >();
+  const fileContacts = new Map<string, FileEntity & { companyKey: string }>();
   const fileDeals = new Set<string>();
 
   for (const { rowNumber, values } of parsed.rows) {
@@ -180,9 +321,7 @@ export function buildPreview(
     // Company: domain is the natural key; a name-only match is a possible duplicate — for every
     // row that names it, not only the first (AC-D1).
     const company = cand.company;
-    const companyKey = company.domain
-      ? `domain:${normaliseKey(company.domain)}`
-      : `name:${normaliseKey(company.name)}`;
+    const companyKey = companyKeyOf(company.domain, company.name);
     let companyOutcome: Outcome;
     const seen = fileCompanies.get(companyKey);
     if (seen) {
@@ -194,6 +333,44 @@ export function buildPreview(
     } else {
       companyOutcome = 'CREATE';
     }
+    const companyDecision =
+      companyOutcome === 'POSSIBLE_DUPLICATE' ? decisions.companies.get(companyKey) : undefined;
+    let skip = companyDecision === 'SKIP';
+    let existingCompanyId = seen?.existingId ?? null;
+    if (companyDecision === 'LINK_EXISTING') {
+      const ids = snapshot.companyIdsByName.get(normaliseKey(company.name)) ?? [];
+      if (ids.length === 1) {
+        existingCompanyId = ids[0]!;
+      } else {
+        errors.push({
+          rowNumber,
+          column: spec.columns.companyName?.header ?? 'companyName',
+          reason:
+            ids.length > 1
+              ? 'matches more than one existing company; add the domain, create a new one, or skip'
+              : 'no longer matches an existing company',
+        });
+      }
+      companyOutcome = 'LINK';
+    } else if (companyDecision === 'CREATE_NEW') {
+      companyOutcome = 'CREATE';
+    }
+    /**
+     * A company this file creates anew — on this row or an earlier one — has no existing
+     * contacts or deals to collide with.
+     */
+    const newCompany = companyDecision === 'CREATE_NEW' || (seen?.decidedNew ?? false);
+    /**
+     * The key the organization's records of this row's company are filed under: the linked
+     * company's own key when a decision linked it (it may have a domain the file omits), else
+     * the row's. Within-file identity keeps the row's key.
+     */
+    const existingKey =
+      existingCompanyId !== null
+        ? (snapshot.companyKeyById.get(existingCompanyId) ?? companyKey)
+        : companyKey;
+    /** The row's contact as the organization would key it under existingKey ('' for none). */
+    let existingContactKey = '';
 
     // Contact: email is the natural key; name + company is a possible duplicate. An email that
     // already belongs to a contact under another company is a row error: the commit would refuse
@@ -201,14 +378,22 @@ export function buildPreview(
     let contactOutcome: Outcome | null = null;
     let contactKey = '';
     let linksExistingContact = false;
+    /** The user decided this possible-duplicate contact is a new person (here or earlier). */
+    let contactDecidedNew = false;
+    let existingContactId: string | null = null;
     if (cand.contact) {
       const fullName = normaliseKey(`${cand.contact.firstName} ${cand.contact.lastName}`);
       const email = cand.contact.email ? normaliseKey(cand.contact.email) : null;
-      contactKey = email ? `email:${email}` : `name:${fullName}|${companyKey}`;
+      contactKey = email ? contactEmailKey(email) : contactNameKey(fullName, companyKey);
+      existingContactKey = email ? contactKey : contactNameKey(fullName, existingKey);
       const inFile = fileContacts.get(contactKey);
       const existing = email ? snapshot.contactEmails.get(email) : undefined;
+      if (inFile !== undefined) {
+        existingContactId = inFile.existingId;
+        contactDecidedNew = inFile.decidedNew;
+      }
       if (inFile !== undefined || existing !== undefined) {
-        if ((inFile ?? existing) !== companyKey) {
+        if (inFile !== undefined ? inFile.companyKey !== companyKey : existing !== existingKey) {
           errors.push({
             rowNumber,
             column: spec.columns.contactEmail?.header ?? 'contactEmail',
@@ -217,27 +402,96 @@ export function buildPreview(
         }
         contactOutcome = 'LINK';
         linksExistingContact = inFile === undefined;
-      } else if (!email && snapshot.contactNameCompany.has(`${fullName}|${companyKey}`)) {
+      } else if (
+        !email &&
+        !newCompany &&
+        snapshot.contactNameCompany.has(contactNameKey(fullName, existingKey))
+      ) {
         contactOutcome = 'POSSIBLE_DUPLICATE';
       } else {
         contactOutcome = 'CREATE';
       }
+      if (contactOutcome === 'POSSIBLE_DUPLICATE') {
+        const d = decisions.contacts.get(contactKey);
+        if (d === 'SKIP') skip = true;
+        else if (d === 'LINK_EXISTING') {
+          contactOutcome = 'LINK';
+          const ids =
+            snapshot.contactIdsByNameCompany.get(contactNameKey(fullName, existingKey)) ?? [];
+          if (ids.length === 1) {
+            existingContactId = ids[0]!;
+          } else {
+            errors.push({
+              rowNumber,
+              column: spec.columns.contactLastName?.header ?? 'contactLastName',
+              reason:
+                ids.length > 1
+                  ? 'matches more than one existing contact of this company; add the email, create a new one, or skip'
+                  : 'no longer matches an existing contact',
+            });
+          }
+        } else if (d === 'CREATE_NEW') {
+          contactOutcome = 'CREATE';
+          contactDecidedNew = true;
+        }
+      }
+    }
+    // Linked by decision (here or on an earlier row): compare with that contact's own deals.
+    if (existingContactId !== null) {
+      existingContactKey = snapshot.contactKeyById.get(existingContactId) ?? existingContactKey;
+    }
+    // A new company's contact cannot be an existing contact of the existing company.
+    if (newCompany && linksExistingContact) {
+      errors.push({
+        rowNumber,
+        column: spec.columns.contactEmail?.header ?? 'contactEmail',
+        reason: 'belongs to a contact of the existing company; use the existing company, or skip',
+      });
     }
 
     // Deal: no natural key; same title + company + contact as a live deal, or as an earlier
     // committing row of this file, is a possible duplicate (AC-D3).
+    //
+    // R-3 (founder decision 2026-10-29): "create anyway" creates the selected deal ONCE. A row
+    // repeating a deal an earlier row of this file creates is decided on its own — under a key
+    // of its own (repeatDealKeyOf) — so one decision never creates the repeats.
     let dealOutcome: Outcome | null = null;
     let dealKey = '';
+    let dealDecisionKey = '';
     if (cand.deal) {
-      dealKey = `${normaliseKey(cand.deal.title)}|${companyKey}|${contactKey}`;
+      dealKey = dealKeyOf(normaliseKey(cand.deal.title), companyKey, contactKey);
+      const existingDealKey = dealKeyOf(
+        normaliseKey(cand.deal.title),
+        existingKey,
+        existingContactKey,
+      );
+      // Only an explicit "create new" decision rules out the existing deals: a record the user
+      // declared new has none.
+      const againstExisting = !newCompany && !contactDecidedNew;
       dealOutcome =
-        snapshot.dealKeys.has(dealKey) || fileDeals.has(dealKey) ? 'POSSIBLE_DUPLICATE' : 'CREATE';
+        (againstExisting && snapshot.dealKeys.has(existingDealKey)) || fileDeals.has(dealKey)
+          ? 'POSSIBLE_DUPLICATE'
+          : 'CREATE';
+      dealDecisionKey = fileDeals.has(dealKey) ? repeatDealKeyOf(dealKey, rowNumber) : dealKey;
+      if (dealOutcome === 'POSSIBLE_DUPLICATE') {
+        const d = decisions.deals.get(dealDecisionKey);
+        if (d === 'SKIP') skip = true;
+        else if (d === 'CREATE_NEW') dealOutcome = 'CREATE';
+      }
     }
 
     if (errors.length > 0) {
       invalidRows.push({ rowNumber, errors, values });
       continue;
     }
+    if (skip) {
+      // A SKIP decision excludes the row: it creates nothing, links nothing, registers nothing.
+      skippedRows.push(rowNumber);
+      continue;
+    }
+    if (companyOutcome === 'POSSIBLE_DUPLICATE') unresolved.companies.add(companyKey);
+    if (contactOutcome === 'POSSIBLE_DUPLICATE') unresolved.contacts.add(contactKey);
+    if (dealOutcome === 'POSSIBLE_DUPLICATE') unresolved.deals.add(dealDecisionKey);
 
     // Within-file identity (AC-D4). A row with a possible duplicate is skipped unless the user
     // includes it, so until then it creates nothing a later row could link to: only rows without
@@ -252,8 +506,21 @@ export function buildPreview(
           reason: `differs from row ${seen.rowNumber} for the same company; row ${seen.rowNumber} wins`,
         });
       }
-      if (!seen) fileCompanies.set(companyKey, { rowNumber, industry: company.industry ?? null });
-      if (cand.contact && !fileContacts.has(contactKey)) fileContacts.set(contactKey, companyKey);
+      if (!seen) {
+        fileCompanies.set(companyKey, {
+          rowNumber,
+          industry: company.industry ?? null,
+          existingId: existingCompanyId,
+          decidedNew: newCompany,
+        });
+      }
+      if (cand.contact && !fileContacts.has(contactKey)) {
+        fileContacts.set(contactKey, {
+          companyKey,
+          existingId: existingContactId,
+          decidedNew: contactDecidedNew,
+        });
+      }
       if (cand.deal) fileDeals.add(dealKey);
     }
 
@@ -283,6 +550,8 @@ export function buildPreview(
       ownerPersonId,
       companyKey,
       contactKey: cand.contact ? contactKey : null,
+      existingCompanyId,
+      existingContactId: cand.contact ? existingContactId : null,
       values,
     });
   }
@@ -299,6 +568,12 @@ export function buildPreview(
     counts,
     conflicts,
     notIncludableRows,
+    skippedRows,
+    unresolved: {
+      companies: [...unresolved.companies],
+      contacts: [...unresolved.contacts],
+      deals: [...unresolved.deals],
+    },
   };
 }
 

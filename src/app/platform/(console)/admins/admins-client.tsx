@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { OneTimeLink } from '../one-time-link';
+import { DeliveryNotice, type DeliveryShown } from '../delivery-notice';
 import { newIdempotencyKey, platformApi, signInAgain } from '../platform-api';
 
 interface Admin {
@@ -45,9 +45,7 @@ function ErrorLine({ code, message }: { code: string; message: string }) {
 export function AdminsClient({ selfId, held }: { selfId: string; held: string[] }) {
   const [admins, setAdmins] = useState<Admin[] | null>(null);
   const [loadError, setLoadError] = useState<{ code: string; message: string } | null>(null);
-  const [shown, setShown] = useState<{ title: string; link: string; expiresAt: string } | null>(
-    null,
-  );
+  const [shown, setShown] = useState<DeliveryShown | null>(null);
 
   const load = useCallback(async () => {
     const r = await platformApi<{ admins: Admin[] }>('/admins');
@@ -72,7 +70,7 @@ export function AdminsClient({ selfId, held }: { selfId: string; held: string[] 
           permissions you hold.
         </p>
       </div>
-      {shown ? <OneTimeLink {...shown} onDismiss={() => setShown(null)} /> : null}
+      {shown ? <DeliveryNotice shown={shown} onDismiss={() => setShown(null)} /> : null}
       <InviteForm
         held={held}
         onInvited={(s) => {
@@ -113,7 +111,7 @@ function AdminRow({
   admin: Admin;
   self: boolean;
   onChanged: () => void;
-  onLink: (s: { title: string; link: string; expiresAt: string }) => void;
+  onLink: (s: DeliveryShown) => void;
 }) {
   const [revoking, setRevoking] = useState(false);
   const [reason, setReason] = useState('');
@@ -140,7 +138,7 @@ function AdminRow({
   async function reissue() {
     setPending(true);
     setError(null);
-    const r = await platformApi<{ setupLink: string; setupExpiresAt: string }>(
+    const r = await platformApi<{ emailed: boolean; recipient: string; setupExpiresAt: string }>(
       `/admins/${admin.adminId}/setup`,
       { method: 'POST' },
     );
@@ -151,7 +149,8 @@ function AdminRow({
     }
     onLink({
       title: `New setup link for ${admin.email} (the previous one no longer works)`,
-      link: r.data.setupLink,
+      emailed: r.data.emailed,
+      recipient: r.data.recipient,
       expiresAt: r.data.setupExpiresAt,
     });
     onChanged();
@@ -228,7 +227,7 @@ function InviteForm({
   onInvited,
 }: {
   held: string[];
-  onInvited: (s: { title: string; link: string; expiresAt: string }) => void;
+  onInvited: (s: DeliveryShown) => void;
 }) {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -250,7 +249,13 @@ function InviteForm({
     setError(null);
     setReplayed(false);
     const r = await platformApi<
-      | { replayed: false; adminId: string; setupLink: string; setupExpiresAt: string }
+      | {
+          replayed: false;
+          adminId: string;
+          emailed: boolean;
+          recipient: string;
+          setupExpiresAt: string;
+        }
       | { replayed: true; adminId: string }
     >('/admins', {
       method: 'POST',
@@ -266,8 +271,9 @@ function InviteForm({
       return;
     }
     onInvited({
-      title: `Setup link for ${email.trim()}`,
-      link: r.data.setupLink,
+      title: `Invitation for ${email.trim()}`,
+      emailed: r.data.emailed,
+      recipient: r.data.recipient,
       expiresAt: r.data.setupExpiresAt,
     });
     setEmail('');
@@ -335,8 +341,8 @@ function InviteForm({
           </Button>
           {replayed ? (
             <p role="status" className="mt-3 text-sm text-ink-muted">
-              This invitation was already sent. Its link is not shown again — use &ldquo;Re-issue
-              setup link&rdquo; on the administrator below if it was lost.
+              This invitation was already sent; nothing was sent again. If its email was lost, use
+              &ldquo;Re-issue setup link&rdquo; on the administrator below.
             </p>
           ) : null}
           {error ? <ErrorLine {...error} /> : null}

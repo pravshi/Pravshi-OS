@@ -43,7 +43,9 @@ that email, by any runtime role (only the schema owner, through a migration, cou
 the trigger). No platform route can change it. A mistyped address is corrected by
 provisioning again, not by editing the person.
 
-Accepted residual: an administrator with that permission sees the new link and could use it
+Closed by 0087 (email only, founder policy 2026-10-29): the console no longer sees the link — it
+is emailed to the recorded recipient and appears in no answer, log or audit entry, and a pending
+link can be revoked. Previously accepted residual: an administrator with that permission saw the new link and could use it
 themselves, taking the unclaimed login. This is inherent while links are shown in the console.
 The decision that removes it is N-2 (deliver setup links by email only), which is the founder's.
 Until then, grant `assign_initial_admin` only to administrators trusted with every unclaimed
@@ -56,9 +58,26 @@ ownership of the email. So the console re-issues an unused invitation only for t
 administrator who sent it, and only while they still hold every permission it grants: a
 re-issue never gives anyone more than an invitation of their own could. Every other case —
 another administrator's invitation, one whose inviter is gone, one who already has a login —
-is the operator's (`scripts/bootstrap/platform.mjs reissue-setup` or `recover`). Residual
-until N-2: the inviter sees the new link and could use it themselves, which gives them nothing
-beyond their own permissions.
+is the operator's (`scripts/bootstrap/platform.mjs reissue-setup` or `recover`). Closed by
+N-2 (email only, founder decision 2026-10-29): the inviter no longer sees the link — it is emailed
+to the invitation's own address, which nothing changes after the invitation, and appears in no
+answer, console view, log or audit entry. The operator CLI (first administrator, break-glass
+recovery) still prints its link to the operator's own terminal: it runs before any mail path
+exists.
+
+## Administrator addresses and undelivered invitations
+
+An invited administrator's address is trimmed at the API boundary and otherwise kept as typed:
+stored, emailed and shown exactly so. Identity is case-insensitive — the address is unique
+whatever its case (citext), and an address already used by a login or another administrator in
+any case is refused (`EMAIL_IN_USE`) — and the login created at setup is stored lower-cased
+(0083/0085), so sign-in works in any case. Nothing lower-cases or rewrites the address silently.
+
+An invitation or re-issue whose email the provider does not accept is recorded as
+`EMAIL_DELIVERY_FAILED` (ERROR) with no address, link or token. It names its administrator
+through the request: the same request id carries the `platform.admin.invited` (or
+`platform.admin.setup_reissued`) entry, whose target is the administrator's id. The administrator
+stays `PENDING_ENROLMENT` with no login until a link is used.
 
 ## Sessions ended by the platform's limits (S2-4)
 
@@ -69,7 +88,9 @@ audited.
 
 ## Still open
 
-- N-2 (founder): setup links shown once in the console versus email-only delivery.
+- N-2: closed. Organization first administrators (0087) and platform-administrator invitations
+  (founder decision 2026-10-29) receive their setup links by email only.
 - D1 (hosting): rate limits key on the deployment's trusted client-address header
-  (`x-vercel-forwarded-for` on Vercel); pending the founder's topology confirmation. Per-administrator
-  limits do not depend on it.
+  (`x-vercel-forwarded-for` on Vercel). Topology founder-confirmed 2026-10-29 (Vercel directly,
+  Cloudflare DNS-only); the production DNS record and the preview check of recorded addresses are
+  still to be done. Per-administrator limits do not depend on it.

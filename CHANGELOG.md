@@ -7,10 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Database migrations: 0063–0086 (production still pending — see the
+Database migrations: 0063–0088 (production still pending — see the
 [production migration runbook](docs/runbooks/production-migration.md)).
 
 ### Added
+
+- Sales Sheet duplicate resolution (migration 0088). A possible duplicate is decided once per
+  company, contact or deal — use the existing record, create a new one, or skip — and every row
+  naming it follows; the preview is recomputed after each decision (GET/PUT
+  `/api/crm/imports/{id}/decisions`). In a decided import, a possible duplicate still undecided
+  at confirmation is skipped — including one that only appeared after upload. "Use the existing"
+  is refused when several records share the name; the record it resolves to is recorded by id at
+  confirmation and the commit links exactly that one (a row fails if it has since been deleted).
+  Decisions are made by the importer before confirmation; the confirmation records the plan row
+  by row, and the commit (both its batch and per-row paths, and any retry) applies exactly that
+  plan. An import with no decisions keeps 0081's behaviour: a row clean at upload is not
+  re-checked against records created later. A "create anyway" decision on a deal creates it once: a row of the same file repeating
+  that deal (same title, company and contact) is flagged under its own key and decided on its own
+  (R-3, founder decision 2026-10-29). Entity keys (decision keys and the within-file identity stored with each row) are
+  JSON arrays of tagged parts, so a value containing a separator can never make two different
+  companies, contacts or deals share a key (review R-15). Prepared rollback (refuses while a decided import is
+  queued or running): `scripts/db/rollback/0088_crm_import_decisions.down.sql`.
+- First-administrator setup links by email only (founder policy 2026-10-29, migration 0087). When
+  the platform provisions an organization or re-issues its first administrator's link, the link is
+  emailed to the recipient the database recorded (fixed while setup is pending) and is never shown
+  in the console, returned by an API, logged or audited; the console shows only whether the email
+  was accepted, to whom, and when the link expires. Without Resend configured (`RESEND_API_KEY`,
+  `EMAIL_FROM`) provisioning and re-issue are refused before anything is created. An undelivered
+  email is audited (ERROR, `EMAIL_DELIVERY_FAILED`) and fixed by re-issuing. A pending link can now
+  be revoked without issuing another (reason required, audited). Prepared rollback:
+  `scripts/db/rollback/0087_org_admin_setup_email.down.sql`.
+- Platform-administrator invitations by email only (founder decision 2026-10-29; no migration).
+  Inviting or re-issuing emails the link to the invitation's own address (which nothing changes
+  after the invitation); the API answers `{emailed, recipient, setupExpiresAt}` and never the
+  link, and the console shows only the delivery outcome. Single use, 72-hour expiry and revocation
+  (revoking the administrator) are unchanged. Without Resend configured both are refused before
+  anything is created (503); an undelivered email is audited (ERROR, `EMAIL_DELIVERY_FAILED`); a
+  replayed invitation sends nothing. The operator CLI still prints its link to the operator's own
+  terminal (first administrator, break-glass recovery).
 
 - Worker liveness (REL-11). A job's lease renewal proved only that the worker process was
   alive: a handler that never returned kept its lease, so the job was never reaped and

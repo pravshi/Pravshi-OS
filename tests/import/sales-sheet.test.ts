@@ -11,10 +11,15 @@ import { strictIsoDate } from '@/lib/import/sales-sheet/rows';
 import {
   ImportRefusal,
   buildPreview,
+  companyKeyOf,
+  contactNameKey,
+  dealKeyOf,
   failedRowsCsv,
   normaliseKey,
   type OrgSnapshot,
 } from '@/lib/import/sales-sheet/preview';
+
+const DOM = (domain: string) => companyKeyOf(domain, '');
 
 const FIXTURE = readFileSync('tests/fixtures/sales-sheet/representative.csv');
 const OWNER_1 = '11111111-1111-4111-8111-111111111111';
@@ -22,8 +27,16 @@ const OWNER_2 = '22222222-2222-4222-8222-222222222222';
 const snapshot = (over: Partial<OrgSnapshot> = {}): OrgSnapshot => ({
   companyDomains: new Set(['existing.example']),
   companyNames: new Set([normaliseKey('Name Only Ltd')]),
-  contactEmails: new Map([['known@existing.example', 'domain:existing.example']]),
+  contactEmails: new Map([['known@existing.example', DOM('existing.example')]]),
   contactNameCompany: new Set(),
+  companyIdsByName: new Map([
+    [normaliseKey('Name Only Ltd'), ['c0000000-0000-4000-8000-000000000001']],
+  ]),
+  contactIdsByNameCompany: new Map(),
+  companyKeyById: new Map([
+    ['c0000000-0000-4000-8000-000000000001', companyKeyOf(null, 'Name Only Ltd')],
+  ]),
+  contactKeyById: new Map(),
   dealKeys: new Set(),
   activeOwnersByEmail: new Map([
     ['owner.one@pravshi.example', OWNER_1],
@@ -203,8 +216,8 @@ describe('what the preview hands to the stored import (0081)', () => {
     );
     expect(p.header).toEqual(HEADER.trim().split(','));
     expect(p.validRows[0]).toMatchObject({
-      companyKey: 'domain:acme.example',
-      contactKey: 'name:asha rao|domain:acme.example',
+      companyKey: DOM('acme.example'),
+      contactKey: contactNameKey('asha rao', DOM('acme.example')),
       values: ['Acme ', ' ACME.example', 'Asha', 'Rao', '', 'owner.one@pravshi.example'],
     });
   });
@@ -234,7 +247,13 @@ describe('what the preview hands to the stored import (0081)', () => {
       ),
       REPRESENTATIVE_MAPPING,
       snapshot({
-        dealKeys: new Set(['renewal|domain:acme.example|name:asha rao|domain:acme.example']),
+        dealKeys: new Set([
+          dealKeyOf(
+            'renewal',
+            DOM('acme.example'),
+            contactNameKey('asha rao', DOM('acme.example')),
+          ),
+        ]),
       }),
     );
     expect(p.validRows.map((r) => [r.company, r.deal])).toEqual([
@@ -259,7 +278,9 @@ describe('what the preview hands to the stored import (0081)', () => {
           'Name Only Ltd,Cy,Lee,cy@x.example,owner.one@pravshi.example\n',
       ),
       REPRESENTATIVE_MAPPING,
-      snapshot({ contactEmails: new Map([['bob@x.example', 'name:name only ltd']]) }),
+      snapshot({
+        contactEmails: new Map([['bob@x.example', companyKeyOf(null, 'Name Only Ltd')]]),
+      }),
     );
     expect(p.validRows.map((r) => [r.company, r.contact])).toEqual([
       ['POSSIBLE_DUPLICATE', 'LINK'],
@@ -331,5 +352,21 @@ describe('failed-rows export (AC-C4)', () => {
       `"9","'=HYPERLINK(""http://x"")","'+cmd","Owner Email: is not an active person"`,
     );
     expect(lines[2]).toBe(`"12","'-1","'@SUM(A1)","bad"`);
+  });
+});
+
+describe('a domain cell is a domain (review R-13)', () => {
+  it('refuses a domain with a space or a control character', () => {
+    for (const domain of ['acme .com', 'acme\u0001.com']) {
+      const p = buildPreview(
+        bytes(`Company,Company Domain,Owner Email\nAcme,${domain},owner.one@pravshi.example\n`),
+        REPRESENTATIVE_MAPPING,
+        snapshot(),
+      );
+      expect(p.validRows).toEqual([]);
+      expect(p.invalidRows[0]!.errors.map((e) => e.reason)).toContain(
+        'is not a valid domain (it contains a space or a control character)',
+      );
+    }
   });
 });

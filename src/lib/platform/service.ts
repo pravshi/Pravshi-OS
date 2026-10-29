@@ -70,7 +70,7 @@ async function classify42501(
   }
 }
 
-async function run<T>(
+export async function runPlatformOperation<T>(
   req: PlatformRequest,
   operation: PlatformOperation,
   refusals: Refusals,
@@ -151,7 +151,7 @@ export interface OrganizationRow {
 }
 
 export async function listOrganizations(req: PlatformRequest): Promise<OrganizationRow[]> {
-  const rows = await run(req, 'platform.organization.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.organization.list', {}, (tx) =>
     tx.execute<{
       org_id: string;
       name: string;
@@ -189,7 +189,7 @@ export interface OrganizationTypeRow {
 }
 
 export async function listOrganizationTypes(req: PlatformRequest): Promise<OrganizationTypeRow[]> {
-  const rows = await run(req, 'platform.organization.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.organization.list', {}, (tx) =>
     tx.execute<{
       type_key: string;
       display_name: string;
@@ -240,12 +240,16 @@ export async function provisionOrganization(
 ): Promise<ProvisionResult> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(req, 'platform.organization.provision', PROVISION_REFUSALS, (tx) =>
-    tx.execute<{
-      provisioned_org_id: string;
-      setup_expires_at: Date | string | null;
-      replayed: boolean;
-    }>(sql`
+  const rows = await runPlatformOperation(
+    req,
+    'platform.organization.provision',
+    PROVISION_REFUSALS,
+    (tx) =>
+      tx.execute<{
+        provisioned_org_id: string;
+        setup_expires_at: Date | string | null;
+        replayed: boolean;
+      }>(sql`
       select provisioned_org_id, setup_expires_at, replayed
       from platform.provision_organization(
         ${input.idempotencyKey}, ${input.name}, ${input.slug}, ${input.timezone}, ${input.typeKey},
@@ -266,10 +270,14 @@ export async function provisionOrganization(
 export async function reissueOrgAdminSetup(
   req: PlatformRequest,
   orgId: string,
-): Promise<{ setupToken: string; setupExpiresAt: string }> {
+): Promise<{
+  setupToken: string;
+  setupExpiresAt: string;
+  recipient: { email: string; fullName: string; orgName: string };
+}> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.organization.admin_setup_reissue',
     {
@@ -280,17 +288,33 @@ export async function reissueOrgAdminSetup(
           'The organization is not active, or its first administrator already completed setup.',
       },
     },
-    (tx) =>
-      tx.execute<{ expires_at: Date | string }>(sql`
+    // One transaction: the new hash commits only together with the address the new link is
+    // sent to — a failed lookup leaves the old link in place and nothing changed.
+    async (tx) => {
+      const issued = await tx.execute<{ expires_at: Date | string }>(sql`
         select platform.reissue_org_admin_setup(${orgId}::uuid, decode(${digest}, 'hex'),
                                                 ${req.requestId}::uuid) as expires_at
-      `),
+      `);
+      const to = await tx.execute<{ email: string; full_name: string; org_name: string }>(
+        sql`select email, full_name, org_name from platform.org_admin_setup_recipient(${orgId}::uuid)`,
+      );
+      // No pending recipient: refused like any other "cannot re-issue" (55000), rolled back.
+      if (!to.rows[0]) throw Object.assign(new Error('no pending recipient'), { code: '55000' });
+      return { expires: issued.rows[0]?.expires_at, to: to.rows[0] };
+    },
     { targetOrgId: orgId, permission: 'platform.organizations.assign_initial_admin' },
   );
-  const expires = rows.rows[0]?.expires_at;
-  if (!expires)
+  if (!rows.expires)
     throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
-  return { setupToken: token, setupExpiresAt: new Date(expires).toISOString() };
+  return {
+    setupToken: token,
+    setupExpiresAt: new Date(rows.expires).toISOString(),
+    recipient: {
+      email: rows.to.email,
+      fullName: rows.to.full_name,
+      orgName: rows.to.org_name,
+    },
+  };
 }
 
 export async function setOrganizationStatus(
@@ -299,7 +323,7 @@ export async function setOrganizationStatus(
   to: 'SUSPENDED' | 'ACTIVE',
   reason: string,
 ): Promise<'SUSPENDED' | 'ACTIVE' | 'UNCHANGED'> {
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     to === 'SUSPENDED' ? 'platform.organization.suspend' : 'platform.organization.reactivate',
     {
@@ -343,7 +367,7 @@ export interface AdminRow {
 }
 
 export async function listAdmins(req: PlatformRequest): Promise<AdminRow[]> {
-  const rows = await run(req, 'platform.admin.list', {}, (tx) =>
+  const rows = await runPlatformOperation(req, 'platform.admin.list', {}, (tx) =>
     tx.execute<{
       admin_id: string;
       email: string;
@@ -397,7 +421,7 @@ export async function inviteAdmin(
           input.permissions.map((p) => sql`${p}`),
           sql`, `,
         )}]::text[]`;
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.admin.invite',
     {
@@ -453,10 +477,14 @@ export async function inviteAdmin(
 export async function reissueAdminSetup(
   req: PlatformRequest,
   adminId: string,
-): Promise<{ setupToken: string; setupExpiresAt: string }> {
+): Promise<{
+  setupToken: string;
+  setupExpiresAt: string;
+  recipient: { email: string; fullName: string };
+}> {
   const token = newSetupToken();
   const digest = hashSetupToken(token);
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.admin.setup_reissue',
     {
@@ -475,17 +503,29 @@ export async function reissueAdminSetup(
           'grants, can re-issue it. Otherwise ask the operator.',
       },
     },
-    (tx) =>
-      tx.execute<{ expires_at: Date | string }>(sql`
+    // One transaction: the new hash commits only together with the address it is sent to —
+    // the invited administrator's own, recorded at invitation and never changed (0083).
+    async (tx) => {
+      const issued = await tx.execute<{ expires_at: Date | string }>(sql`
         select platform.reissue_admin_setup(${adminId}::uuid, decode(${digest}, 'hex'),
                                             ${req.requestId}::uuid) as expires_at
-      `),
+      `);
+      const to = await tx.execute<{ email: string; full_name: string }>(sql`
+        select email::text as email, full_name from platform.list_admins()
+        where admin_id = ${adminId}::uuid
+      `);
+      if (!to.rows[0]) throw Object.assign(new Error('no recipient'), { code: '55000' });
+      return { expires: issued.rows[0]?.expires_at, to: to.rows[0] };
+    },
     { permission: 'platform.admins.manage' },
   );
-  const expires = rows.rows[0]?.expires_at;
-  if (!expires)
+  if (!rows.expires)
     throw new PlatformError(500, 'INTERNAL', 'Something went wrong. Nothing was changed.');
-  return { setupToken: token, setupExpiresAt: new Date(expires).toISOString() };
+  return {
+    setupToken: token,
+    setupExpiresAt: new Date(rows.expires).toISOString(),
+    recipient: { email: rows.to.email, fullName: rows.to.full_name },
+  };
 }
 
 export async function revokeAdmin(
@@ -493,7 +533,7 @@ export async function revokeAdmin(
   adminId: string,
   reason: string,
 ): Promise<void> {
-  await run(
+  await runPlatformOperation(
     req,
     'platform.admin.revoke',
     {
@@ -540,7 +580,7 @@ export async function listAudit(
   cursor: { beforeAt: string; beforeId: string } | null,
   limit: number,
 ): Promise<{ rows: AuditRow[]; next: { beforeAt: string; beforeId: string } | null }> {
-  const rows = await run(
+  const rows = await runPlatformOperation(
     req,
     'platform.audit.list',
     { '22023': { status: 400, code: 'INVALID_INPUT', message: 'Invalid page.' } },

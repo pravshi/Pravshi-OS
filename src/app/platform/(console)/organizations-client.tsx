@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { OneTimeLink } from './one-time-link';
+import { DeliveryNotice, type DeliveryShown } from './delivery-notice';
 import { newIdempotencyKey, platformApi, signInAgain } from './platform-api';
 
 interface Organization {
@@ -29,7 +29,8 @@ interface OrganizationType {
   latestVersion: number;
 }
 
-type Shown = { title: string; link: string; expiresAt: string } | null;
+/** The outcome of an email-only setup-link delivery — never the link itself. */
+type Shown = DeliveryShown | null;
 
 function ErrorLine({ code, message }: { code: string; message: string }) {
   return (
@@ -78,14 +79,7 @@ export function OrganizationsClient(props: {
         </p>
       </div>
 
-      {shown ? (
-        <OneTimeLink
-          title={shown.title}
-          link={shown.link}
-          expiresAt={shown.expiresAt}
-          onDismiss={() => setShown(null)}
-        />
-      ) : null}
+      {shown ? <DeliveryNotice shown={shown} onDismiss={() => setShown(null)} /> : null}
 
       {props.canCreate ? (
         <ProvisionForm
@@ -165,7 +159,7 @@ function OrganizationRow({
   async function reissue() {
     setPending(true);
     setError(null);
-    const r = await platformApi<{ setupLink: string; setupExpiresAt: string }>(
+    const r = await platformApi<{ emailed: boolean; recipient: string; setupExpiresAt: string }>(
       `/organizations/${org.orgId}/admin-setup`,
       { method: 'POST' },
     );
@@ -175,10 +169,30 @@ function OrganizationRow({
       return;
     }
     onLink({
-      title: `New setup link for the first administrator of ${org.name}`,
-      link: r.data.setupLink,
+      title: `New setup link for the first administrator of ${org.name} (the previous one no longer works)`,
+      emailed: r.data.emailed,
+      recipient: r.data.recipient,
       expiresAt: r.data.setupExpiresAt,
     });
+    onChanged();
+  }
+
+  async function revokeLink() {
+    const reason = window.prompt(
+      'Reason for revoking the pending setup link (recorded in the audit):',
+    );
+    if (!reason || reason.trim().length < 3) return;
+    setPending(true);
+    setError(null);
+    const r = await platformApi(`/organizations/${org.orgId}/admin-setup/revoke`, {
+      method: 'POST',
+      body: { reason: reason.trim() },
+    });
+    setPending(false);
+    if (!r.ok) {
+      setError(r);
+      return;
+    }
     onChanged();
   }
 
@@ -209,6 +223,11 @@ function OrganizationRow({
         {canReissue && org.status === 'ACTIVE' && org.firstAdminSetupPending && mode === 'idle' ? (
           <Button size="sm" variant="outline" disabled={pending} onClick={() => void reissue()}>
             Re-issue setup link
+          </Button>
+        ) : null}
+        {canReissue && org.status === 'ACTIVE' && org.firstAdminSetupPending && mode === 'idle' ? (
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => void revokeLink()}>
+            Revoke setup link
           </Button>
         ) : null}
       </div>
@@ -299,7 +318,13 @@ function ProvisionForm({ onProvisioned }: { onProvisioned: (s: Shown) => void })
     setError(null);
     setReplayed(false);
     const r = await platformApi<
-      | { replayed: false; orgId: string; setupLink: string; setupExpiresAt: string }
+      | {
+          replayed: false;
+          orgId: string;
+          emailed: boolean;
+          recipient: string;
+          setupExpiresAt: string;
+        }
       | { replayed: true; orgId: string }
     >('/organizations', { method: 'POST', body: { idempotencyKey, ...form } });
     setPending(false);
@@ -313,8 +338,9 @@ function ProvisionForm({ onProvisioned }: { onProvisioned: (s: Shown) => void })
       return;
     }
     onProvisioned({
-      title: `${form.name} is provisioned. Setup link for ${form.adminEmail}`,
-      link: r.data.setupLink,
+      title: `${form.name} is provisioned.`,
+      emailed: r.data.emailed,
+      recipient: r.data.recipient,
       expiresAt: r.data.setupExpiresAt,
     });
     setForm((f) => ({ ...f, name: '', slug: '', adminFullName: '', adminEmail: '' }));
@@ -326,7 +352,8 @@ function ProvisionForm({ onProvisioned }: { onProvisioned: (s: Shown) => void })
       <h2 className="text-lg font-medium">Provision an organization</h2>
       <p className="mt-1 text-sm text-ink-muted">
         Creates the organization from its type&apos;s latest published template, an Executive
-        department, and its first administrator, who receives a 72-hour setup link.
+        department, and its first administrator, who receives a 72-hour setup link by email (it is
+        never shown here).
       </p>
       {typesError ? <ErrorLine {...typesError} /> : null}
       {types && types.length === 0 ? (

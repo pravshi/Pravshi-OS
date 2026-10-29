@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { json } from '@/lib/platform/guard';
-import { BadRequest, platformRoute, platformSetupLink, readJson } from '@/lib/platform/http';
-import { inviteAdmin, listAdmins } from '@/lib/platform/service';
+import { inviteAndEmail } from '@/lib/platform/admin-invite';
+import { BadRequest, platformRoute, readJson } from '@/lib/platform/http';
+import { listAdmins } from '@/lib/platform/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,9 +32,11 @@ const Invite = z.strictObject({
 /**
  * POST /api/platform/admins — invite a platform administrator (platform.admins.manage;
  * step-up; 10 an hour). They always receive the two view permissions, plus only those
- * requested — never one the inviter does not hold. The setup link is in the answer, once.
+ * requested — never one the inviter does not hold. The setup link is EMAILED to the invited
+ * address and never returned (founder decision 2026-10-29): 201 {replayed: false, adminId,
+ * emailed, recipient, setupExpiresAt}; 503 EMAIL_NOT_CONFIGURED before anything is created.
  * Idempotent by idempotencyKey: a retry of a completed request answers 200 {replayed: true}
- * with no link (re-issue it: POST /api/platform/admins/{id}/setup).
+ * and sends nothing (re-issue: POST /api/platform/admins/{id}/setup).
  */
 export const POST = platformRoute(
   {
@@ -45,13 +48,8 @@ export const POST = platformRoute(
   async (req, ctx) => {
     const parsed = Invite.safeParse(await readJson(req));
     if (!parsed.success) throw new BadRequest(String(parsed.error.issues[0]?.path[0] ?? ''));
-    const r = await inviteAdmin(ctx, parsed.data);
+    const r = await inviteAndEmail(ctx, parsed.data);
     if (r.replayed) return json(200, { replayed: true, adminId: r.adminId });
-    return json(201, {
-      replayed: false,
-      adminId: r.adminId,
-      setupLink: platformSetupLink(r.setupToken),
-      setupExpiresAt: r.setupExpiresAt,
-    });
+    return json(201, r);
   },
 );
