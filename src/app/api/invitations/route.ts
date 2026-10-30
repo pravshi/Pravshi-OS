@@ -1,6 +1,7 @@
 import { env } from '@/env';
 import { withPermission } from '@/lib/authz/http';
-import { createInvitation, InvitationError } from '@/lib/invitations/service';
+import { InvitationError } from '@/lib/auth/invitation-contract';
+import { createInvitation } from '@/lib/invitations/service';
 import { CreateInvitationSchema, type CreateInvitationInput } from '@/lib/invitations/schema';
 import { buildInviteUrl } from '@/lib/invitations/tokens';
 import { sendInvitationEmail } from '@/lib/invitations/email';

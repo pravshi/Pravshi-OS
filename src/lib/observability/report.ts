@@ -21,7 +21,7 @@
  * changes the worker branch below, nothing else.
  */
 import type * as SentryModule from '@sentry/nextjs';
-import { isWorkerProcess } from '@/lib/jobs/process-context';
+import { isWorkerProcess } from './process-context';
 
 type Sentry = typeof SentryModule;
 

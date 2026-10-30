@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { INVITATION_TOKEN_PATTERN } from './tokens';
 
 /**
  * Invitation input schemas, shared with the client. Everything untrusted is validated
@@ -44,14 +43,6 @@ export const CreateInvitationSchema = z.strictObject({
 });
 
 export type CreateInvitationInput = z.infer<typeof CreateInvitationSchema>;
-
-export const AcceptInvitationSchema = z.strictObject({
-  token: z.string().regex(INVITATION_TOKEN_PATTERN),
-  fullName: z.string().trim().min(1).max(200),
-  password: z.string().min(1).max(256),
-});
-
-export type AcceptInvitationInput = z.infer<typeof AcceptInvitationSchema>;
 
 export const RevokeInvitationSchema = z.strictObject({
   id: uuid,

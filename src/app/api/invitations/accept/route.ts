@@ -1,7 +1,6 @@
 import { env } from '@/env';
 import { acceptInvitation } from '@/lib/auth/invitations';
-import { InvitationError } from '@/lib/invitations/service';
-import { AcceptInvitationSchema } from '@/lib/invitations/schema';
+import { AcceptInvitationSchema, InvitationError } from '@/lib/auth/invitation-contract';
 import { clientIp } from '@/lib/auth/login-events';
 import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 /**
  * Invitation token primitives.
@@ -8,18 +8,15 @@ import { createHash, randomBytes } from 'node:crypto';
  * the shadow" split as the bootstrap setup token. The digest comparison is by equality
  * against a unique index, not a string compare in application code, so there is no
  * timing side-channel worth defending beyond that.
+ *
+ * The token's shape (INVITATION_TOKEN_PATTERN) and its stored digest (hashInvitationToken) live in
+ * src/lib/auth/invitation-contract.ts, which the pre-login accept flow shares (ADR-010, Step 4);
+ * this module keeps generation and the acceptance link.
  */
-
-export const INVITATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 /** A fresh single-use invitation token. Returned to the caller exactly once. */
 export function generateInvitationToken(): string {
   return randomBytes(32).toString('base64url');
-}
-
-/** The value stored in invitations.token_hash. The plaintext never reaches the database. */
-export function hashInvitationToken(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 /**

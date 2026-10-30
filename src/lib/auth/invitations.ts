@@ -2,9 +2,11 @@ import { sql } from 'drizzle-orm';
 import { auth } from './server';
 import { authDb } from '@/lib/db/auth-client';
 import { PasswordResetError, validateNewPasswordPolicy } from './password-reset';
-import { hashInvitationToken } from '@/lib/invitations/tokens';
-import type { AcceptInvitationInput } from '@/lib/invitations/schema';
-import { InvitationError } from '@/lib/invitations/service';
+import {
+  hashInvitationToken,
+  InvitationError,
+  type AcceptInvitationInput,
+} from './invitation-contract';
 
 /**
  * Invitation acceptance — the pre-authentication half of the invitation flow.

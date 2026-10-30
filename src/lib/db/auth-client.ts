@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { authPool } from './auth-pool';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from './auth-schema';
 
 /**
  * THE SECOND, AND ONLY OTHER, PATH TO POSTGRES — and it lives here, in the db module,

@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { clientAddressFromHeaders } from '@/lib/auth/client-address';
+import { clientAddressFromHeaders } from '@/lib/observability/client-address';
 import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
@@ -48,7 +48,7 @@ const USER_AGENT_MAX = 512;
 
 /**
  * The request facts an audit entry may carry. The client address comes from the header this
- * deployment trusts (src/lib/auth/client-address.ts, D1); it is informational only and never
+ * deployment trusts (src/lib/observability/client-address.ts, D1); it is informational only and never
  * used to decide anything. A value that is not an IP literal is dropped rather than stored — including an
  * IPv6 literal with a zone id (fe80::1%eth0): Node's isIP accepts it, Postgres inet does not,
  * and the `::inet` cast below would throw and lose the audit entry.

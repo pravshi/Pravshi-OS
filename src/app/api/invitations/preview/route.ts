@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { env } from '@/env';
 import { previewInvitation } from '@/lib/auth/invitations';
-import { INVITATION_TOKEN_PATTERN } from '@/lib/invitations/tokens';
+import { INVITATION_TOKEN_PATTERN } from '@/lib/auth/invitation-contract';
 import { clientIp } from '@/lib/auth/login-events';
 import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';
 

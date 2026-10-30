@@ -109,7 +109,7 @@ Read by `scripts/bootstrap/run.mjs`, once per database, from the process environ
 #### Client address — which header each service trusts (D1)
 
 The client address feeds rate limits, login records and audit metadata; it never grants access.
-It is read only from a header the deployment guarantees (`src/lib/auth/client-address.ts`), and
+It is read only from a header the deployment guarantees (`src/lib/observability/client-address.ts`), and
 Better Auth's own limiter is configured to read the same one:
 
 | Where the code runs                       | Trusted header           | Why                                                                                                                                             |

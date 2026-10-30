@@ -1,5 +1,6 @@
 import { withPermission } from '@/lib/authz/http';
-import { revokeInvitation, InvitationError } from '@/lib/invitations/service';
+import { InvitationError } from '@/lib/auth/invitation-contract';
+import { revokeInvitation } from '@/lib/invitations/service';
 import { RevokeInvitationSchema } from '@/lib/invitations/schema';
 import { clientIp } from '@/lib/auth/login-events';
 import { checkIpRateLimit, ipRateLimitKey } from '@/lib/auth/rate-limit';

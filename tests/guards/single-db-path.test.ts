@@ -40,6 +40,20 @@ describe('there is exactly one path to Postgres', () => {
     expect(hits, `app_worker pool imported outside the worker plane, in:\n${hits}`).toBe('');
   });
 
+  it('only the auth plane imports the Better Auth table definitions', () => {
+    // src/lib/db/auth-schema.ts (Step 4: moved from src/lib/auth/schema.ts so db no longer
+    // imports auth) describes the credential tables. Only the auth module and the auth client
+    // that binds it to the app_auth login may import it — the move into src/lib/db must not
+    // hand the credential-table definitions to any other module. Relative imports count.
+    const hits = grep(
+      `-lE "(db/auth-schema|[.]/auth-schema)'" -- src ":!src/lib/auth/*" ":!src/lib/db/auth-client.ts"`,
+    );
+    expect(
+      hits,
+      `Better Auth table definitions imported outside the auth plane, in:\n${hits}`,
+    ).toBe('');
+  });
+
   it('no feature code queries the credential tables by hand', () => {
     const hits = grep(
       `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src ":!src/lib/auth/*"`,

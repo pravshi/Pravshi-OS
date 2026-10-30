@@ -13,7 +13,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as Sentry from '@sentry/nextjs';
-import { markWorkerProcess } from '@/lib/jobs/process-context';
+import { markWorkerProcess } from '@/lib/observability/process-context';
 import * as report from '@/lib/observability/report';
 
 type Event = {

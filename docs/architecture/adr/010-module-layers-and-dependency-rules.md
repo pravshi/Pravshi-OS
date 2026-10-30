@@ -15,16 +15,17 @@ relative paths and dynamic `import()` all resolved) shows:
 
   | Edge                           | Where                                                            |
   | ------------------------------ | ---------------------------------------------------------------- |
-  | `db → auth`                    | `src/lib/db/auth-client.ts` imports `@/lib/auth/schema`          |
-  | `observability → jobs`         | `src/lib/observability/report.ts` imports `jobs/process-context` |
-  | `audit → auth`                 | `src/lib/audit/log.ts` imports `auth/client-address`             |
-  | `auth ↔ invitations`           | `src/lib/auth/invitations.ts` ↔ `src/lib/invitations/service.ts` |
+  | `db → auth` — **removed, Step 4** | `src/lib/db/auth-client.ts` imported `@/lib/auth/schema`; the definitions now live in `src/lib/db/auth-schema.ts` |
+  | `observability → jobs` — **removed, Step 4** | `src/lib/observability/report.ts` imported `jobs/process-context`; the flag now lives in `src/lib/observability/process-context.ts` |
+  | `audit → auth` — **removed, Step 4** | `src/lib/audit/log.ts` imported `auth/client-address`; the trusted-header logic now lives in `src/lib/observability/client-address.ts` (Better Auth's option stays in `src/lib/auth/better-auth-ip.ts`) |
+  | `auth → invitations` — **removed, Step 4** | `src/lib/auth/invitations.ts` imported the token hash, accept schema and `InvitationError` from `invitations`; they now live in `src/lib/auth/invitation-contract.ts`, which `invitations` imports (a permitted downward edge) |
   | `jobs → domain modules`        | the worker entry (`runner.ts`, `handlers.ts`, `workflow-jobs.ts`) lives in `src/lib/jobs` |
   | `crm, work, integrations ↔ workflows` | event emission and workflow actions call each other directly |
   | `crm → integrations`           | `src/lib/crm/deals.ts` and `src/lib/crm/pipelines.ts` call `emitIntegrationEvent` (`integrations/fanout`) |
   | `work → integrations`          | `src/lib/work/tasks.ts` calls `emitIntegrationEvent` (`integrations/fanout`) |
 
-  Step 4 removes the first four edges and Step 5 the `jobs` edge. Step 6 removes the last three rows:
+  Step 4 removed the first four edges (the boundary guard's baseline went from 17 entries to 13)
+  and Step 5 removes the `jobs` edge. Step 6 removes the last three rows:
   `crm → workflows`, `work → workflows`, `integrations → workflows`, `crm → integrations` and
   `work → integrations` all become emissions through the `events` port (rule 4).
 

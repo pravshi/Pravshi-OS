@@ -97,11 +97,6 @@ type Rule = 'rule-1' | 'rule-2' | 'rule-3' | 'rule-5' | 'rule-7' | 'cycle';
 
 /** `<importing file> -> <target module> [<rule>]`, with the step that removes it. */
 const BASELINE: readonly string[] = [
-  // Step 4 — foundation cycles
-  'src/lib/db/auth-client.ts -> auth [rule-1]',
-  'src/lib/observability/report.ts -> jobs [rule-1]',
-  'src/lib/audit/log.ts -> auth [rule-1]',
-  'src/lib/auth/invitations.ts -> invitations [rule-1]',
   // Step 5 — the worker entry and handlers leave src/lib/jobs
   'src/lib/jobs/handlers.ts -> integrations [rule-5]',
   'src/lib/jobs/reminder-sweep.ts -> work [rule-5]',

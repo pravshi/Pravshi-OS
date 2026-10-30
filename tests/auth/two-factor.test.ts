@@ -9,7 +9,7 @@ import { createHmac } from 'node:crypto';
 import { auth, MIN_PASSWORD_LENGTH, sessionAssuranceFor } from '@/lib/auth/server';
 import { resolveAuthContext, revokeSessionsFor } from '@/lib/auth/session';
 import { authDb } from '@/lib/db/auth-client';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from '@/lib/db/auth-schema';
 
 /**
  * Drift guard: the expected authz-helper count is derived from the migration
