@@ -65,17 +65,18 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWorkerWithWake } from '../db/worker-pool';
-import type { Tx } from '../db/authorized';
-import type { Authorization } from '../authz/require-permission';
-import { claimJob, completeJob, failJob, heartbeatJob, startJob } from './queue';
+import { connectWorkerWithWake } from '@/lib/db/worker-pool';
+import type { Tx } from '@/lib/db/authorized';
+import type { Authorization } from '@/lib/authz/require-permission';
+import { claimJob, completeJob, failJob, heartbeatJob, startJob } from '@/lib/jobs/queue';
 import { sweepRetryableJobs } from './retry-sweeper';
 import { sweepDueTaskReminders } from './reminder-sweep';
 import { runDbMaintenance, sqlstateOf } from './maintenance';
 import { WakeLatch } from './wake-latch';
+import { getRegisteredHandler } from '@/lib/jobs/handler-registry';
 import type { LivenessReporter } from './liveness';
-import { backoffDelayMs, classifyError } from './retry';
-import { JOB_TYPE_SET, type Job, type JobType } from './types';
+import { backoffDelayMs, classifyError } from '@/lib/jobs/retry';
+import type { Job, JobType } from '@/lib/jobs/types';
 
 // ── Config & context ────────────────────────────────────────────────────────
 
@@ -184,47 +185,6 @@ export const MAX_DEEP_SLEEP_MS = 24 * 60 * 60 * 1000;
 /** deep-sleep: first back-off when nextDueAt() fails or a due item will not clear. */
 export const DEEP_SLEEP_ERROR_BACKOFF_MS = 30_000;
 
-export type JobHandler = (ctx: JobExecutionContext) => Promise<void>;
-
-export interface JobExecutionContext {
-  job: Job;
-  /** Org-scoped system-actor Authorization synthesized from the job row (§3.6). */
-  auth: Authorization;
-  /** Fires on SIGTERM/SIGINT so the handler can stop cooperatively. */
-  signal: AbortSignal;
-  /**
-   * The id this worker claimed the job under. Worker-plane readers bound to the
-   * held job (job_email_content_for_worker, 0069) check it against claimed_by.
-   */
-  workerId: string;
-}
-
-// ── Handler registry ────────────────────────────────────────────────────────
-
-const handlers = new Map<JobType, JobHandler>();
-
-/**
- * Register the handler for one job type. Throws on duplicate registration —
- * two handlers for one type is a wiring bug, never a merge.
- */
-export function registerHandler(type: JobType, handler: JobHandler): void {
-  if (!JOB_TYPE_SET.has(type)) {
-    throw new Error(`INVALID_REQUEST: unknown job type '${type}'`);
-  }
-  if (typeof handler !== 'function') {
-    throw new Error('INVALID_REQUEST: handler must be a function');
-  }
-  if (handlers.has(type)) {
-    throw new Error(`INVALID_REQUEST: handler already registered for job type '${type}'`);
-  }
-  handlers.set(type, handler);
-}
-
-/** Test/maintenance utility: clear the global handler registry. */
-export function resetHandlerRegistry(): void {
-  handlers.clear();
-}
-
 // ── System-actor Authorization (§3.6 actor authority rule) ───────────────────
 
 /**
@@ -325,7 +285,7 @@ async function executeJob(
   state: WorkerState,
 ): Promise<void> {
   const auth = buildJobAuthorization(job);
-  const handler = handlers.get(job.type);
+  const handler = getRegisteredHandler(job.type);
 
   if (!handler) {
     // No code path can ever succeed for this job — dead-letter it directly.

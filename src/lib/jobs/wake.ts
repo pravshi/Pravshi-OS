@@ -21,8 +21,8 @@
  *   - Inside the worker process it does nothing: the worker is already awake.
  */
 import { env } from '@/env';
+import { WAKE_TOKEN_HEADER } from './wake-token';
 import { isWorkerProcess, markWorkerProcess } from '@/lib/observability/process-context';
-import { WAKE_TOKEN_HEADER } from './wake-server';
 
 export { isWorkerProcess, markWorkerProcess };
 

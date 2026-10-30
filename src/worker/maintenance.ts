@@ -22,8 +22,8 @@
  */
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWorkerWithWake } from '../db/worker-pool';
-import type { Tx } from '../db/authorized';
+import { connectWorkerWithWake } from '@/lib/db/worker-pool';
+import type { Tx } from '@/lib/db/authorized';
 
 /** Rows per retention target per call. 0065 accepts 1..10000. */
 export const RETENTION_BATCH_DEFAULT = 5000;

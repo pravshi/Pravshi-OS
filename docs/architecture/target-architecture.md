@@ -109,6 +109,31 @@ foundation-cycles change (four moves, ADR-010); same environment, newly initiali
 | `pnpm test` (tests)                                       | 4,209 passed, 0 failed, 10 skipped  | 4,210 passed, 0 failed, 10 skipped (4,220: one new guard test, `single-db-path`, review F-S4-1) |
 | Module-boundary baseline                                  | 17 entries                          | 13 entries — the four foundation entries removed, none added                                    |
 
+**After Step 5** (queue/worker split; same environment, newly initialised cluster; base `7317406`):
+
+| Check                                                    | Step 4 (`09c4102`)                 | Step 5                                                                                              |
+| -------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                               | pass (lint: no warnings)                                                                            |
+| `pnpm guards`                                             | pass (1,051 files)                 | pass (secret scan clean; workflow secret flow 2 workflows)                                          |
+| `pnpm audit --audit-level=high`                           | pass                               | pass (documented ignores only)                                                                      |
+| `pnpm build`                                              | pass                               | pass — the route list (63 pages, 99 route handlers, `/_not-found`, middleware) is identical         |
+| Migrations from zero                                      | 88 of 88                           | 88 of 88; the 88 migration files, the journal and the 14 rollback scripts are byte-identical        |
+| `pnpm test` (files)                                       | 271 passed, 0 failed, 1 skipped    | 272 passed, 0 failed, 1 skipped (273 files: one new test file)                                      |
+| `pnpm test` (tests)                                       | 4,210 passed, 0 failed, 10 skipped | 4,213 passed, 0 failed, 10 skipped (4,223: the 3 tests of `handler-registry-wiring`)                |
+| Worker end-to-end suite (opt-in, `WPW_E2E=1`)             | not run                            | 7 of 7 passed in three runs on separate throwaway databases; one further attempt failed at setup (see below) |
+| Module-boundary baseline                                  | 13 entries                         | 8 entries — the four `jobs` rule-5 entries and the `jobs`↔`notifications` cycle entry removed, none added |
+
+The worker end-to-end suite was run four times. Runs 1 and 2 (before the review fixes) and run 4
+(on the final tree) each passed 7 of 7, with the worker's first log line within about 0.9 s of
+launch against the suite's 20 s window; the known start-up flake did not occur. Run 3 failed at
+setup (all 7 tests "not run") because rebuilding the disposable cluster for the final full-suite
+run had dropped the E2E database and regenerated the role passwords: a fault of the test
+environment, reported here rather than discarded. The worker also started from `src/worker/runner.ts`
+through the unchanged `pnpm worker` script on Node 22.22.0 (`.nvmrc` 22) as `app_worker`, ran every
+loop phase and shut down gracefully. Seven of the eight job types have a registered handler and
+each is exercised by its tests; `retry` is a job type with no handler on `main` either — retries
+are the retry sweeper's job (`src/worker/retry-sweeper.ts`) — and is pinned as such.
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 
@@ -192,6 +217,23 @@ ADR-009, ADR-010 and this document. Documentation only.
 - **Touches:** `src/lib/jobs`, `src/worker/` (new), `package.json` (`worker` script — a shared
   file), `scripts/worker-loader.mjs`, `scripts/worker-alias-hooks.mjs` (protected path), AGENTS.md
   §3 (rule file), DEPLOYMENT.md, and the guards and docs that name these paths.
+- **Result (implemented):** decided file by file from the import graph.
+  - _Stay in `src/lib/jobs` (queue core):_ `types`, `queue`, `wake`, `retry`, `audit`, `cron`,
+    `schedule-policy`, and two new small modules — `handler-registry` and `wake-token`. `cron` and
+    `audit` stay although the plan listed them for the worker: `queue.ts`, `schedule-policy.ts`,
+    `workflows` and `src/app` import them, and moving them would have made an L4 module import the
+    worker.
+  - _Moved to `src/worker/`:_ `runner`, `handlers`, `workflow-jobs`, `reminder-sweep`,
+    `retry-sweeper`, `scheduler`, `maintenance`, `liveness`, `worker`, `usage-estimate`,
+    `wake-latch`, `wake-server`.
+  - _Three cuts so no L4 module needs the worker:_ the handler registry out of `worker.ts` (so the
+    Sales Sheet import registers its handler without importing the worker); the static webhook-URL
+    (SSRF) guard out of `handlers.ts` into `integrations/webhook-url-guard.ts` (it validates
+    subscription URLs, so integrations owns it); the wake-token header constant out of
+    `wake-server.ts` into a zero-import module (the wake endpoint sits on the database-free
+    liveness path whose import list a guard pins). Each cut is verbatim.
+  - _`scripts/worker-alias-hooks.mjs` needed no change:_ it maps `@/` to `src/` generically;
+    `scripts/worker-loader.mjs` changed in a comment only.
 
 ### Step 6 — Domain events
 

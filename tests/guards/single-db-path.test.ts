@@ -32,11 +32,13 @@ describe('there is exactly one path to Postgres', () => {
     ).toBe('');
   });
 
-  it('only the worker plane (src/lib/jobs) uses the app_worker pool', () => {
+  it('only the worker plane (src/lib/jobs, src/worker) uses the app_worker pool', () => {
     // worker-pool.ts connects as app_worker (migration 0070): the role that can claim every
     // organization's jobs. Only the job runtime may reach it — never a route, a page or
     // feature code — and the web app does not even hold its credential (src/env.ts).
-    const hits = grep(`-lE "db/worker-pool'" -- src ":!src/lib/jobs/*" ":!src/lib/db/*"`);
+    const hits = grep(
+      `-lE "db/worker-pool'" -- src ":!src/lib/jobs/*" ":!src/worker/*" ":!src/lib/db/*"`,
+    );
     expect(hits, `app_worker pool imported outside the worker plane, in:\n${hits}`).toBe('');
   });
 
@@ -137,7 +139,7 @@ describe('there is exactly one path to Postgres', () => {
     // because the auth pool is created on first use and needs no configuration to load — pinned
     // by tests/db/auth-pool-config.test.ts and by the worker E2E starting without the variable.
     const hits = grep(
-      `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs src/lib/workflows`,
+      `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs src/worker src/lib/workflows`,
     );
     expect(hits, `worker-plane code imports the authentication plane, in:\n${hits}`).toBe('');
   });

@@ -70,17 +70,12 @@ vi.mock('drizzle-orm/neon-serverless', () => ({
   }),
 }));
 
-import {
-  buildJobAuthorization,
-  reapStaleJobs,
-  registerHandler,
-  resetHandlerRegistry,
-  runWorker,
-  SYSTEM_ACTOR_ID,
-} from '@/lib/jobs/worker';
+import { buildJobAuthorization, reapStaleJobs, runWorker, SYSTEM_ACTOR_ID } from '@/worker/worker';
+import { registerHandler, resetHandlerRegistry } from '@/lib/jobs/handler-registry';
 import { claimJob, completeJob, failJob, heartbeatJob, startJob } from '@/lib/jobs/queue';
 import type { Job } from '@/lib/jobs/types';
-import type { JobExecutionContext, WorkerConfig } from '@/lib/jobs/worker';
+import type { WorkerConfig } from '@/worker/worker';
+import type { JobExecutionContext } from '@/lib/jobs/handler-registry';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 

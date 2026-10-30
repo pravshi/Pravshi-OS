@@ -2,7 +2,7 @@
  * WP-W — WakeLatch: the worker's interruptible sleep. DB-free.
  */
 import { describe, expect, it } from 'vitest';
-import { WakeLatch } from '@/lib/jobs/wake-latch';
+import { WakeLatch } from '@/worker/wake-latch';
 
 describe('WakeLatch', () => {
   it('times out when nobody rings', async () => {

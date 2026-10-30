@@ -56,11 +56,11 @@
 
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWorkerWithWake, withWorkerContext } from '../db/worker-pool';
-import type { Tx } from '../db/authorized';
-import type { AuthContext } from '../db/context';
-import { isPgCode } from '../work/errors';
-import { notificationTitle } from '../notifications/emit';
+import { connectWorkerWithWake, withWorkerContext } from '@/lib/db/worker-pool';
+import type { Tx } from '@/lib/db/authorized';
+import type { AuthContext } from '@/lib/db/context';
+import { isPgCode } from '@/lib/work/errors';
+import { notificationTitle } from '@/lib/notifications/emit';
 
 /**
  * Nil UUID of the background system actor — the same value worker.ts

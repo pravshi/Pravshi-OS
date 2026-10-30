@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // handlers.ts registers its handlers at module load; stub the registry
 // (the handlers-ssrf.test.ts pattern) so importing it stays DB-free.
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ import {
 } from '@/lib/integrations/subscriptions';
 import { isIntegrationsError } from '@/lib/integrations/errors';
 import { decryptSecret, encryptSecret, serialiseEnvelope } from '@/lib/integrations/secrets';
-import { normalizeWebhookPayload } from '@/lib/jobs/handlers';
+import { normalizeWebhookPayload } from '@/worker/handlers';
 import { WebhookPayloadSchema } from '@/lib/jobs/types';
 import { ACTION_REGISTRY, REGISTRY_DEFERRED_ACTION_TYPES } from '@/lib/workflows/actions';
 import { ActionConfigSchema, WebhookActionParamsSchema } from '@/lib/workflows/schema';

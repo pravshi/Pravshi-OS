@@ -15,7 +15,7 @@
  * with no notification — pinned by the last actor test below.
  *
  * AUD-04: task reminders had storage + CRUD but no reader. P1b adds the
- * worker-plane sweep (src/lib/jobs/reminder-sweep.ts + the 0064 claim
+ * worker-plane sweep (src/worker/reminder-sweep.ts + the 0064 claim
  * definer): a due reminder is claimed (is_sent flips atomically) and
  * delivered as a TASK_DUE in-app notification to the reminder's owner,
  * through the notification family's definers, honouring the recipient's
@@ -49,9 +49,9 @@ type DealsSvc = typeof import('@/lib/crm/deals');
 type PipelinesSvc = typeof import('@/lib/crm/pipelines');
 type RemindersSvc = typeof import('@/lib/work/reminders');
 type PrefsSvc = typeof import('@/lib/notifications/preferences');
-type WorkerMod = typeof import('@/lib/jobs/worker');
-type HandlersMod = typeof import('@/lib/jobs/handlers');
-type SweepMod = typeof import('@/lib/jobs/reminder-sweep');
+type WorkerMod = typeof import('@/worker/worker');
+type HandlersMod = typeof import('@/worker/handlers');
+type SweepMod = typeof import('@/worker/reminder-sweep');
 type Job = import('@/lib/jobs/types').Job;
 
 /** A permission bundle for a real actor (all GLOBAL scope). */
@@ -350,9 +350,9 @@ describe.skipIf(!HAS_DB)('P1b domain-event notifications + reminder delivery (re
     pipelines = await import('@/lib/crm/pipelines');
     reminders = await import('@/lib/work/reminders');
     prefs = await import('@/lib/notifications/preferences');
-    ({ buildJobAuthorization } = await import('@/lib/jobs/worker'));
-    ({ handleNotification } = await import('@/lib/jobs/handlers'));
-    ({ sweepDueTaskReminders } = await import('@/lib/jobs/reminder-sweep'));
+    ({ buildJobAuthorization } = await import('@/worker/worker'));
+    ({ handleNotification } = await import('@/worker/handlers'));
+    ({ sweepDueTaskReminders } = await import('@/worker/reminder-sweep'));
 
     orgA = await mkOrg('a');
     orgB = await mkOrg('b');

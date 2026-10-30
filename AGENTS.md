@@ -53,6 +53,8 @@ enforced are the database (separate logins, forced RLS), the CI guards and human
     role and RLS policy;
   - `src/lib/**` (backend services, data access, auth, authz), except the shared
     `src/lib/utils.ts`;
+  - `src/worker/**` (the background worker plane: its entry point, job handlers, scheduler and
+    maintenance — ADR-010, redesign Step 5);
   - inside `src/app/`: `src/app/api/**`, every `route.ts`, every file starting with
     `'use server'`, and the server-side calls in pages and layouts (`withAuthorizedDb`,
     `withPermission`, `requirePermission`);

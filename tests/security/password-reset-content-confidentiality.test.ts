@@ -33,8 +33,8 @@ vi.mock('resend', () => ({
 import { env } from '@/env';
 import { mkAccount, mkDept, mkOrg, signIn, type Account } from '../authz/fixtures';
 import { requestPasswordReset, resetPassword } from '@/lib/auth/password-reset';
-import { handleEmail } from '@/lib/jobs/handlers';
-import { buildJobAuthorization } from '@/lib/jobs/worker';
+import { handleEmail } from '@/worker/handlers';
+import { buildJobAuthorization } from '@/worker/worker';
 import { classifyError } from '@/lib/jobs/retry';
 import type { Job } from '@/lib/jobs/types';
 import { GET as listJobsRoute } from '@/app/api/jobs/route';

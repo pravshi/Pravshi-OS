@@ -43,8 +43,8 @@ const tryImport = async <T>(path: string): Promise<T | null> => {
 
 type ServiceModule = typeof import('@/lib/notifications/service');
 type PrefsModule = typeof import('@/lib/notifications/preferences');
-type HandlersModule = typeof import('@/lib/jobs/handlers');
-type WorkerModule = typeof import('@/lib/jobs/worker');
+type HandlersModule = typeof import('@/worker/handlers');
+type WorkerModule = typeof import('@/worker/worker');
 type RetryModule = typeof import('@/lib/jobs/retry');
 type Job = import('@/lib/jobs/types').Job;
 type CreateInput = import('@/lib/notifications/service').CreateNotificationInput;
@@ -152,8 +152,8 @@ describe.skipIf(!HAS_DB)('notifications integration (§42)', () => {
   beforeAll(async () => {
     svc = await tryImport<ServiceModule>('@/lib/notifications/service');
     prefs = await tryImport<PrefsModule>('@/lib/notifications/preferences');
-    handlers = await tryImport<HandlersModule>('@/lib/jobs/handlers');
-    worker = await tryImport<WorkerModule>('@/lib/jobs/worker');
+    handlers = await tryImport<HandlersModule>('@/worker/handlers');
+    worker = await tryImport<WorkerModule>('@/worker/worker');
     retry = await tryImport<RetryModule>('@/lib/jobs/retry');
     if (!svc || !prefs || !handlers || !worker || !retry) return;
 

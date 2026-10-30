@@ -33,19 +33,19 @@ vi.mock('@/lib/jobs/queue', () => ({
   failJob: vi.fn(async () => undefined),
   heartbeatJob: vi.fn(async () => undefined),
 }));
-vi.mock('@/lib/jobs/retry-sweeper', () => ({
+vi.mock('@/worker/retry-sweeper', () => ({
   sweepRetryableJobs: vi.fn(async () => {
     touch('retry');
     return 0;
   }),
 }));
-vi.mock('@/lib/jobs/reminder-sweep', () => ({
+vi.mock('@/worker/reminder-sweep', () => ({
   sweepDueTaskReminders: vi.fn(async () => {
     touch('reminders');
     return { claimed: 0, delivered: 0, skipped: 0, failed: 0 };
   }),
 }));
-vi.mock('@/lib/jobs/maintenance', () => ({
+vi.mock('@/worker/maintenance', () => ({
   runDbMaintenance: vi.fn(async () => {
     touch('maintenance');
     return { partitions: null, retention: null };
@@ -72,13 +72,9 @@ vi.mock('drizzle-orm/neon-serverless', () => ({
   }),
 }));
 
-import {
-  MAX_DEEP_SLEEP_MS,
-  registerHandler,
-  resetHandlerRegistry,
-  runWorker,
-} from '@/lib/jobs/worker';
-import { WakeLatch } from '@/lib/jobs/wake-latch';
+import { MAX_DEEP_SLEEP_MS, runWorker } from '@/worker/worker';
+import { registerHandler, resetHandlerRegistry } from '@/lib/jobs/handler-registry';
+import { WakeLatch } from '@/worker/wake-latch';
 import { claimJob, completeJob } from '@/lib/jobs/queue';
 import type { Job } from '@/lib/jobs/types';
 

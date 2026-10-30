@@ -1,5 +1,5 @@
 /**
- * REL-11 — the worker-loop watchdog (src/lib/jobs/liveness.ts), driven by a fake monotonic
+ * REL-11 — the worker-loop watchdog (src/worker/liveness.ts), driven by a fake monotonic
  * clock: every check is deterministic and nothing here touches a database or a real timer
  * (except the one test that proves the timer is unref'd and reads a lagging clock).
  *
@@ -21,7 +21,7 @@ import {
   LivenessMonitor,
   STALL_CHECKS,
   type LivenessEvent,
-} from '@/lib/jobs/liveness';
+} from '@/worker/liveness';
 
 const BUDGETS = { passMs: 1_000, maintenanceMs: 5_000, jobMs: 10_000, graceMs: 500 };
 

@@ -13,7 +13,7 @@ import {
   WAKE_DEBOUNCE_MS,
   WAKE_FAILURE_BACKOFF_MS,
 } from '@/lib/jobs/wake';
-import { WAKE_TOKEN_HEADER } from '@/lib/jobs/wake-server';
+import { WAKE_TOKEN_HEADER } from '@/lib/jobs/wake-token';
 
 const TOKEN = 'client-test-token-0123456789-abcdefghij';
 

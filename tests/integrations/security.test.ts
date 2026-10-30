@@ -1148,7 +1148,7 @@ describe.skipIf(!HAS_DB)('integrations security (§4.7) — isolation, authoriza
     const { sql } = await import('drizzle-orm');
     const aliceManage = await authFor(aliceAcct, 'integrations.manage');
 
-    // Exactly the worker's resolution path (jobs/handlers.ts
+    // Exactly the worker's resolution path (worker/handlers.ts
     // resolveSubscriptionSigningSecret): the 0059 definer on the app_worker
     // connection (0070) under the system actor bound to the job's org, then
     // the vault decrypt.

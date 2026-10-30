@@ -39,7 +39,7 @@ describe.skipIf(!dbReady)('retry sweeper (live DB)', () => {
 
   beforeAll(async () => {
     if (!dbReady) return;
-    ({ sweepRetryableJobs } = await import('@/lib/jobs/retry-sweeper'));
+    ({ sweepRetryableJobs } = await import('@/worker/retry-sweeper'));
     orgId = await mkOrg(owner, `sweep-${RUN}`);
   }, 30_000);
 

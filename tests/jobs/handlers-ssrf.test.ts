@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -19,7 +19,7 @@ import {
   looksLikeIpv4Literal,
   parseIpv4Aton,
   parseIpv6Bytes,
-} from '../../src/lib/jobs/handlers';
+} from '../../src/lib/integrations/webhook-url-guard';
 
 describe('SSRF guard — blocked URLs (static check, no DNS)', () => {
   const blocked: Array<[string, string]> = [

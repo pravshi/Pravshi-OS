@@ -14,10 +14,10 @@ const JOB_HEARTBEAT_ALLOWLIST = new Set([
   'src/app/(app)/jobs/_components/JobActions.tsx',
   'src/app/(app)/jobs/_jobs.ts',
   'src/app/api/jobs/store.ts',
-  'src/lib/jobs/handlers.ts',
   'src/lib/jobs/queue.ts',
   'src/lib/jobs/types.ts',
-  'src/lib/jobs/worker.ts',
+  'src/worker/handlers.ts',
+  'src/worker/worker.ts',
 ]);
 
 describe('nothing defeats Neon autosuspend', () => {
@@ -58,9 +58,17 @@ describe('nothing defeats Neon autosuspend', () => {
   // and every monitor poll would keep Neon compute awake. Each file's complete import list is
   // pinned below, so a new dependency — in any import form — fails here and must be reviewed.
   const LIVENESS_PATH_IMPORTS: Record<string, string[]> = {
-    'src/lib/jobs/liveness.ts': [],
-    'src/lib/jobs/wake-latch.ts': [],
-    'src/lib/jobs/wake-server.ts': ['./liveness', './wake-latch', 'node:crypto', 'node:http'],
+    'src/worker/liveness.ts': [],
+    'src/worker/wake-latch.ts': [],
+    'src/worker/wake-server.ts': [
+      './liveness',
+      './wake-latch',
+      '@/lib/jobs/wake-token',
+      'node:crypto',
+      'node:http',
+    ],
+    // The wake-token constant is on that path too (imported by wake-server): no imports at all.
+    'src/lib/jobs/wake-token.ts': [],
   };
   /** Every module specifier in `code`: static, side-effect, dynamic, re-export and require. */
   const specifiersOf = (code: string): string[] => {

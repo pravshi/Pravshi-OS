@@ -76,9 +76,9 @@ vi.mock('@/lib/db/pool', () => ({
 
 // ── Imports under test ────────────────────────────────────────────────────────
 
-import { handleWorkflowRun, handleScheduledTrigger } from '@/lib/jobs/workflow-jobs';
+import { handleWorkflowRun, handleScheduledTrigger } from '@/worker/workflow-jobs';
 import type { Job } from '@/lib/jobs/types';
-import type { JobExecutionContext } from '@/lib/jobs/worker';
+import type { JobExecutionContext } from '@/lib/jobs/handler-registry';
 import { DB_READY, RUN, mkOrg, mkPerson, mkWorkflow, sqlstateOf } from '../workflows/helpers';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

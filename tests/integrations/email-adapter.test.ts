@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -29,7 +29,7 @@ import {
   type ResendSendFn,
   type ResendSendOutcome,
 } from '../../src/lib/integrations/providers/email/send';
-import { sendEmailViaProvider, type EmailProviderInput } from '../../src/lib/jobs/handlers';
+import { sendEmailViaProvider, type EmailProviderInput } from '../../src/worker/handlers';
 import { classifyError } from '../../src/lib/jobs/retry';
 import type { Job } from '../../src/lib/jobs/types';
 

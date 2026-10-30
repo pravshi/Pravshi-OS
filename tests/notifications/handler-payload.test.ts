@@ -6,7 +6,7 @@
  * is covered by the integration pass.
  */
 import { describe, expect, it } from 'vitest';
-import { normalizeNotificationPayload } from '@/lib/jobs/handlers';
+import { normalizeNotificationPayload } from '@/worker/handlers';
 
 describe('normalizeNotificationPayload — Phase 8 type/eventId', () => {
   it('reads type and eventId from data', () => {

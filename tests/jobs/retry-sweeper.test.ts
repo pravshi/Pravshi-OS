@@ -3,7 +3,7 @@
  * failure-resilience.test.ts: retryable failures parked in 'failed' with a
  * backoff next_run_at, but nothing automatically re-drove failed→pending).
  *
- * Real module under test: sweepRetryableJobs (src/lib/jobs/retry-sweeper.ts).
+ * Real module under test: sweepRetryableJobs (src/worker/retry-sweeper.ts).
  *
  * Mocked at the module boundary (repo convention, cf. failure-resilience.test.ts):
  *   - '@/lib/db/pool' → fake connectWithWake
@@ -151,7 +151,7 @@ vi.mock('drizzle-orm/neon-serverless', () => ({
 
 // ── Real modules under test ─────────────────────────────────────────────────
 
-import { sweepRetryableJobs } from '@/lib/jobs/retry-sweeper';
+import { sweepRetryableJobs } from '@/worker/retry-sweeper';
 import { canTransitionJob } from '@/lib/jobs/types';
 
 beforeEach(() => {

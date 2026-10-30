@@ -51,7 +51,7 @@
  *   errors — the dispatcher logs a warning and runs the engine inline.
  *
  *   Known follow-up (RESOLVED 2026-10-06): the worker's handleWorkflowRun
- *   (jobs/workflow-jobs.ts) now bypasses this dispatcher and calls
+ *   (worker/workflow-jobs.ts) now bypasses this dispatcher and calls
  *   runWorkflowsForEvent directly with a fully-stamped event, so the queue
  *   branch can never re-enter from the worker path. The flag is safe to
  *   enable wherever a Phase 6 worker is running.
@@ -152,7 +152,7 @@ function setFallbackDepth(auth: Authorization, depth: number): void {
  * never break because the queue is unavailable, and a caller without
  * `jobs.create` must not silently drop the event).
  *
- * Dynamic import, not static: this module is imported BY jobs/workflow-jobs.ts
+ * Dynamic import, not static: this module is imported BY worker/workflow-jobs.ts
  * (the handler calls dispatchWorkflowEvent), so a static import of the queue
  * would risk an import cycle and would pull the drizzle queue module into
  * every request path. The queue module loads lazily, only when the flag is on.

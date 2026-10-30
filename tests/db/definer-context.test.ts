@@ -37,7 +37,7 @@ const RUN = Math.random()
   .toUpperCase()
   .replace(/[^A-Z0-9]/g, 'X');
 
-/** The worker plane's person identity (src/lib/jobs/worker.ts). */
+/** The worker plane's person identity (src/worker/worker.ts). */
 const SYSTEM_ACTOR = '00000000-0000-4000-8000-000000000000';
 
 type Ctx = { personId: string; orgId: string };

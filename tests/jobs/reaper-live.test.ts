@@ -43,7 +43,7 @@ describe.skipIf(!dbReady)('stale-claim reaper (live DB)', () => {
 
   beforeAll(async () => {
     if (!dbReady) return;
-    ({ reapStaleJobs } = await import('@/lib/jobs/worker'));
+    ({ reapStaleJobs } = await import('@/worker/worker'));
     orgId = await mkOrg(owner, `reap-${RUN}`);
   }, 30_000);
 

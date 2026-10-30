@@ -12,7 +12,7 @@ Developer and operator documentation for the Integrations module (`src/lib/integ
 
 ### 1.1 The engines already existed; Phase 10 built the surface
 
-Phase 10 is a surface-and-state phase, not an engine phase. The Phase 6 jobs platform (`src/lib/jobs/*`) already provided the durable Postgres queue, dedup idempotency, exponential backoff with jitter, dead-letter + manual replay, the scheduler, and a production-grade outbound webhook delivery handler with an SSRF guard and HMAC signing. What was missing — and what Phase 10 built — is org-scoped integration state (connections, subscriptions, deliveries, inbound events), a credential vault, the first real email adapter, and the APIs/UI that drive the engines.
+Phase 10 is a surface-and-state phase, not an engine phase. The Phase 6 jobs platform (the queue core `src/lib/jobs/*` and the worker `src/worker/*`) already provided the durable Postgres queue, dedup idempotency, exponential backoff with jitter, dead-letter + manual replay, the scheduler, and a production-grade outbound webhook delivery handler with an SSRF guard and HMAC signing. What was missing — and what Phase 10 built — is org-scoped integration state (connections, subscriptions, deliveries, inbound events), a credential vault, the first real email adapter, and the APIs/UI that drive the engines.
 
 ```
 Settings → Integrations page (server component)
@@ -38,11 +38,11 @@ External sender
                connected_by principal
 
 Workflow `send_email` action / system mail
-  └─ `email` job → sendEmailViaProvider()   src/lib/jobs/handlers.ts
+  └─ `email` job → sendEmailViaProvider()   src/worker/handlers.ts
        └─ sendViaResend()                   src/lib/integrations/providers/email/send.ts
 ```
 
-Delivery, email and any future sync run in the **separate job worker process** (`pnpm worker` → `src/lib/jobs/runner.ts`), not in the web process. If no worker is running, jobs sit queued — queued is a real state, not an error, and neither the APIs nor the UI promise instant delivery.
+Delivery, email and any future sync run in the **separate job worker process** (`pnpm worker` → `src/worker/runner.ts`), not in the web process. If no worker is running, jobs sit queued — queued is a real state, not an error, and neither the APIs nor the UI promise instant delivery.
 
 ### 1.2 Module map — `src/lib/integrations/`
 
@@ -395,7 +395,7 @@ The true refusal reason lives only in the receipt row's `status` (`REJECTED_SIGN
 
 ### 8.1 The path
 
-Workflow `send_email` actions (Phase 8) and system mail enqueue Phase 6 `email` jobs; the worker's handler calls `sendEmailViaProvider()` (`src/lib/jobs/handlers.ts`), which selects the adapter from the deployment env `EMAIL_PROVIDER`:
+Workflow `send_email` actions (Phase 8) and system mail enqueue Phase 6 `email` jobs; the worker's handler calls `sendEmailViaProvider()` (`src/worker/handlers.ts`), which selects the adapter from the deployment env `EMAIL_PROVIDER`:
 
 | `EMAIL_PROVIDER` | Behaviour |
 |---|---|

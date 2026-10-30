@@ -66,8 +66,8 @@
 
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
-import { connectWorkerWithWake } from '../db/worker-pool';
-import type { Tx } from '../db/authorized';
+import { connectWorkerWithWake } from '@/lib/db/worker-pool';
+import type { Tx } from '@/lib/db/authorized';
 
 /** Maximum rows flipped per sweep call. Default 100. */
 export const RETRY_SWEEP_DEFAULT_LIMIT = 100;

@@ -14,7 +14,7 @@ import { assertIntegrationUuid, IntegrationsError } from './errors';
  * payload carries { subscriptionId, deliveryId, url, body } — the body is
  * the event envelope — and NEVER the subscription's signing secret (§4.5
  * [DECISION]: operators can read jobs.payload; the handler resolves and
- * decrypts the secret inside the worker, see jobs/handlers.ts + migration
+ * decrypts the secret inside the worker, see worker/handlers.ts + migration
  * 0059).
  *
  * ── EVENT CATALOGUE (V1) ─────────────────────────────────────────────────

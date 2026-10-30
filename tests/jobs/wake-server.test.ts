@@ -12,8 +12,9 @@ vi.mock('@/lib/db/pool', () => ({
   pool: {},
 }));
 
-import { WakeLatch } from '@/lib/jobs/wake-latch';
-import { startWakeServer, WAKE_TOKEN_HEADER, type WakeServer } from '@/lib/jobs/wake-server';
+import { WakeLatch } from '@/worker/wake-latch';
+import { startWakeServer, type WakeServer } from '@/worker/wake-server';
+import { WAKE_TOKEN_HEADER } from '@/lib/jobs/wake-token';
 
 const TOKEN = 'a'.repeat(20) + 'wake-token-for-tests-0123456789';
 

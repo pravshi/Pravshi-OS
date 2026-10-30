@@ -2,7 +2,7 @@
  * Worker process bootstrap for `pnpm worker`.
  *
  * Runs via `node --import ./scripts/worker-loader.mjs` BEFORE the TypeScript
- * entrypoint (src/lib/jobs/runner.ts) is evaluated, so it can:
+ * entrypoint (src/worker/runner.ts) is evaluated, so it can:
  *
  * 1. Load `.env` for local development when `dotenv` is available. dotenv is a
  *    devDependency and may be pruned from production images — absence is not
