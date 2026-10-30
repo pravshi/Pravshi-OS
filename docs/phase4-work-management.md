@@ -2,7 +2,7 @@
 
 Developer documentation for the Work Management module (`/api/work/*`). Phase 4 of Pravshi OS.
 
-> Status: DB (migration 0042) and core API routes are implemented. Subtask routes, reminder routes, UI pages, and CRM-integration UI are still in progress — anything not yet built is marked **TBD pending implementation**. This document tracks contracts, not aspirations: it only describes what the contract specifies or what the implementation contains.
+> Status: implemented. The database (migrations 0042, 0043 and the reminder delivery of 0064), the API routes under `/api/work/*`, the `/work` pages and the deal ↔ project link are all in the app. Subtasks are handled by server actions (`src/app/(app)/work/subtasks/actions.ts`) and the `subtask-list` component, not by a REST route. Where this document still describes a contract rather than the code, the code wins.
 
 ---
 
@@ -16,9 +16,9 @@ Work Management gives every org a lightweight project/task system that lives alo
 |---|---|
 | **Project** | A container for tasks. Optional `deal_id` links it to the CRM deal it delivers. Archived (not deleted) when finished — `is_archived`. |
 | **Task** | A unit of work. Has `status` (`todo` → `in_progress` → `done`), `priority` (`low`/`medium`/`high`/`urgent`), optional `due_date`, optional single assignee (`assignee_person_id`). A task may belong to a project, or be ungrouped (`project_id` NULL = backlog). |
-| **Subtask** | A task with `parent_task_id`. Subtasks inherit the parent's org and project; deleting a parent hard-deletes the whole subtree. **TBD pending implementation** (DB support exists; API routes `/api/work/tasks/[id]/subtasks` not yet built). |
+| **Subtask** | A task with `parent_task_id`. Subtasks inherit the parent's org and project; deleting a parent hard-deletes the whole subtree. Implemented through server actions and the task page; there is no `/api/work/tasks/[id]/subtasks` REST route. |
 | **Member** | A `people` row joined to a project via `project_members`, with `role_in_project` of `manager` or `member`. Project-level managers can manage that project's roster without holding the global `projects.manage_members` permission. |
-| **Reminder** | A scheduled nudge for a task (`task_reminders` per the contract). **TBD pending implementation** — table and API routes not yet built; no reminder processing exists. |
+| **Reminder** | A scheduled nudge for a task (`task_reminders`, migration 0043; delivery added by migration 0064). Created and listed through `/api/work/tasks/[id]/reminders` and deleted through `/api/work/tasks/[id]/reminders/[reminderId]`. |
 
 ### Design rules (from the contract)
 
@@ -92,7 +92,7 @@ Indexes: `(org_id)`, `(project_id)`, `(assignee_person_id)`, `(parent_task_id)`,
 
 ### `task_reminders`
 
-Contract: `(id, org_id, task_id, person_id, remind_at, is_sent, created_at)`. **TBD pending implementation** — not in migration 0042 yet.
+Table `task_reminders` (migration 0043): `id`, `org_id`, `task_id`, `person_id`, `remind_at`, `is_sent`, `created_at`. The insert policy pins `person_id` to the caller's own person.
 
 ### RLS summary (FORCE RLS, all tables)
 
@@ -138,8 +138,8 @@ Base path: `/api/work/*`. All routes require an authenticated session and go thr
 | DELETE | `/api/work/tasks/[id]` | `tasks.delete` | — | `200 { ok: true }` (soft delete: `deleted_at = now()`) |
 | POST | `/api/work/tasks/[id]/move` | `tasks.edit` | `{ status }` — kanban move; changes **only** status. Same-status move is a 200 no-op. Cross-project moves are forbidden here — use PATCH with `projectId` | `200 { ok, taskId, fromStatus, toStatus }` |
 | GET | `/api/work/tasks/mine` | `tasks.view` | `?search=&limit=&offset=&projectId=&status=&priority=&sort=&order=` — assignee forced to the caller's person id | `200 { rows, total, limit, offset }` |
-| *any* | `/api/work/tasks/[id]/subtasks` | — | — | **TBD pending implementation** |
-| *any* | `/api/work/tasks/[id]/reminders` | — | — | **TBD pending implementation** |
+| *any* | `/api/work/tasks/[id]/subtasks` | — | — | Not a REST route — subtasks use server actions |
+| *any* | `/api/work/tasks/[id]/reminders` | GET, POST | — | Implemented; `DELETE` is on `/reminders/[reminderId]` |
 
 Task row shape: `{ id, projectId, projectName, title, description, status, priority, dueDate, assigneePersonId, assigneeName, createdBy, createdAt, updatedAt }`. Member row shape: `{ personId, name, roleInProject }` (ordered by `added_at`).
 
@@ -186,9 +186,9 @@ Key rules:
 
 ## 5. UI guide
 
-> **TBD pending implementation** — no `/work` pages exist in the app yet. The notes below describe the intended surface from the contract so the UI agent builds against it; do not treat them as shipped.
+> Implemented — the pages below exist under `src/app/(app)/work`.
 
-Planned pages (routes TBD):
+Pages:
 
 - **Projects list** — table/cards of projects with search, archived toggle, create-project action.
 - **Project detail** — task kanban + members tab + settings (rename, archive).
@@ -200,7 +200,7 @@ Three columns driven by task `status`: **To do** (`todo`), **In progress** (`in_
 
 ### Keyboard shortcuts
 
-**TBD pending implementation** — no shortcuts are defined yet. (Suggested candidates for the UI agent: `n` new task, `/` focus search, `1/2/3` filter by status column, `?` shortcut help. Not specified by the contract.)
+No global keyboard shortcuts are defined. (Task cards handle keyboard activation; see `src/app/(app)/work/_components/TaskCard.tsx`.)
 
 ---
 
@@ -213,7 +213,7 @@ The CRM seam is `work_projects.deal_id` → `deals.id`:
 - A deal **hard-delete nulls** `deal_id` (`ON DELETE SET NULL`) — project history survives the deal.
 - Query direction is project-first: find projects by deal via the `(org_id, deal_id)` index. No deal→project FK exists on the CRM side.
 
-CRM-integration UI (e.g. "create project from deal" on the deal page) is **TBD pending implementation**.
+The deal ↔ project link is implemented: `GET`, `POST` and `DELETE` on `/api/work/projects/[id]/link-deal`, and the `linked-deal-section` component.
 
 ---
 
@@ -235,4 +235,4 @@ Phase 4 specifics:
 - RLS/tenant isolation: test cross-org writes expect `42501` (task → project, task → assignee, subtask → parent, member → project/person, project → deal) and read probes across orgs expect 404.
 - Soft-delete paths: `crm_soft_delete('work_project' | 'work_task' | 'task', id)` — requires the corresponding delete permission; without it the M1 probe raises `42501`.
 - API: exercise the routes in §3 with a session holding each role in §4 to verify the matrix (especially creator-delete of tasks without `tasks.delete`, and project-level manager membership management without `projects.manage_members`).
-- Phase 4 test files themselves are **TBD pending implementation** — the QA agent is still writing them. When they land, run the Phase 4 subset with `pnpm test tests/work` (adjust path to where the QA agent places them) and `pnpm e2e` for the work-management specs.
+- Tests: `tests/work` holds `validation.test.ts` and shared helpers (`pnpm test tests/work`). The database and row-level-security behaviour is covered in `tests/db/work-projects.test.ts`, `tests/db/work-rls.test.ts` and `tests/db/work-tasks.test.ts`, which need a migrated database. `pnpm e2e` runs the browser specs and is opt-in.

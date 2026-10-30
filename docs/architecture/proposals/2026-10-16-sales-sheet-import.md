@@ -1,6 +1,11 @@
 # Sales Sheet import into the CRM — requirements proposal
 
-**Status: PROPOSAL — pending founder review. Not approved. Nothing here is implemented.**
+**Status: SUPERSEDED — kept for the requirements and open questions.** The import is built
+(migrations 0081 and 0088; `src/lib/import/sales-sheet`; `/api/crm/imports`) against a
+representative mapping only, per [2026-10-25-sales-sheet-import-implementation.md](./2026-10-25-sales-sheet-import-implementation.md),
+[2026-10-27-sales-sheet-import-policies.md](./2026-10-27-sales-sheet-import-policies.md) and [ADR-008](../adr/008-v1-platform-and-import-decisions.md).
+The real source-column mapping has not been supplied, so validation against the real sheet is
+**pending**.
 Date: 2026-10-16 · Baseline: `main` @ `2e2d725` · Decision:
 [ADR-007](../adr/007-v1-founder-product-decisions.md) BP-06 (the import is in the V1 launch scope)
 

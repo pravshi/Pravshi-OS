@@ -11,6 +11,11 @@ assumption, intention, or partial progress.
 Statuses below are initialised honestly from that day's facts and updated in
 place as evidence lands.
 
+> **Not re-verified since 2026-10-09.** Since then migrations 0063–0088 and the platform console
+> landed, and no deployment, hosted-database or bootstrap gate (HG-1…HG-9) has been performed.
+> Treat every row as the 2026-10-09 record and re-verify each against the current `main` before
+> go-live; do not read a row marked NOT MET or NOT RUN as updated.
+
 | #   | Item                                                                                                                                                                                                                    | Owner           | Evidence source                                                                                         | Status                                                                                                                                                                                                                                                       |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1   | Phases 1–13 implementation complete; release commit's CI fully green (guards + ci + direct-push-audit).                                                                                                                 | CI              | GitHub Actions runs on the release commit                                                               | **NOT MET** — Phases 1–12 released, main green at `46464563` (2026-10-09); Phase 13 release commit pending (F-13-01)                                                                                                                                       |

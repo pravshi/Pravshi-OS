@@ -6,13 +6,16 @@ Postgres does not enforce RLS against a table's owner, or against any role holdi
 `BYPASSRLS`. An application connected as either one has policies that look correct, review
 as correct, and do nothing at all. The role split exists so that failure cannot happen.
 
-| Role        | Purpose                                                                                  | Owns tables | Credential lives in                                    |
-| ----------- | ---------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------ |
-| `app_owner` | Schema owner, migrations only                                                            | Yes         | GitHub Actions and local machines ONLY                 |
-| `app_user`  | **Application runtime**                                                                  | **No**      | `DATABASE_URL` — local, and Vercel when it exists      |
-| `app_admin` | First-run bootstrap only: EXECUTE on `public.bootstrap_organization()`, and nothing else | No          | `DATABASE_URL_BOOTSTRAP` — the operator's machine only |
+| Role           | Purpose                                                                                                                                                    | Owns tables | Credential lives in                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------- |
+| `app_owner`    | Schema owner, migrations only                                                                                                                              | Yes         | GitHub Actions and local machines ONLY                         |
+| `app_user`     | **Application runtime**                                                                                                                                    | **No**      | `DATABASE_URL` — local, and Vercel when it exists              |
+| `app_admin`    | First-run bootstrap only: EXECUTE on `public.bootstrap_organization()`, and nothing else                                                                   | No          | `DATABASE_URL_BOOTSTRAP` — the operator's machine only         |
+| `app_worker`   | Background worker plane: EXECUTE on the worker-plane functions (migration 0070), no table privileges                                                       | No          | `DATABASE_URL_WORKER` — the worker host only, never Vercel     |
+| `app_auth`     | Authentication plane: Better Auth, the credential store (`auth` schema) and the pre-login functions (migrations 0072/0073); nothing in the business schema | No          | `DATABASE_URL_AUTH` — the web app only, never the worker host  |
+| `app_platform` | Platform administrator plane: USAGE on schema `platform` and EXECUTE on the platform functions (migration 0083, ADR-008); no table privileges              | No          | `DATABASE_URL_PLATFORM` — only where the platform console runs |
 
-All three are created `login nobypassrls`, and `roles.sql` asserts that none holds
+All six are created `login nobypassrls`, and `roles.sql` asserts that none holds
 `BYPASSRLS`, `SUPERUSER`, `CREATEROLE` or `CREATEDB`. The assertion raises and aborts if any
 does. `CREATEROLE` and `CREATEDB` are asserted as defence in depth, not as known RLS
 bypasses.

@@ -1,7 +1,7 @@
 # Organization types and templates — design, proposals and review
 
 **Status:** the mechanism (migration **0080**, journal idx 79 — renumbered from 0078, see R1)
-is IMPLEMENTED and LOCALLY VERIFIED (committed locally, unpushed). Everything marked
+is IMPLEMENTED and LOCALLY VERIFIED (merged to `main`; verified on disposable local PostgreSQL only, not Neon). Everything marked
 **PROPOSAL** below is a recommendation for the founder, not an approved business decision.
 Industry-specific CRM functionality (Real Estate, Education) is deferred to the agreed point
 before V1 Pro Max; both types stay DISABLED until then.

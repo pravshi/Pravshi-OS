@@ -1,6 +1,9 @@
 # Platform Super Admin and organization provisioning — architecture proposal
 
-**Status: PROPOSAL — pending founder review. Not approved. Nothing here is implemented.**
+**Status: SUPERSEDED — kept for the reasoning.** The V1 minimum in
+[2026-10-27-platform-administration-v1-minimum.md](./2026-10-27-platform-administration-v1-minimum.md)
+was approved in [ADR-008](../adr/008-v1-platform-and-import-decisions.md) and is built (migrations 0083–0087, the `/platform` console, the
+`app_platform` login). Where this original proposal differs from the ADR, the ADR wins.
 Date: 2026-10-16 · Baseline: `main` @ `2e2d725` · Decision context:
 [ADR-007](../adr/007-v1-founder-product-decisions.md) (GOV-02, GOV-03, GOV-04)
 

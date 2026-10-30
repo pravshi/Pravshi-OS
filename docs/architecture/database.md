@@ -1,7 +1,11 @@
 # PRAVSHI OS — Database Architecture & ERD
 
 Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-master-blueprint.md).
-Neon Postgres (branch per environment). **No code has been written; this is the design.**
+Neon Postgres (branch per environment). **Baseline design document (written 2026-09, before implementation).** V1 was built as the
+multi-tenant Business OS ([ADR-006](adr/006-v1-scope-business-os.md)); the HR and operations
+sections are deferred. For the current schema read `drizzle/` (migrations 0000–0088); for the
+current roles, RLS and guards read [SECURITY.md](../../SECURITY.md) and `tests/guards/`. Where
+this document and the code disagree, the code is right.
 
 ---
 
