@@ -389,6 +389,17 @@ Database migrations: 0063–0088 (production still pending — see the
 
 ### Changed
 
+- Git workflow: verified milestones go directly to `main` as fast-forward pushes; pull requests
+  stay for high-risk, security-sensitive and migration work and for any change to CI, scripts,
+  guards, dependencies, shared files or the agent rules. The `direct-push-audit` check now passes
+  a direct push only as a fast-forward with no protected-path change, no CI-skip marker and a
+  successful `ci` run of its own, and passes a merged PR only when it was merged into `main`
+  (PR #101). It remains detection, not prevention.
+- Documentation brought in line with what V1 built: README status and contents, the database
+  roles in SECURITY.md, migration counts and rollback scripts in DEPLOYMENT.md, the Work
+  Management and bootstrap documents, and honest status banners on superseded proposals and on
+  the pre-implementation architecture documents. The finished Phase 0 plan and the unused
+  `src/modules` placeholder README were removed.
 - V1 scope recorded ([ADR-006](docs/architecture/adr/006-v1-scope-business-os.md)): V1 is the
   multi-tenant Business OS that was built. The 2026-09-06 HR and operations blueprint is preserved
   as a deferred, separate future product scope and is no longer a V1 acceptance criterion; its

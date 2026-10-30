@@ -40,8 +40,10 @@ Create `dev/<yourname>` from the development project's default branch in the Neo
 then set `DATABASE_URL`, `DATABASE_URL_TEST` and `DATABASE_URL_MIGRATE` to point at it.
 See [ENVIRONMENT.md](ENVIRONMENT.md) for which role and endpoint each one takes.
 
-Your branch inherits `app_owner`, `app_user` and `app_admin` from its parent, with their
-passwords. If you need branch-local credentials, reset the role's password on **your**
+Your branch inherits the six logins (`app_owner`, `app_user`, `app_admin`, `app_worker`,
+`app_auth` and `app_platform`) from its parent, with their passwords. Sign-in needs
+`DATABASE_URL_AUTH`; the worker needs `DATABASE_URL_WORKER` and the platform console needs
+`DATABASE_URL_PLATFORM` (see [ENVIRONMENT.md](ENVIRONMENT.md)). If you need branch-local credentials, reset the role's password on **your**
 branch — Neon scopes that to the branch and leaves the parent untouched.
 
 Provisioning a brand-new development project from empty follows the same order as CI:

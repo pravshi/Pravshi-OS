@@ -6,7 +6,7 @@
 > are not V1 acceptance criteria. The rest of this document is kept unchanged as the historical plan.
 
 Companion to the [Master Blueprint](../superpowers/specs/2026-09-06-pravshi-os-master-blueprint.md).
-**Phase order confirmed by the founder on 2026-09-06 and fixed. No application code has been written.**
+**Phase order confirmed by the founder on 2026-09-06 and fixed.** (Written before implementation; all thirteen phases were later built — see [README.md](../../README.md).)
 
 > **The order below is not to be changed.** Sales (Phase 3) is the immediate business priority, and
 > Projects & Tasks (Phase 4) follows it. Any future proposal to resequence needs an explicit founder

@@ -1,10 +1,10 @@
 # Platform provisioning — readiness and decision register
 
-**Status:** DECISIONS PENDING. Nothing in the platform package is implemented, and none of it may
-be until the founder approves the proposal
-([2026-10-16-platform-super-admin.md](./2026-10-16-platform-super-admin.md)) — ADR-007 (GOV-03)
-and the proposal both say so, and each package then needs its own approval. This document does
-not decide anything. It separates what is **already decided**, what **can proceed without a new
+**Status: SUPERSEDED — kept as the decision register of 2026-10-26.** The founder approved the
+platform direction in [ADR-008](../adr/008-v1-platform-and-import-decisions.md) and the platform console is built (migrations 0083–0087).
+What remains gated is operational, not design: hosted-database rehearsal, production migration,
+DNS, email configuration and the platform administrator bootstrap each need their own approval.
+The text below is the original register and does not decide anything. It separates what is **already decided**, what **can proceed without a new
 decision**, and what **is blocked on one**, and it states the first-bootstrap choice (K8) as the
 decision it is.
 

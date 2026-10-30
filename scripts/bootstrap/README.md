@@ -105,7 +105,9 @@ Content-Type: application/json
 | 200    | `{"status":"COMPLETED"}`                                                                                 | The login exists and is linked. Sign in normally                                        |
 | 400    | `{"error":"SETUP_TOKEN_INVALID"}`                                                                        | Unknown, expired or already used — deliberately indistinguishable                       |
 | 400    | `{"error":"PASSWORD_TOO_SHORT"}` / `PASSWORD_TOO_LONG`, with `minPasswordLength` and `maxPasswordLength` | Better Auth's password policy (12 to 128 today)                                         |
+| 400    | `{"error":"PASSWORD_TOO_COMMON"}` / `PASSWORD_BREACHED`                                                  | The shared password policy: the common-password list and the breach-list check          |
 | 400    | `{"error":"INVALID_REQUEST"}`                                                                            | The body is not exactly a `token` string and a `password` string                        |
+| 429    | `{"error":"RATE_LIMITED"}`                                                                               | More than 5 attempts a minute from one address                                          |
 | 403    | `{"error":"FORBIDDEN_ORIGIN"}`                                                                           | A browser request from another origin                                                   |
 | 409    | `{"error":"SETUP_CANNOT_COMPLETE"}`                                                                      | The person already has a login, or one exists for the email. The token was not consumed |
 | 413    | `{"error":"INVALID_REQUEST"}`                                                                            | The body is over 4 KB                                                                   |
@@ -147,10 +149,11 @@ or attributing the grant to the new owner — would make its one irreplaceable p
 ## Deliberately not here
 
 - **No re-issue.** A bounded, pre-completion re-issue would be a new founder decision.
-- **No rate limit on the completion endpoint.** The token carries 256 bits; malformed and dead
-  tokens are refused before any password is hashed, so the endpoint is no CPU sink; and it is
-  inert once the token is used or expired.
-- **No breach-list password check.** Blueprint §25 requires one and it is not implemented
-  anywhere yet; when it lands it must cover this path as well.
+- **Rate limited:** 5 attempts a minute per client address, checked first. The token also
+  carries 256 bits; malformed and dead tokens are refused before any password is hashed, so the
+  endpoint is no CPU sink; and it is inert once the token is used or expired.
+- **Password policy:** the full shared policy applies (length, the common-password list and the
+  breach-list check), the same as reset, change, invitation and platform setup. The breach-list
+  lookup fails open when the service is unreachable; a guard test pins that behaviour.
 - **No MFA enforcement.** Mandatory TOTP for SUPER_ADMIN is enforced by `requirePermission()` in
   Task 1.15.
