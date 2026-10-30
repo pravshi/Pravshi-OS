@@ -10,9 +10,9 @@ name: direct-push-audit
 # scripts/ci/verify-pr-merge.mjs; policy: CONTRIBUTING.md):
 #   - it arrived through a merged pull request; or
 #   - it is a direct milestone push that is a plain fast-forward, whose range touches no
-#     protected control file (.github/, scripts/ci/, scripts/guards/, scripts/db/, drizzle/,
-#     scripts/migrate-ws.mjs) and asks for no CI skip, and whose own `ci` run completed
-#     successfully. This job waits for that run; it does not replace it, and `ci` stays
+#     protected file (PROTECTED_PATHS in scripts/ci/verify-pr-merge.mjs: CI, scripts, guards,
+#     dependencies and tool configuration, migrations, shared files, agent rules) and asks for
+#     no CI skip, and whose own `ci` run completed successfully. This job waits for that run; it does not replace it, and `ci` stays
 #     mandatory and unchanged.
 # There is no actor- or identity-based bypass. A verdict never comes from the commit message.
 

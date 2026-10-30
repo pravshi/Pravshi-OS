@@ -26,24 +26,31 @@
 //
 // There is deliberately no identity-based bypass: no actor, bot or token is trusted.
 //
-// KNOWN LIMITS (documented, not hidden):
-//   - A pusher with write access can still push; the result is a red run, not a refusal.
-//   - The push-triggered workflow runs the code of the pushed commit, so a malicious push
-//     that edits this script or the workflow could make its own audit pass. Rule (d) makes
-//     such an edit a failure under the honest script and keeps it in the visible diff, but
-//     it cannot stop a hostile pusher. This audit protects against mistakes and unnoticed
-//     drift, not against an attacker with write access.
-//   - GitHub does not run push workflows for a commit whose message carries a skip marker,
-//     so that commit is never audited here (rule (c) only flags such a commit when a later
-//     push's range contains it).
-//   Branch protection (a required `ci` check and no direct pushes) is the real control. It is
-//   a repository setting that only the founder can change.
+// KNOWN LIMITS (documented, not hidden). This is DETECTION after the fact, not a safeguard
+// against a hostile pusher with write access:
+//   - The push is not prevented; the result is a red run. Vercel may deploy main before the
+//     audit finishes.
+//   - The push-triggered workflow runs the code of the pushed commit. A push that edits or
+//     deletes this script or the workflow, changes its `on:`, or deletes ci.yml can make its own
+//     audit pass or never run. Rule (d) flags such a range under the honest script; it cannot
+//     stop a hostile one. A push made with GITHUB_TOKEN triggers no workflow at all.
+//   - A tip commit carrying a skip marker triggers neither `ci` nor this audit: a complete,
+//     silent bypass of both. Rule (c) only flags a skip marker on a NON-tip commit of a range,
+//     because each range starts at the previous tip and so never re-reads an earlier push.
+//   - The audit trusts `event.before` as a known-good base. A push that failed its audit does
+//     not poison later pushes: a clean fast-forward after it can be green.
+//   - The PR path checks the merge, not review or CI on the PR: a self-merged red PR passes.
+//   - Net-diff blindness: a range that adds and then reverts a protected change shows nothing.
+//   - The compare API's own limits (100 commits, 300 files per call) are enforced fail-closed.
+//   A scheduled sweep from main (or branch protection with a required `ci` check) is the way to
+//   close the silent cases; branch protection is a repository setting only the founder can
+//   change.
 
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Decide whether `sha` arrived through a merged pull request.
+ * Decide whether `sha` is the merge result, into main, of a merged pull request.
  *
  * @param {string} sha    the pushed commit
  * @param {Array}  pulls  response of GET /repos/{o}/{r}/commits/{sha}/pulls
@@ -53,34 +60,67 @@ export function isFromMergedPr(sha, pulls) {
   if (!Array.isArray(pulls) || pulls.length === 0) {
     return { ok: false, reason: 'no pull request is associated with this commit' };
   }
+  let merged = false;
   for (const pr of pulls) {
     if (!pr?.merged_at) continue; // open or closed-unmerged proves nothing
-    if (pr.merge_commit_sha === sha) {
-      return { ok: true, reason: `merge commit of merged PR #${pr.number}` };
+    merged = true;
+    // A PR merged into some other branch must not vouch for a commit pushed to main, and the
+    // pushed commit must be that PR's own merge result (merge, squash or rebase tip).
+    if (pr.base?.ref === 'main' && pr.merge_commit_sha === sha) {
+      return { ok: true, reason: `merge result of PR #${pr.number} into main` };
     }
-    // Squash and rebase merges: GitHub still associates the resulting commit with the PR.
-    return { ok: true, reason: `commit associated with merged PR #${pr.number}` };
   }
-  return { ok: false, reason: 'associated pull request(s) exist but none is merged' };
+  return {
+    ok: false,
+    reason: merged
+      ? "associated merged PR(s) are not this commit's merge into main"
+      : 'associated pull request(s) exist but none is merged',
+  };
 }
 
 /**
  * Paths a direct push may not touch. Prefixes end with "/"; the rest are exact files.
- * These are the controls themselves and the changes the founder routes through a PR:
- * CI, the guards, migrations, roles and the migration runner.
+ * These are the controls themselves and what CI executes or trusts, plus the changes the
+ * founder routes through a PR (shared files, dependencies, migrations, roles, agent rules).
+ * Matching is case-insensitive.
  */
 export const PROTECTED_PATHS = [
+  // CI, guards and the scripts they and the build run
   '.github/',
-  'scripts/ci/',
-  'scripts/guards/',
-  'scripts/db/',
+  'scripts/',
+  'tests/ci/',
+  'tests/guards/',
+  'tests/setup.ts',
+  // what CI executes and trusts: dependencies, lifecycle scripts, runtime and tool configuration
+  'package.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  '.npmrc',
+  '.nvmrc',
+  'patches/',
+  'vitest.config.mts',
+  'tsconfig.json',
+  'eslint.config.mjs',
+  'next.config.ts',
+  'playwright.config.ts',
+  'vercel.json',
+  // migrations, roles and the shared security entry points the founder decides
   'drizzle/',
-  'scripts/migrate-ws.mjs',
+  'src/middleware.ts',
+  'src/env.ts',
+  // the agent rules (AGENTS.md §3: the founder decides)
+  'AGENTS.md',
+  'CLAUDE.md',
+  '.claude/',
+  '.agents/',
 ];
 
 export function isProtectedPath(path) {
-  const p = String(path).replace(/\\/g, '/').replace(/^\.\//, '');
-  return PROTECTED_PATHS.some((entry) => (entry.endsWith('/') ? p.startsWith(entry) : p === entry));
+  const p = String(path).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  return PROTECTED_PATHS.some((entry) => {
+    const e = entry.toLowerCase();
+    return e.endsWith('/') ? p.startsWith(e) : p === e;
+  });
 }
 
 // GitHub documents these markers; any of them in a commit message suppresses push workflows.
@@ -90,8 +130,8 @@ export function hasSkipCiMarker(message) {
   return SKIP_CI.test(String(message ?? ''));
 }
 
-/** GitHub caps the compare API at 250 commits and 300 files; beyond that the view is partial. */
-export const COMPARE_COMMIT_CAP = 250;
+/** One compare call returns at most 100 commits (per_page) and 300 files; beyond that it is partial. */
+export const COMPARE_COMMIT_CAP = 100;
 export const COMPARE_FILE_CAP = 300;
 
 const ZERO_SHA = /^0{40}$/;
@@ -154,8 +194,15 @@ export function evaluatePushRange({ forced, before, compare }) {
 export function evaluateCiRuns(runsForSha, coveredByLaterSuccess = false) {
   const runs = Array.isArray(runsForSha) ? runsForSha : [];
   if (runs.length === 0) return { state: 'wait', reason: 'no ci run for this commit yet' };
-  if (runs.some((r) => r.status === 'completed' && r.conclusion === 'success'))
-    return { state: 'pass', reason: 'ci completed successfully for this commit' };
+  if (runs.some((r) => r.status === 'completed' && r.conclusion === 'success')) {
+    const failed = runs.filter((r) => r.status === 'completed' && r.conclusion === 'failure');
+    return {
+      state: 'pass',
+      reason:
+        'ci completed successfully for this commit' +
+        (failed.length ? ` (after ${failed.length} earlier failed run(s) of the same commit)` : ''),
+    };
+  }
   if (runs.some((r) => r.status !== 'completed'))
     return { state: 'wait', reason: 'ci is still running for this commit' };
   // Every run is completed and none succeeded.
@@ -172,19 +219,29 @@ export function evaluateCiRuns(runsForSha, coveredByLaterSuccess = false) {
  * parsed JSON or throws; `sleep` and `now` are injectable so the polling is testable.
  */
 export async function auditCommit({ api, sha, before, forced, sleep, now = Date.now, waitMs }) {
+  const SHA = /^[0-9a-f]{40}$/;
+  if (!SHA.test(String(sha))) throw new Error('COMMIT_SHA is not a 40-character hex SHA');
+  if (before && !SHA.test(String(before)))
+    throw new Error('BEFORE_SHA is not a 40-character hex SHA');
   const pulls = await api(`/commits/${sha}/pulls`);
   const viaPr = isFromMergedPr(sha, pulls);
   if (viaPr.ok) return { ok: true, path: 'pr', reason: viaPr.reason };
 
   const compare =
-    !before || ZERO_SHA.test(before) ? null : await api(`/compare/${before}...${sha}`);
+    !before || ZERO_SHA.test(before)
+      ? null
+      : await api(`/compare/${before}...${sha}?per_page=${COMPARE_COMMIT_CAP}`);
   const range = evaluatePushRange({ forced, before, compare });
   if (!range.ok) return { ok: false, path: 'direct', reason: range.reason };
 
   const deadline = now() + waitMs;
   for (;;) {
-    const body = await api(`/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&per_page=20`);
-    const runs = (body?.workflow_runs ?? []).filter((r) => r.head_sha === sha);
+    const body = await api(
+      `/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=20`,
+    );
+    const runs = (body?.workflow_runs ?? []).filter(
+      (r) => r.head_sha === sha && r.head_branch === 'main',
+    );
     let covered = false;
     if (
       runs.length > 0 &&

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -95,7 +97,7 @@ describe('direct milestone push: the static range verdict', () => {
 
   it('matches protected paths by prefix, not by substring', () => {
     expect(isProtectedPath('docs/.github/notes.md')).toBe(false);
-    expect(isProtectedPath('scripts/migrate-ws.mjs.bak')).toBe(false);
+    expect(isProtectedPath('scriptsx/migrate-ws.mjs')).toBe(false);
     expect(isProtectedPath('.\\.github\\workflows\\ci.yml')).toBe(true);
     expect(PROTECTED_PATHS).toContain('.github/');
   });
@@ -131,8 +133,13 @@ describe('direct milestone push: the ci verdict', () => {
     expect(evaluateCiRuns(cancelled, true).state).toBe('pass');
   });
 
-  it('a later green rerun does not hide a real failure of the same commit being green first', () => {
-    // One success among several runs of the same commit passes; failures alone never do.
+  it('a green rerun of the same commit passes but names the earlier failed run; failures alone never pass', () => {
+    const green = evaluateCiRuns([
+      { status: 'completed', conclusion: 'failure' },
+      { status: 'completed', conclusion: 'success' },
+    ]);
+    expect(green.state).toBe('pass');
+    expect(green.reason).toMatch(/earlier failed run/);
     expect(
       evaluateCiRuns([
         { status: 'completed', conclusion: 'failure' },
@@ -164,6 +171,7 @@ function fakeApi(routes: Array<[RegExp, Reply]>) {
 
 const run = (over: Record<string, unknown> = {}) => ({
   head_sha: SHA,
+  head_branch: 'main',
   status: 'completed',
   conclusion: 'success',
   ...over,
@@ -174,7 +182,17 @@ const base = { sha: SHA, before: BEFORE, forced: false, waitMs: 60_000 };
 describe('direct-push audit end to end (fake GitHub)', () => {
   it('passes a merged PR without consulting CI or the range', async () => {
     const { api, calls } = fakeApi([
-      [/\/pulls$/, [{ number: 1, merged_at: '2026-10-30T00:00:00Z', merge_commit_sha: SHA }]],
+      [
+        /\/pulls$/,
+        [
+          {
+            number: 1,
+            merged_at: '2026-10-30T00:00:00Z',
+            merge_commit_sha: SHA,
+            base: { ref: 'main' },
+          },
+        ],
+      ],
     ]);
     const v = await auditCommit({ ...base, api, sleep: async () => {} });
     expect(v.ok).toBe(true);
@@ -246,10 +264,10 @@ describe('direct-push audit end to end (fake GitHub)', () => {
     expect(polls).toBe(3);
   });
 
-  it('never asks CI or the range anything for a force push: it fails before CI', async () => {
+  it('fails a forced push before consulting CI, even when compare looks like a fast-forward', async () => {
     const { api, calls } = fakeApi([
       [/\/pulls$/, []],
-      [/^\/compare\//, rangeOf({ status: 'diverged' })],
+      [/^\/compare\//, rangeOf()],
     ]);
     const v = await auditCommit({ ...base, forced: true, api, sleep: async () => {} });
     expect(v.ok).toBe(false);
@@ -291,5 +309,136 @@ describe('direct-push audit end to end (fake GitHub)', () => {
       },
     });
     expect(bad.ok).toBe(false);
+  });
+});
+
+describe('hardening found in review', () => {
+  it.each([
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    '.nvmrc',
+    'vitest.config.mts',
+    'tests/guards/new.test.ts',
+    'tests/ci/direct-push-audit.test.ts',
+    'scripts/ops/anything.mjs',
+    'patches/x.patch',
+    'src/middleware.ts',
+    'src/env.ts',
+    'AGENTS.md',
+    '.claude/rules/git-and-release.md',
+  ])(
+    'rejects a direct push that changes %s (decides what CI proves or the founder decides)',
+    (filename) => {
+      const r = evaluatePushRange({ before: BEFORE, compare: rangeOf({ files: [{ filename }] }) });
+      expect(r.ok).toBe(false);
+    },
+  );
+
+  it('sees a protected file renamed away and matches case-insensitively', () => {
+    expect(
+      evaluatePushRange({
+        before: BEFORE,
+        compare: rangeOf({
+          files: [{ filename: 'docs/a.ts', previous_filename: 'tests/guards/a.ts' }],
+        }),
+      }).ok,
+    ).toBe(false);
+    expect(isProtectedPath('Package.JSON')).toBe(true);
+    expect(isProtectedPath('.GitHub/Workflows/ci.yml')).toBe(true);
+  });
+
+  it('still accepts ordinary application and documentation changes', () => {
+    const files = [
+      { filename: 'src/lib/crm/companies.ts' },
+      { filename: 'tests/db/crm.test.ts' },
+      { filename: 'docs/architecture/x.md' },
+    ];
+    expect(evaluatePushRange({ before: BEFORE, compare: rangeOf({ files }) }).ok).toBe(true);
+  });
+
+  it('refuses a malformed commit or previous-tip sha before using it in an API path', async () => {
+    const { api } = fakeApi([]);
+    await expect(
+      auditCommit({ ...base, sha: 'not-a-sha/../x', api, sleep: async () => {} }),
+    ).rejects.toThrow(/COMMIT_SHA/);
+    await expect(
+      auditCommit({ ...base, before: '../evil', api, sleep: async () => {} }),
+    ).rejects.toThrow(/BEFORE_SHA/);
+  });
+
+  it('asks GitHub for exactly this commit on main, push event, and the full compare page', async () => {
+    const { api, calls } = fakeApi([
+      [/\/pulls$/, []],
+      [/^\/compare\//, rangeOf()],
+      [/workflows\/ci\.yml\/runs/, { workflow_runs: [run()] }],
+    ]);
+    await auditCommit({ ...base, api, sleep: async () => {} });
+    expect(calls).toContain(`/compare/${BEFORE}...${SHA}?per_page=${COMPARE_COMMIT_CAP}`);
+    const runsCall = calls.find((c) => c.includes('workflows/ci.yml/runs')) ?? '';
+    expect(runsCall).toContain(`head_sha=${SHA}`);
+    expect(runsCall).toContain('event=push');
+    expect(runsCall).toContain('branch=main');
+  });
+
+  it('ignores a green ci run for this sha that did not run on main', async () => {
+    const { api } = fakeApi([
+      [/\/pulls$/, []],
+      [/^\/compare\//, rangeOf()],
+      [/workflows\/ci\.yml\/runs/, { workflow_runs: [run({ head_branch: 'develop' })] }],
+    ]);
+    let t = 0;
+    const v = await auditCommit({
+      ...base,
+      api,
+      waitMs: 30_000,
+      now: () => t,
+      sleep: async (ms: number) => {
+        t += ms;
+      },
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it('a PR merged into another base does not vouch for a direct push', async () => {
+    const { api } = fakeApi([
+      [
+        /\/pulls$/,
+        [
+          {
+            number: 5,
+            merged_at: '2026-10-30T00:00:00Z',
+            merge_commit_sha: SHA,
+            base: { ref: 'tmp' },
+          },
+        ],
+      ],
+      [/^\/compare\//, rangeOf({ files: [{ filename: '.github/workflows/ci.yml' }] })],
+    ]);
+    const v = await auditCommit({ ...base, api, sleep: async () => {} });
+    expect(v.ok).toBe(false);
+    expect(v.path).toBe('direct');
+  });
+});
+
+describe('workflow wiring', () => {
+  const yml = readFileSync(
+    join(__dirname, '..', '..', '.github', 'workflows', 'direct-push-audit.yml'),
+    'utf8',
+  );
+
+  it('passes the previous tip and the forced flag from the push event, via env not run', () => {
+    expect(yml).toMatch(/BEFORE_SHA: \$\{\{ github\.event\.before \}\}/);
+    expect(yml).toMatch(/FORCED: \$\{\{ github\.event\.forced \}\}/);
+    expect(yml).toMatch(/COMMIT_SHA: \$\{\{ github\.sha \}\}/);
+    expect(yml).not.toMatch(/run: .*\$\{\{/);
+  });
+
+  it('stays read-only and runs only on pushes to main', () => {
+    expect(yml).toMatch(
+      /permissions:\n {2}contents: read\n {2}pull-requests: read\n {2}actions: read\n/,
+    );
+    expect(yml).not.toMatch(/: write/);
+    expect(yml).toMatch(/push:\n {4}branches: \[main\]/);
   });
 });

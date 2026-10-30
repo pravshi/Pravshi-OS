@@ -39,8 +39,8 @@ worktree. Handoffs to and from Antigravity follow AGENTS.md §6. The private coo
 12. Publish. Default: a direct milestone push to `main` under AGENTS.md §5 (fast-forward,
     explicit refspec), then verify the remote SHA, every GitHub check and a clean tree, and
     record the milestone privately (`audit-output/milestones.md`, never committed). For
-    high-risk, security-sensitive or major-migration work, or changes to CI, guards, migrations
-    or roles: prepare the PR text and wait for approval to push the branch and open the PR; the
+    high-risk or security-sensitive work, any migration, or changes to CI, scripts, guards,
+    dependencies, shared files or these rules: prepare the PR text and wait for approval to push the branch and open the PR; the
     founder merges. Production, DNS, hosted databases, real email and bootstrap stay gated.
 
 ## Commands (from `package.json` and `.github/workflows/ci.yml` — do not invent others)

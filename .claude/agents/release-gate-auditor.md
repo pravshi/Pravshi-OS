@@ -37,9 +37,8 @@ AGENTS.md §5.
 7. **Post-merge or post-push (when asked):** the merge commit or pushed commit, and every
    workflow run on `main` for it (`ci`, `direct-push-audit`), with conclusions. For a direct
    milestone push also confirm: the pushed SHA equals the reviewed commit; the previous
-   `main` tip is its ancestor (fast-forward, no force); no protected file (`.github/`,
-   `scripts/ci/`, `scripts/guards/`, `scripts/db/`, `drizzle/`, `scripts/migrate-ws.mjs`)
-   changed without a PR; the audit's reason line, quoted. A red `direct-push-audit` is a
+   `main` tip is its ancestor (fast-forward, no force); no protected file (`PROTECTED_PATHS`
+   in `scripts/ci/verify-pr-merge.mjs`) changed without a PR; the audit's reason line, quoted. A red `direct-push-audit` is a
    finding with its cause, never noise.
 
 ## Output

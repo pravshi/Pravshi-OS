@@ -27,10 +27,13 @@ because it is followed.
   `git push origin <sha>:refs/heads/main` — an explicit refspec, never a bare `git push`,
   never `--force`. If `main` has moved unexpectedly, stop and investigate. Afterwards verify
   the remote SHA, every check on it (`ci`, `direct-push-audit`) and a clean working tree.
-- **Pull request instead** for high-risk or security-sensitive changes, major migrations,
-  changes to `.github/`, `scripts/ci/`, `scripts/guards/`, `scripts/db/`, `drizzle/` or the
-  migration runner (the direct-push audit fails a direct push touching them), and whenever an
-  independent review adds value. Push the branch and open the PR **only when explicitly
+- **Pull request instead** for high-risk or security-sensitive changes, any migration, and any
+  change to a protected path — `PROTECTED_PATHS` in `scripts/ci/verify-pr-merge.mjs`: `.github/`,
+  `scripts/`, `tests/guards/`, `tests/ci/`, `package.json`, the lockfile and tool configuration,
+  `drizzle/`, `src/middleware.ts`, `src/env.ts`, the agent rules. The direct-push audit flags a
+  direct push touching them only after the fact; it cannot prevent it. Dependency and shared-file
+  changes also need the founder's approval (AGENTS.md §3–§4) and never ride in a milestone push
+  without it. Independent review is a further reason for a PR. Push the branch and open the PR **only when explicitly
   authorized**: `git push -u origin refs/heads/<b>:refs/heads/<b>`.
 - Never merge a PR (the founder merges), never enable auto-merge, never deploy, never change
   repository settings, permissions, secrets, billing or deployment configuration. Production,

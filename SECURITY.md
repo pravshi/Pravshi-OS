@@ -210,8 +210,7 @@ Two compensating controls exist, and both are **detection, not prevention**:
   set to.
 - `.github/workflows/direct-push-audit.yml` fails a run when a commit reaches `main` neither
   through a merged pull request nor as a verified direct milestone push (a fast-forward whose
-  own `ci` run succeeded, touching no CI, guard, migration or role file, with no CI-skip
-  marker). It decides from GitHub's data, never from a commit subject such as `(#123)` or
+  own `ci` run succeeded, touching no protected path, with no CI-skip marker). It decides from GitHub's data, never from a commit subject such as `(#123)` or
   from who pushed, and has no identity-based bypass. It cannot stop the push, and a hostile
   pusher with write access could edit the audit itself; branch protection is the real control.
 

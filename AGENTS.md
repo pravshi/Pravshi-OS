@@ -130,14 +130,16 @@ to the next.
   task, module or phase before publishing; then run the release gates in
   [git-and-release.md](.claude/rules/git-and-release.md). Verified milestones go **directly to
   `main`** by default. Use a **pull request** (the founder merges) for high-risk or
-  security-sensitive changes, major migrations, any change to CI, guards, migrations or roles
-  (the direct-push audit rejects those), and whenever an independent review adds value.
+  security-sensitive changes, any migration, and any change to CI, scripts, guards, dependencies,
+  shared files or these rules (the direct-push audit flags those after the fact — it cannot
+  prevent the push — so route them through a PR), and whenever an independent review adds value.
 - **A milestone push to `main` requires all of:** the release gates pass on the exact commit;
   `git fetch` shows `origin/main` equals the base SHA you recorded and is an ancestor of the
   commit (a plain fast-forward — if `main` moved unexpectedly, stop and investigate, do not
   rebase or merge over it blindly); an explicit refspec (`git push origin <sha>:refs/heads/main`).
   Afterwards verify the remote SHA, every GitHub check (`ci` and `direct-push-audit`) and a
-  clean working tree, and record the milestone in the private record. A red check after a push is
+  clean working tree, and record the milestone in the private record (`audit-output/milestones.md`
+  until the `.coordination/` ledger exists). A red check after a push is
   reported with its cause; it is never waved through.
 - Branch from the verified current `origin/main`: `feature/*`, `fix/*`, `chore/*`, `docs/*`
   (`hotfix/*` only for a production incident — [CONTRIBUTING.md](CONTRIBUTING.md)); Antigravity
