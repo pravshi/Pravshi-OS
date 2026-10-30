@@ -1,13 +1,20 @@
 name: direct-push-audit
 
-# DETECTION, NOT PREVENTION. Nothing blocks a direct push to main: branch protection is
-# available while the repository is public, but none was configured when this was last
-# checked (2026-10-15), and on GitHub Free a private repository cannot have it. So this
-# records a direct push loudly after the fact. It opens no issue, tags nobody, changes no
+# DETECTION, NOT PREVENTION. Nothing blocks a push to main: branch protection is available
+# while the repository is public, but none was configured when this was last checked
+# (2026-10-15), and on GitHub Free a private repository cannot have it. So this records an
+# unverified push loudly after the fact. It opens no issue, tags nobody, changes no
 # repository state, and requests no write permission — a failed run on main is the signal.
 #
-# The verdict comes from GitHub's commit/PR association data, never from the commit
-# message: a subject ending "(#123)" is trivially forged and is not consulted.
+# A commit passes in exactly one of two ways (decision logic and its limits:
+# scripts/ci/verify-pr-merge.mjs; policy: CONTRIBUTING.md):
+#   - it arrived through a merged pull request; or
+#   - it is a direct milestone push that is a plain fast-forward, whose range touches no
+#     protected control file (.github/, scripts/ci/, scripts/guards/, scripts/db/, drizzle/,
+#     scripts/migrate-ws.mjs) and asks for no CI skip, and whose own `ci` run completed
+#     successfully. This job waits for that run; it does not replace it, and `ci` stays
+#     mandatory and unchanged.
+# There is no actor- or identity-based bypass. A verdict never comes from the commit message.
 
 on:
   push:
@@ -16,16 +23,22 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 jobs:
   audit:
     runs-on: ubuntu-latest
+    # Longer than the CI wait below, so a slow ci run is reported as such, not cancelled.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version-file: .nvmrc }
-      - name: Verify this commit arrived through a merged pull request
+      - name: Verify this push is a merged PR or a verified fast-forward milestone with green ci
         env:
           GITHUB_TOKEN: ${{ github.token }}
           COMMIT_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          FORCED: ${{ github.event.forced }}
+          CI_WAIT_MINUTES: '40'
         run: node scripts/ci/verify-pr-merge.mjs
