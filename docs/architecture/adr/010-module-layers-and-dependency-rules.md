@@ -77,9 +77,9 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
 7. **Public surface (`src/lib` only).** A `src/lib` module is imported through its public files. A
    file in `src/lib` whose name starts with `_` or that sits under an `internal/` folder may be
    imported only by files of the same `src/lib` module. The rule does not apply to `src/app`: it
-   is an entry point, not a module, and its `_`-prefixed folders (`_actions`, `_components`,
-   `_types`) are Next.js private folders whose sharing is governed by the frontend rules, not by
-   this record.
+   is an entry point, not a module, and its `_`-prefixed files and folders (`_components/`,
+   `_actions.ts`, `_permissions.ts`, `_types.ts` and others) are Next.js-private route-segment
+   files whose sharing is governed by the frontend rules, not by this record.
 8. **Tests and scripts are entry points.** They may import any layer; the rules apply to `src/`.
 
 ### Enforcement
