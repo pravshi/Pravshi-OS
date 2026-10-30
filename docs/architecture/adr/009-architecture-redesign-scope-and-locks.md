@@ -1,4 +1,4 @@
-# ADR-009: Architecture redesign — scope, non-goals and locked decisions
+# ADR-009: Architecture redesign — end state, stages and locked decisions
 
 Status: Accepted | Date: 2026-10-30 | Deciders: Founder
 
@@ -26,91 +26,118 @@ A read-only audit of `main` at `3a8c155` (the V1 baseline) found:
   boundaries; ESLint restricts only `process.env`.
 
 Because of that cycle, the blueprint's packages (`database`, `security`, `crm-core`, …) cannot be
-separated as they stand: moving folders would carry the cycle into the new layout.
+separated as they stand: moving folders first would carry the cycle into the new layout.
 
 ## Decision
 
-1. **Redesign in place, untangle first.** The redesign is a bounded sequence of six steps
-   ([target-architecture.md](../target-architecture.md) §4): this record and ADR-010 (Step 1); a
-   module-boundary guard (Step 2); a schema-driven security inventory (Step 3); breaking the
-   foundation cycles (Step 4); splitting the job queue from the worker's entry point (Step 5);
-   replacing the remaining domain cycles with an internal event port (Step 6). Each step is its
-   own branch and pull request, approved and merged by the founder. **The plan ends after
-   Step 6.**
-2. **Behaviour is preserved.** No step changes the database schema, a migration, a route, a
-   permission, an RLS policy or a screen unless that step's approval says so. "Works as before" is
-   proven per step by the verification protocol in target-architecture.md §5, against the
-   baseline recorded there.
-3. **Deployables stay as they are:** one Next.js application (`src/app`: tenant workspace,
-   platform console and API routes) and one worker process. The blueprint allows these to share a
-   process at first; separation is logical, enforced by ADR-010.
-4. **Workspaces and package extraction are out of scope.** Moving code into `apps/` and
-   `packages/` (pnpm workspaces, if adopted — no Turborepo) is revisited only when mobile apps or
-   organization websites need to share code with the web application. Until then the target
-   module layout of ADR-010 is realised inside `src/lib`.
-5. **`src/app` and `src/components` are not moved** by this plan; frontend file ownership
-   (AGENTS.md §3) is unchanged.
-6. **V1 baseline.** The V1 baseline commit `3a8c155` is marked with the annotated tag `v1.0.0`
-   so V1 can still be deployed from it while the redesign proceeds. Pushing that tag needs its own
-   founder approval at the time.
+1. **The end state is the blueprint.** Pravshi OS converges on the blueprint's architecture: the
+   `apps/` and `packages/` layout, the control plane and tenant plane, independent CRM product
+   modules, and the delivery channels (web, shared mobile apps, organization websites,
+   white-label apps). It is reached in stages; each stage below needs its own founder approval,
+   and no approval extends to the next stage.
+2. **Phase 1 — untangle first (Steps 1–6).** In place, inside `src/`: this record and ADR-010
+   (Step 1); a module-boundary guard (Step 2); a schema-driven security inventory (Step 3);
+   breaking the foundation cycles (Step 4); separating the job queue from the worker's entry point
+   (Step 5); replacing the remaining domain cycles with an internal event port (Step 6). After
+   Step 6 the module graph has no cycle.
+3. **Phase 2 — workspace (Steps 7–8), planned.**
+   - **Step 7, workspace skeleton:** pnpm workspaces; `apps/web` (the Next.js application, moved
+     from the repository root and `src/app`, `src/components`, `src/hooks`, `public`) and
+     `apps/worker` (the worker entry from Step 5); shared configuration; CI, CODEOWNERS and the
+     agent rule files updated in the same change.
+   - **Step 8, package extraction:** the layers of ADR-010 move into `packages/`, **one package
+     per pull request, in dependency order** (lowest layer first), each with its own approval.
+4. **Phase 3 — products and delivery, future stages.** The product registry, the Real Estate CRM,
+   the Education CRM, the shared mobile apps, organization websites and custom domains, and
+   white-label apps are separate future stages. **Each needs its own ADR and its own approval**
+   before any of it is built.
+5. **Behaviour is preserved in Phases 1 and 2.** No step changes the database schema, a migration,
+   a route, a permission, an RLS policy or a screen unless that step's approval says so. "Works as
+   before" is proven per step by the verification protocol in
+   [target-architecture.md](../target-architecture.md) §6, against the V1 baseline recorded there.
+6. **Deployables.** `apps/web` serves the tenant workspace, the platform console and the API
+   routes, and `apps/worker` runs background work — as today, which the blueprint allows. A
+   further split happens only when measured need justifies it, as the blueprint itself requires.
+7. **Tooling.** pnpm workspaces with the pinned pnpm 12; no Turborepo or other new build tool
+   unless a later approval adds one.
+8. **V1 baseline.** The V1 baseline commit `3a8c155` is marked with the annotated tag `v1.0.0`, so
+   V1 can still be deployed from it while the redesign proceeds. The tag exists locally and has
+   not been pushed; pushing it needs its own founder approval at the time.
 
-## Non-goals
+## Non-goals of Phases 1 and 2
 
-- **No product code.** Real Estate CRM, Education CRM, mobile apps, organization websites, custom
-  domains and white-label apps are not built. ADR-008 P-1 places them outside V1, and AGENTS.md §1
-  puts V1 acceptance first. The redesign prepares the structure they will need and nothing more.
-- **No entitlements.** No product registry, plan, tier, entitlement or feature flag is built, and
-  no record is written for one now. ADR-007 GOV-04 stands: no V1 feature reads a plan or tier.
-- **No multi-organization login.** One login belongs to exactly one organization (ADR-007
-  GOV-02). No organization switching, for web or mobile.
-- **No new deployable, provider, dependency or database.** No migration is required by any step;
-  if one turns out to be needed it is a separate, approved change under the migration rules.
-- **No hosted operation.** No hosted database, deployment, DNS, secret or repository setting is
-  touched by this plan.
+- **No product code.** Phase 3 stages are not started by Phases 1–2; they only prepare the
+  structure.
+- **No entitlements, plans or product registry.**
+- **No multi-organization login** and no organization switching.
+- **No migration, new provider, new dependency or new deployable.** If a step turns out to need
+  one, it is a separate, approved change under the migration and dependency rules.
+- **No hosted operation.** No hosted database, deployment, DNS, secret or repository setting.
 
-## Locked decisions this plan must respect
+## Blueprint parts that need a new decision record from the founder
 
-Recorded here so every step can be checked against one list. Changing any of them needs a new
-founder decision record.
+These parts of the blueprint contradict an accepted decision. They are not built, designed in
+detail or assumed by any stage until the founder records a new decision that amends the one named.
+
+| Blueprint part                                                                                                                                                                                         | Accepted decision it contradicts                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Product registry and entitlements: product enablement and feature entitlements in the control plane (§04), entitlement as an input to every access decision (§07), the product registry (§11)       | ADR-007 GOV-04 — no V1 feature reads a plan or tier; no plan, entitlement, billing or usage limits |
+| Anything that lets one login reach more than one organization: users belonging to several organizations and organization switching in the shared mobile apps (§12), org-switching flows (§15)       | ADR-007 GOV-02 — one login belongs to exactly one organization                                      |
+
+Everything else the blueprint leaves optional (it says "evaluate", "if selected", "when
+justified" or "decision pending") is not a conflict. Where Phases 1–2 rely on such an option, the
+choice is stated in Decision 6 and 7 above and in the lock list below.
+
+## Locked decisions every stage must respect
+
+Changing any of them needs a new founder decision record.
 
 | Lock                                                                                                                                                                                                                                                                 | Source                         |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| V1 is the multi-tenant Business OS; the HR blueprint is deferred and its documents are kept                                                                                                                                                                          | ADR-006                        |
+| V1 is the multi-tenant Business OS; the HR blueprint is deferred and its documents are kept; V1 acceptance comes before later product work                                                                                                                           | ADR-006, AGENTS.md §1          |
 | Neon PostgreSQL, Better Auth, Cloudflare R2 for any future files, the Singapore region, scale-to-zero (nothing may keep compute awake)                                                                                                                                | ADR-006 §3                     |
 | `app_user` without `BYPASSRLS`; RLS enabled **and forced** on every `public` table; identity set transaction-locally; one authorized data path; fail-closed authorization                                                                                            | ADR-006 §3, AGENTS.md §5       |
 | Separate logins per plane, each with its own credential and placement; no role may hold `BYPASSRLS`, `SUPERUSER`, `CREATEROLE` or `CREATEDB`                                                                                                                         | AGENTS.md §5, `roles.sql`      |
 | One login, one organization                                                                                                                                                                                                                                          | ADR-007 GOV-02                 |
 | Free-trial and paid organizations share capabilities and guarantees; no plans, entitlements, billing or usage limits                                                                                                                                                | ADR-007 GOV-04                 |
 | Platform administration is a separate authority with no access to customer business data; suspend and reactivate in V1, archive and restore deferred                                                                                                                 | ADR-007 GOV-03, ADR-008 P-1/L1 |
-| Migrations: `scripts/migrate-ws.mjs` is the only runner; order is the journal's `idx`, never time; applied files, `when` values and recorded hashes are never edited; migration files stay byte-identical (SHA-256 checked) if they are ever moved                  | AGENTS.md §5, ADR-009 §C6      |
+| Migrations: `scripts/migrate-ws.mjs` is the only runner; order is the journal's `idx`, never time; applied files, `when` values and recorded hashes are never edited; if migration files move (Step 8), every file stays byte-identical, proven by SHA-256 before and after | AGENTS.md §5                   |
 | Workflow engine semantics: post-commit emission, depth bound of 5, actions run with the trigger actor's authority, inline or queued execution                                                                                                                        | ADR-005                        |
 | File ownership and approval gates: frontend files belong to Antigravity; shared and rule files, CI, scripts, guards, dependencies and migrations go through a founder-approved PR                                                                                     | AGENTS.md §3–§4                |
 
-## Reconciliation with the blueprint (decisions of 2026-10-30)
+## File-ownership consequences of moving `src/app` and `src/components` (Step 7)
 
-| #   | Blueprint                                                     | Decision                                                                                                       |
-| --- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| C1  | Finish V1 before refactoring                                  | Tag the V1 baseline (`v1.0.0` on `3a8c155`); push only on a separate approval                                  |
-| C2  | Real Estate / Education CRMs, mobile, websites, white-label   | Not built; structure only                                                                                      |
-| C3  | Product entitlements as an access input                       | Deferred; no record written now                                                                                |
-| C4  | Organization switching                                        | Not adopted; one login, one organization                                                                       |
-| C5  | RLS "evaluated per data class"; providers "to be validated"   | Not adopted: forced RLS everywhere and the ADR-006 providers stay locked                                       |
-| C6  | `packages/database` owns migrations                           | Only if packages are ever extracted; files moved byte-identical and hash-checked                               |
-| C7  | `apps/web` holds the UI                                       | `src/app` and `src/components` are not moved in this plan                                                      |
-| C8  | Separate `api` and `platform-console` deployables             | Not adopted; one web application and one worker                                                                |
+Steps 1–6 do not move these folders. Step 7 does, and it changes what the ownership rules point
+at, so it carries these conditions:
+
+- **Antigravity's work is settled first.** Every open Antigravity branch and worktree touching
+  `src/app`, `src/components` or `src/hooks` is merged or paused before Step 7 starts; nothing is
+  rebased or moved on its behalf (AGENTS.md §5).
+- **The rule files move with the code, in the same pull request:** AGENTS.md §3 and §8, CLAUDE.md,
+  `.agents/rules/pravshi-frontend-only.md` and `.claude/rules/*` name the new paths
+  (`apps/web/app/**`, `apps/web/components/**`, …). Ownership itself does not change: the
+  frontend stays Antigravity's, route handlers, `'use server'` files and the server-side calls
+  stay Claude Code's.
+- **CODEOWNERS** entries for `/src/app/` and `/src/components/` are updated to the new paths.
+- **Guards that name these paths** are updated in the same change, without weakening any check:
+  `require-permission-first` (its exact pre-authentication route list), `frontend-boundary-leaks`,
+  `frontend-resilience`, `no-keepalive` (its allowlist) and the other tests that pin `src/` paths
+  (38 test files at `3a8c155`).
+- **Antigravity reviews the move** read-only and reports findings (AGENTS.md §6) before the
+  founder merges.
+- `src/components/ui` becomes `packages/shared-ui` only in Step 8, under the same conditions.
 
 ## Consequences
 
-- The redesign delivers enforced module boundaries, a security inventory that fails CI on an
+- Phase 1 delivers enforced module boundaries, a security inventory that fails CI on an
   unclassified or unprotected table, and an acyclic module graph — without moving the application,
   the database or any public contract.
-- Product work, workspaces and package extraction remain future decisions, each needing its own
-  record.
+- Phase 2 then turns that graph into the blueprint's `apps/` and `packages/` layout mechanically.
+- Phase 3 starts only with its own ADRs; the two parts listed above also need a decision that
+  amends ADR-007.
 - Every step updates the documentation it affects in the same pull request.
 
 ## Reconsider when
 
-- Mobile apps or organization websites need code shared with the web application (revisit
-  workspaces and packages).
-- V1 is accepted and a CRM product is approved (revisit C2 and C3).
-- Measured load or isolation needs justify a separate deployable (revisit C8).
+- A Phase 3 stage is approved and needs a structure Phases 1–2 did not provide.
+- Measured load or isolation needs justify another deployable.

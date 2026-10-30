@@ -85,8 +85,10 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
 
 - The cycle is removed in three bounded steps (target-architecture.md §4) without moving the
   application or changing behaviour.
-- When packages are ever extracted (ADR-009 §4), each layer already has an acyclic public surface,
-  so extraction is a mechanical move.
+- When packages are extracted (ADR-009 Step 8, one package per pull request in dependency order),
+  each layer already has an acyclic public surface, so extraction is a mechanical move. The layers
+  and rules here carry over unchanged to `packages/`; the boundary guard then also checks package
+  dependencies.
 - Adding a domain module or an L4 → L4 edge becomes a reviewed decision instead of an accident.
 
 ## Reconsider when
