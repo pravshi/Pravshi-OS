@@ -17,7 +17,7 @@ As of the V1 release:
   2026), but the exact journal state is recorded nowhere and must be verified read-only
   before anything is applied — that is step 0 of the
   [production migration runbook](docs/runbooks/production-migration.md). Migrations have
-  otherwise run only in CI, against an ephemeral Postgres container created per run.
+  otherwise run only on CI's throwaway Postgres containers and local disposable databases.
 - **No Cloudflare R2 bucket exists**, and no R2 API token has been issued. The `R2_*`
   variables are placeholders for deferred storage work — do not provision them for V1.
 - **Sentry is not configured** and no DSN has been issued (gate HG-6).

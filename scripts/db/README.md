@@ -112,13 +112,13 @@ membership in the roles it creates — it never grants anything to `app_user`.
 Note what is deliberately **not** in that list: there is no `alter role ... nobypassrls nosuperuser`.
 `ALTER ROLE` checks the `SUPERUSER` and `BYPASSRLS` attributes on _mention_ rather than on value, so
 even setting them to the negative requires superuser and would hard-fail on Neon. `roles.sql` asserts
-those attributes instead — a `DO` block that raises if any of the three roles holds `BYPASSRLS` or
-`SUPERUSER`. Asserting needs no privilege, covers `app_owner` and `app_admin` as well as `app_user`,
+those attributes instead — a `DO` block that raises if any of the six roles holds `BYPASSRLS` or
+`SUPERUSER`. Asserting needs no privilege, covers every role (`app_owner`, `app_admin`, `app_worker`, `app_auth` and `app_platform` as well as `app_user`),
 and fails loudly instead of being quietly deleted by whoever hits a permission error.
 
 ## Passwords are not in `roles.sql`
 
-`roles.sql` creates all three roles without passwords. Task 3b's runner sets them afterward using
+`roles.sql` creates all six roles without passwords. Task 3b's runner sets them afterward using
 `format('alter role %I password %L', role_name, password)`, letting Postgres's own quoting (`%L`)
 handle the password value. That's deliberate: a password embedded directly in a SQL string could
 contain a quote character and break out of the statement, and a password committed to a file in

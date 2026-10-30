@@ -213,7 +213,7 @@ The CRM seam is `work_projects.deal_id` → `deals.id`:
 - A deal **hard-delete nulls** `deal_id` (`ON DELETE SET NULL`) — project history survives the deal.
 - Query direction is project-first: find projects by deal via the `(org_id, deal_id)` index. No deal→project FK exists on the CRM side.
 
-The deal ↔ project link is implemented: `POST /api/work/projects/[id]/link-deal` and the `linked-deal-section` component.
+The deal ↔ project link is implemented: `GET`, `POST` and `DELETE` on `/api/work/projects/[id]/link-deal`, and the `linked-deal-section` component.
 
 ---
 
@@ -235,4 +235,4 @@ Phase 4 specifics:
 - RLS/tenant isolation: test cross-org writes expect `42501` (task → project, task → assignee, subtask → parent, member → project/person, project → deal) and read probes across orgs expect 404.
 - Soft-delete paths: `crm_soft_delete('work_project' | 'work_task' | 'task', id)` — requires the corresponding delete permission; without it the M1 probe raises `42501`.
 - API: exercise the routes in §3 with a session holding each role in §4 to verify the matrix (especially creator-delete of tasks without `tasks.delete`, and project-level manager membership management without `projects.manage_members`).
-- Tests: `tests/work` holds `validation.test.ts` and shared helpers; run it with `pnpm test tests/work`. `pnpm e2e` runs the browser specs and is opt-in.
+- Tests: `tests/work` holds `validation.test.ts` and shared helpers (`pnpm test tests/work`). The database and row-level-security behaviour is covered in `tests/db/work-projects.test.ts`, `tests/db/work-rls.test.ts` and `tests/db/work-tasks.test.ts`, which need a migrated database. `pnpm e2e` runs the browser specs and is opt-in.

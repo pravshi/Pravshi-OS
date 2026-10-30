@@ -149,7 +149,7 @@ or attributing the grant to the new owner — would make its one irreplaceable p
 ## Deliberately not here
 
 - **No re-issue.** A bounded, pre-completion re-issue would be a new founder decision.
-- **Rate limited:** 5 attempts a minute per client address, checked first. The token also
+- **Rate limited:** 5 attempts a minute per client address, checked before any token or password work. The token also
   carries 256 bits; malformed and dead tokens are refused before any password is hashed, so the
   endpoint is no CPU sink; and it is inert once the token is used or expired.
 - **Password policy:** the full shared policy applies (length, the common-password list and the
