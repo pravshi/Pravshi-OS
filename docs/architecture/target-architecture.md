@@ -71,6 +71,29 @@ attempt was invalidated when the sandbox removed the database server's access to
 directory mid-run; it was discarded and re-run. GitHub CI on each step's pull request remains the
 authoritative check.
 
+**After Step 2** (`6c85bb2`, the module-boundary guard; same environment, 2026-10-30):
+
+| Check                                                         | V1 baseline (`3a8c155`)          | After Step 2 (`6c85bb2`)                                                                 |
+| ------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`             | pass                             | pass                                                                                      |
+| `pnpm guards`                                                  | pass (1,043 files)               | pass (secret scan: 1,047 tracked files; workflow secret flow: 2 workflows)                |
+| `pnpm audit --audit-level=high`                                | not recorded                     | pass (1 high, in the documented ignore list)                                              |
+| `pnpm build`                                                   | pass                             | pass                                                                                      |
+| Migrations from zero                                           | 88 of 88                         | 88 of 88                                                                                  |
+| `pnpm test` (files)                                            | 268 passed, 1 failed, 1 skipped  | 270 passed, 0 failed, 1 skipped (271 files: the guard is new)                              |
+| `pnpm test` (tests)                                            | 4,180 passed, 9 failed, 10 skipped | 4,197 passed, 0 failed, 10 skipped (4,207: the guard adds 8)                            |
+| `tests/guards/module-boundaries.test.ts`                       | —                                | 8 passed; 17 baseline entries, none stale; mutation checks in the Step 2 pull request     |
+
+An earlier full run on `6c85bb2` failed one test, `tests/serial/audit-partition-lock-order.test.ts`
+("retry exhaustion under a lock held throughout": a lock-table sample saw
+`organizations:ShareRowExclusiveLock` held during a back-off). It failed the same way on the
+untouched V1 tree `3a8c155` in that environment, and the code between the two commits differs only
+in documentation — so it is not caused by Step 2. That cluster had been restarted after an unclean
+shutdown of the session's container; on a newly initialised cluster the test passed twice alone and
+the full run above passed. The cause of the failure on the restarted cluster is **unexplained**;
+it is recorded here, not waved through, and GitHub CI (PostgreSQL 18) on the pull request remains
+the authoritative check.
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 
