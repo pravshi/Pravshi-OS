@@ -21,6 +21,12 @@ relative paths and dynamic `import()` all resolved) shows:
   | `auth ↔ invitations`           | `src/lib/auth/invitations.ts` ↔ `src/lib/invitations/service.ts` |
   | `jobs → domain modules`        | the worker entry (`runner.ts`, `handlers.ts`, `workflow-jobs.ts`) lives in `src/lib/jobs` |
   | `crm, work, integrations ↔ workflows` | event emission and workflow actions call each other directly |
+  | `crm → integrations`           | `src/lib/crm/deals.ts` and `src/lib/crm/pipelines.ts` call `emitIntegrationEvent` (`integrations/fanout`) |
+  | `work → integrations`          | `src/lib/work/tasks.ts` calls `emitIntegrationEvent` (`integrations/fanout`) |
+
+  Step 4 removes the first four edges and Step 5 the `jobs` edge. Step 6 removes the last three rows:
+  `crm → workflows`, `work → workflows`, `integrations → workflows`, `crm → integrations` and
+  `work → integrations` all become emissions through the `events` port (rule 4).
 
 - `platform`, `admin`, `search`, `analytics`, `ai`, `identity` and `storage` are imported by no
   other `src/lib` module; nothing in `src/lib` imports `src/app` or `src/components`.
@@ -57,7 +63,8 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
    `ai → crm`, `ai → work` (read context), `analytics → work`, `import → crm`. Any other L4 → L4
    edge needs an amendment to this record.
 4. **Reactions go through events.** A domain module that must cause work in another (a deal
-   change triggering workflows or webhooks, an inbound webhook starting a workflow) emits through
+   change triggering workflows or outbound webhooks, a task change fanning out to integrations, an
+   inbound webhook starting a workflow) emits through
    the L3 `events` port. Subscribers are registered by the entry points. The port keeps ADR-005's
    semantics: emission after commit, the depth bound of 5, actions with the trigger actor's
    authority, inline or queued execution.
@@ -67,15 +74,20 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
 6. **Database access rules are unchanged.** `withAuthorizedDb()` remains the only business-data
    path; the `app_auth`, `app_worker` and `app_platform` pools remain restricted to their planes
    exactly as `tests/guards/single-db-path.test.ts` enforces today.
-7. **Public surface.** A module is imported through its public files. A file whose name starts
-   with `_` or that sits under an `internal/` folder may be imported only inside its own module.
+7. **Public surface (`src/lib` only).** A `src/lib` module is imported through its public files. A
+   file in `src/lib` whose name starts with `_` or that sits under an `internal/` folder may be
+   imported only by files of the same `src/lib` module. The rule does not apply to `src/app`: it
+   is an entry point, not a module, and its `_`-prefixed folders (`_actions`, `_components`,
+   `_types`) are Next.js private folders whose sharing is governed by the frontend rules, not by
+   this record.
 8. **Tests and scripts are entry points.** They may import any layer; the rules apply to `src/`.
 
 ### Enforcement
 
 - Step 2 adds `tests/guards/module-boundaries.test.ts`. It builds the import graph of `src/`
   (static, relative, re-exported and dynamic imports), maps each file to a module and layer, and
-  fails CI on any edge that breaks rules 1–3, 5 or 7, or on any cycle.
+  fails CI on any edge that breaks rules 1–3, 5 or 7 (rule 7 checked for `src/lib` only), or on any
+  cycle.
 - The violations that exist on the day the guard lands are listed in the guard as a **baseline**.
   The baseline may only shrink: a new violation, or a baseline entry that no longer exists, fails
   the guard. Steps 4–6 remove the entries; after Step 6 the baseline is empty.

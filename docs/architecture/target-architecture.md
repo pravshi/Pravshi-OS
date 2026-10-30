@@ -19,7 +19,8 @@ Pravshi-OS/
 │   └── mobile-education/     Phase 3, own ADR
 ├── packages/
 │   ├── shared-config/  database/  observability/  security/  platform-core/
-│   ├── shared-services/  contracts/  crm-core/  shared-ui/
+│   ├── shared-services/  contracts/  crm-core/  work/  integrations/  automation/
+│   ├── imports/  search/  analytics/  ai/  admin/  shared-ui/
 │   ├── products/real-estate/  products/education/          Phase 3, own ADRs
 │   └── website-platform/  mobile-platform/  white-label-platform/   Phase 3, own ADRs
 ├── tests/  tooling/  docs/
@@ -57,7 +58,7 @@ Recorded on 2026-10-30 in a cloud session, on the exact commit, before any redes
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check`             | pass                                                                              |
 | `pnpm guards`                                                  | pass (secret scan: 1,043 tracked files; workflow secret flow: 2 workflows)        |
 | `pnpm build`                                                   | pass                                                                              |
-| `roles.sql` + `node scripts/migrate-ws.mjs` from zero         | 88 of 88 applied; each of the five runtime and owner logins connects as itself    |
+| `roles.sql` + `node scripts/migrate-ws.mjs` from zero         | 88 of 88 applied. `roles.sql` created all six logins — `app_owner`, `app_user`, `app_admin`, `app_worker`, `app_auth`, `app_platform` — none with `SUPERUSER` or `BYPASSRLS`; the five CI connects with (all but `app_admin`, used only by the operator's bootstrap) each connected as itself |
 | `pnpm test`                                                    | 268 files passed, 1 failed, 1 skipped; the failure is explained below             |
 | `tests/serial/migration-runner-history.test.ts`, re-run alone | 10 passed, 1 skipped                                                              |
 
@@ -140,12 +141,19 @@ ADR-009, ADR-010 and this document. Documentation only.
 
 - Keep the queue core in `src/lib/jobs` (types, enqueue, wake, retry policy); move the worker
   entry, job handlers, scheduler and maintenance to `src/worker/`; update the `pnpm worker`
-  script, the guards that name these files and the worker documentation.
+  script, `scripts/worker-loader.mjs` and `scripts/worker-alias-hooks.mjs` (which name the
+  entrypoint and resolve the `@/` alias for it), the guards that name these files, and the worker
+  documentation, including the worker command and entrypoint in DEPLOYMENT.md ("The worker
+  plane": `pnpm worker`, `src/lib/jobs/runner.ts`).
+- **Ownership:** `src/worker/` is new and not listed in AGENTS.md §3. The step adds it to Claude
+  Code's files there (as `src/lib/**` and the worker plane are today). AGENTS.md is a rule file,
+  so this needs the founder's explicit approval and goes in the same pull request.
 - **Done when:** `src/lib/jobs` imports no L4 module; the worker starts and processes every job
   type; the opt-in worker end-to-end suite passes and its result is reported; all release gates
   pass.
 - **Touches:** `src/lib/jobs`, `src/worker/` (new), `package.json` (`worker` script — a shared
-  file), guards and docs that name these paths.
+  file), `scripts/worker-loader.mjs`, `scripts/worker-alias-hooks.mjs` (protected path), AGENTS.md
+  §3 (rule file), DEPLOYMENT.md, and the guards and docs that name these paths.
 
 ### Step 6 — Domain events
 
@@ -163,13 +171,24 @@ ADR-009, ADR-010 and this document. Documentation only.
 ### Step 7 — Workspace skeleton (planned; needs its own approval)
 
 - pnpm workspaces with the pinned pnpm 12 (no new build tool). `apps/web` receives the Next.js
-  application (`src/app`, `src/components`, `src/hooks`, `src/middleware.ts`, `public/`, the
+  application (`src/app`, `src/components`, `src/hooks`, `src/middleware.ts` — a shared file
+  that needs the founder's approval to move or change (AGENTS.md §3) — `public/`, the
   Next, Sentry, PostCSS and component configuration); `apps/worker` receives `src/worker/`. Shared
   TypeScript, ESLint, Prettier and Vitest configuration move to the root workspace. CI, CODEOWNERS,
   `vercel.json` (project root) and the agent rule files are updated in the same change.
 - Preconditions and ownership conditions: ADR-009 "File-ownership consequences" — Antigravity's
   open work settled first, rule files and CODEOWNERS moved with the code, path-pinning guards
-  updated without weakening, Antigravity's read-only review before merge.
+  updated without weakening, Antigravity's read-only review before merge. The path-pinning
+  surface is large: `grep -rlE "src/" tests` finds 90 test files at `3a8c155`, 32 of them among
+  the 56 files in `tests/guards/` (a narrower search counts 89 and 30); each is updated in this
+  step.
+- **V1 deployment and the Vercel root directory.** The plan assumes **V1 is deployed before
+  Step 7**, from the `v1.0.0` tag with the Vercel project's root directory at the repository root
+  (no Vercel project exists today). Step 7 then changes the root directory to `apps/web` — a
+  deployment setting, which is founder-only (AGENTS.md §3) and is changed by the founder when
+  Step 7 merges. If V1 is not yet deployed when Step 7 is approved, the founder chooses at that
+  approval between deploying V1 from the tag first or creating the Vercel project directly with
+  `apps/web` as its root.
 - **Done when:** all release gates pass from the workspace root; `pnpm build` produces the same
   routes as the baseline; the worker starts from `apps/worker`; CI is green.
 
@@ -178,18 +197,31 @@ ADR-009, ADR-010 and this document. Documentation only.
 In dependency order, lowest first. The mapping is proposed here and confirmed in each package's
 approval.
 
-| Order | Package           | Receives                                                                                                  |
-| ----- | ----------------- | --------------------------------------------------------------------------------------------------------- |
-| 1     | `shared-config`   | TypeScript, ESLint, Prettier and Vitest base configuration                                                |
+| Order | Package           | Receives                                                                                                   |
+| ----- | ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| 1     | `shared-config`   | TypeScript, ESLint, Prettier and Vitest base configuration                                                 |
 | 2     | `database`        | `src/lib/db`, `drizzle/`, `scripts/db/`, `scripts/migrate-ws.mjs` — every migration file byte-identical, SHA-256 checked before and after; runbook paths updated in the same PR |
-| 3     | `observability`   | `src/lib/observability`                                                                                   |
-| 4     | `security`        | `src/lib/{audit,auth,authz,identity}`                                                                     |
-| 5     | `platform-core`   | `src/lib/platform` (control plane)                                                                        |
+| 3     | `observability`   | `src/lib/observability`                                                                                    |
+| 4     | `security`        | `src/lib/{audit,auth,authz,identity}`                                                                      |
+| 5     | `platform-core`   | `src/lib/platform` (control plane)                                                                         |
 | 6     | `shared-services` | L3: `jobs` queue core, `notifications`, `events` (not in the blueprint sketch; an implemented responsibility, which the blueprint allows) |
-| 7     | `contracts`       | Request and response schemas that are public contracts between apps                                       |
-| 8     | `crm-core`        | L4 modules; whether today's `crm` stays here or becomes a product package is decided in its approval      |
-| 9     | `shared-ui`       | `src/components/ui` (Antigravity-owned; same conditions as Step 7)                                        |
-| 10–11 | `tooling/`, `tests/` | Guards and CI scripts to `tooling/`; tests regrouped into the blueprint's classes                      |
+| 7     | `contracts`       | Request and response schemas that are public contracts between apps                                        |
+| 8     | `crm-core`        | Only the CRM concepts every CRM product shares: companies, contacts, relationships and activities from `src/lib/crm`. Whether deals and pipelines are shared or belong to a product is decided in this package's approval |
+| 9     | `work`            | `src/lib/work`: projects, tasks, reminders                                                                 |
+| 10    | `integrations`    | `src/lib/integrations`: connections, outbound webhooks, inbound endpoints, credential vault                |
+| 11    | `automation`      | `src/lib/workflows`: the workflow engine, triggers, conditions, actions (depends on `crm-core`, `work`, `integrations`) |
+| 12    | `imports`         | `src/lib/import`: the Sales Sheet import (depends on `crm-core`)                                           |
+| 13    | `search`          | `src/lib/search`                                                                                           |
+| 14    | `analytics`       | `src/lib/analytics` (depends on `work`)                                                                    |
+| 15    | `ai`              | `src/lib/ai` (depends on `crm-core`, `work`)                                                               |
+| 16    | `admin`           | Tenant administration: `src/lib/admin` and `src/lib/invitations`                                           |
+| 17    | `shared-ui`       | `src/components/ui` (Antigravity-owned; same conditions as Step 7)                                         |
+| 18–19 | `tooling/`, `tests/` | Guards and CI scripts to `tooling/`; tests regrouped into the blueprint's classes                       |
+
+The order follows ADR-010's permitted edges, so every package depends only on packages extracted
+before it. A package is created only for a module with an implemented responsibility and a stable
+public surface (blueprint §05); two modules may stay together if their approval finds no stable
+interface between them.
 
 Each extraction: boundary guard green with package dependencies checked; all release gates; CI.
 
@@ -238,9 +270,9 @@ magnitude, replaced by a real estimate in each stage's ADR.
 | Step 5 — queue vs worker                | about 1.5×         | Worker paths named by guards and docs; worker end-to-end run          |
 | Step 6 — domain events                  | 2–3×               | Behaviour-sensitive refactor; security review                         |
 | **Phase 1 total**                       | **7–8.5×**         |                                                                       |
-| Step 7 — workspace skeleton             | 3–4×               | Moves the Next.js app; configs, CI, rule files, 38 path-pinning tests |
-| Step 8 — package extraction (11 PRs)    | 10–14×             | About 1× each; `database`, `security` and `crm-core` 1.5–3×           |
-| **Phase 2 total**                       | **13–18×**         |                                                                       |
+| Step 7 — workspace skeleton             | 4–5×               | Moves the Next.js app; configs, CI, rule files, about 90 path-pinning test files |
+| Step 8 — package extraction (19 PRs)    | 18–25×             | About 1× each; `database`, `security`, `crm-core` and `automation` 1.5–2× |
+| **Phase 2 total**                       | **22–30×**         |                                                                       |
 | Product registry (after ADR-007 amendment) | 3–5×            | Low confidence                                                        |
 | Real Estate CRM; Education CRM          | 20–40× each        | Low confidence; depends on the product ADR's scope                    |
 | Shared mobile app (per product)         | 20–40× each        | Low confidence; store accounts and signing are founder actions        |

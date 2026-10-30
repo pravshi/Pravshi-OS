@@ -45,8 +45,11 @@ separated as they stand: moving folders first would carry the cycle into the new
      from the repository root and `src/app`, `src/components`, `src/hooks`, `public`) and
      `apps/worker` (the worker entry from Step 5); shared configuration; CI, CODEOWNERS and the
      agent rule files updated in the same change.
-   - **Step 8, package extraction:** the layers of ADR-010 move into `packages/`, **one package
+   - **Step 8, package extraction:** the modules of ADR-010 move into `packages/`, **one package
      per pull request, in dependency order** (lowest layer first), each with its own approval.
+     `crm-core` holds only the CRM concepts every product shares; the other tenant capabilities
+     (work, integrations, automation, imports, search, analytics, ai, admin) become their own
+     packages (target-architecture.md §5).
 4. **Phase 3 — products and delivery, future stages.** The product registry, the Real Estate CRM,
    the Education CRM, the shared mobile apps, organization websites and custom domains, and
    white-label apps are separate future stages. **Each needs its own ADR and its own approval**
@@ -121,8 +124,11 @@ at, so it carries these conditions:
 - **CODEOWNERS** entries for `/src/app/` and `/src/components/` are updated to the new paths.
 - **Guards that name these paths** are updated in the same change, without weakening any check:
   `require-permission-first` (its exact pre-authentication route list), `frontend-boundary-leaks`,
-  `frontend-resilience`, `no-keepalive` (its allowlist) and the other tests that pin `src/` paths
-  (38 test files at `3a8c155`).
+  `frontend-resilience`, `no-keepalive` (its allowlist) and the other tests that name `src/` paths
+  (`grep -rlE "src/" tests` finds 90 files at `3a8c155`, 32 of the 56 guard files; a narrower
+  search counts 89 and 30).
+- **`src/middleware.ts`** moves to `apps/web` only with the founder's explicit approval: it is a
+  shared file (AGENTS.md §3).
 - **Antigravity reviews the move** read-only and reports findings (AGENTS.md §6) before the
   founder merges.
 - `src/components/ui` becomes `packages/shared-ui` only in Step 8, under the same conditions.
