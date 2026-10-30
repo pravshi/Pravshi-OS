@@ -75,7 +75,10 @@ founder approved for it. Anything not listed: ask before editing.
 Each needs explicit approval for that exact action and target; approval for one never extends
 to the next.
 
-- Pushing a branch, opening or updating a PR, merging (the founder merges), deploying.
+- Opening or updating a PR, merging a PR (the founder merges), pushing any branch other than
+  `main`, deploying. The standing milestone workflow (§5) pre-authorises exactly one push: a
+  verified fast-forward of finished work to `main`, under the conditions stated there. It never
+  extends to anything else in this list or to a push that fails those conditions.
 - Any connection to a hosted database (Neon, `Pravshi-OS-New`, the old development database,
   production) — each database and each operation separately, production last; running
   `roles.sql`; any migration on a persistent database; creating, renaming or deleting a Neon
@@ -122,21 +125,39 @@ to the next.
 
 **Git and worktrees**
 
+- **Milestone workflow (standing founder decision, 2026-10-30).** Work locally and commit
+  meaningfully at stable checkpoints (a completed component, a green test set). Finish a major
+  task, module or phase before publishing; then run the release gates in
+  [git-and-release.md](.claude/rules/git-and-release.md). Verified milestones go **directly to
+  `main`** by default. Use a **pull request** (the founder merges) for high-risk or
+  security-sensitive changes, any migration, and any change to CI, scripts, guards, dependencies,
+  shared files or these rules (the direct-push audit flags those after the fact — it cannot
+  prevent the push — so route them through a PR), and whenever an independent review adds value.
+- **A milestone push to `main` requires all of:** the release gates pass on the exact commit;
+  `git fetch` shows `origin/main` equals the base SHA you recorded and is an ancestor of the
+  commit (a plain fast-forward — if `main` moved unexpectedly, stop and investigate, do not
+  rebase or merge over it blindly); an explicit refspec (`git push origin <sha>:refs/heads/main`).
+  Afterwards verify the remote SHA, every GitHub check (`ci` and `direct-push-audit`) and a
+  clean working tree, and record the milestone in the private record (`audit-output/milestones.md`
+  until the `.coordination/` ledger exists). A red check after a push is
+  reported with its cause; it is never waved through.
 - Branch from the verified current `origin/main`: `feature/*`, `fix/*`, `chore/*`, `docs/*`
   (`hotfix/*` only for a production incident — [CONTRIBUTING.md](CONTRIBUTING.md)); Antigravity
-  uses `feature/frontend/<task>`. Never commit to `main` directly.
+  uses `feature/frontend/<task>`. Never commit on a local `main`: milestone commits are made on
+  a task branch in its worktree and published by the explicit-refspec push above.
 - One worktree per active task (`git worktree add ../Pravshi-OS-<task> -b <branch> origin/main`).
   Do not implement product changes in the primary `Pravshi-OS` worktree (it holds the agent
   rules and private files), never switch branches in a worktree you do not own, and never
   modify, prune or delete another agent's branch or worktree.
-- A new worktree has none of these rule files: they are committed only on the branch
-  `chore/claude-engineering-system` (not on `main`), which the primary worktree has checked out. Before an agent starts in one, run
-  `node scripts/agents/sync-worktree-rules.mjs <worktree>` from the primary worktree; it copies
-  the committed rules, excluded from Git and verified by sha256 (`--check` verifies only). Never
-  edit the copies — change the rules in the primary — and never run `git clean -x` in a
-  worktree.
-- Never force-push, rewrite shared history, auto-merge, merge your own PR, or deploy. Push only
-  when authorized (§4), with an explicit refspec.
+- The rule files are tracked on `main` (PR #100), so a worktree created from `origin/main` has
+  them already. A worktree created before that has none: run
+  `node scripts/agents/sync-worktree-rules.mjs <worktree>` from the primary worktree to give it
+  checksum-verified, Git-ignored copies (`--check` verifies only; it refuses a target that
+  tracks the files itself). Never edit such copies, and never run `git clean -x` in a worktree.
+- Never force-push, rewrite shared or published history, auto-merge, merge your own PR, or
+  deploy. Never delete or discard local commits, branches, worktrees, stashes, backup refs or
+  uncommitted work without approval. Push only as §4 and the milestone workflow allow, with an
+  explicit refspec.
 - Stage files explicitly. Never stage `audit-output/`, `.coordination/`, scratch logs, `.env*`
   or secrets; both private paths are excluded locally in `.git/info/exclude`. Run the secret
   scan after committing (`node scripts/guards/secret-scan.mjs`; it reads HEAD).
@@ -211,8 +232,10 @@ which stays the detailed reference. Where the two differ, the stricter text wins
   `--dangerously-skip-permissions`.
 - **Git (§5):** work only in your own `feature/frontend/<task>` branch and worktree — never in
   the primary `Pravshi-OS` worktree or in Claude's branch or worktree, and only once its rule
-  copies pass `sync-worktree-rules.mjs --check`; never push to `main`, force-push or merge your
-  own PR; never stage `audit-output/`, `.coordination/`, `.env*` or secrets.
+  copies pass `sync-worktree-rules.mjs --check` (or the worktree tracks the rules); never push
+  to `main`, force-push or merge your own PR — the milestone workflow's direct push is the
+  engineering lead's, and reaches Antigravity only if the founder says so; never stage
+  `audit-output/`, `.coordination/`, `.env*` or secrets.
 - **Handoffs, review and reporting (§6–§7):** work only on an assigned task ID; review read-only
   and report findings with evidence; answer findings AGREE, DISAGREE with evidence, or
   NEEDS-HUMAN; missing evidence is not a pass; every handoff uses the eight-section report.

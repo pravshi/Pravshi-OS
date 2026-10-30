@@ -26,8 +26,9 @@ work. The persistent instructions are in [CLAUDE.md](../../CLAUDE.md); focused r
    write the change and reviews the actual diff against the actual base.
 6. **The lead reconciles disagreements** with evidence (re-reading the code, running the test,
    a targeted experiment) — not by majority. Unresolved disagreements go to the founder.
-7. **Only the founder** authorizes pushing, opening or merging PRs, deployments and any hosted
-   database operation (each named target and operation separately).
+7. **Only the founder** authorizes opening or merging PRs, deployments and any hosted database
+   operation (each named target and operation separately). The one standing authorization is the
+   milestone push to `main` (AGENTS.md §5): verified, fast-forward, explicit refspec.
 
 ## When to delegate and when to work directly
 
@@ -62,13 +63,17 @@ All six run with `Read, Grep, Glob, Bash` and are instructed not to modify the r
 
 1. Lead: establish state (`git fetch`; `origin/main` SHA; worktrees; clean tree).
 2. `principal-architect`: plan and acceptance criteria (for substantial work).
-3. Lead: create the branch (or worktree), implement in small commits, add regression tests,
-   run the gates (`.claude/rules/git-and-release.md`).
+3. Lead: create the task branch and worktree, implement in small local commits at stable
+   checkpoints, add regression tests, and at milestone completion run the gates
+   (`.claude/rules/git-and-release.md`).
 4. In parallel, independently: `independent-code-reviewer` on the full diff, plus
    `security-auditor` and/or `database-migration-auditor` when their areas are touched.
 5. Lead: fix findings, re-run affected tests, review the full diff and docs, commit.
-6. `release-gate-auditor`: confirm the gates; the lead reports to the founder with the standard
-   report and waits for approval to push, open a PR or merge.
+6. `release-gate-auditor`: confirm the gates. Default: the lead pushes the verified milestone
+   directly to `main`, verifies the remote SHA, CI and tree, and reports with the standard
+   report. High-risk, security-sensitive, major-migration or CI/guard/migration/role changes go
+   through a PR instead: the lead reports and waits for approval to push the branch and open it;
+   the founder merges.
 
 ## Checking that the setup is loaded
 
@@ -99,11 +104,13 @@ All six run with `Read, Grep, Glob, Bash` and are instructed not to modify the r
 > requirements and the current CRM, with acceptance criteria. Then implement on a new
 > `feature/` branch from current origin/main, add the forbidden-case and failure tests, run the
 > gates, and get independent-code-reviewer and security-auditor reviews of the full diff. Fix
-> their findings, commit locally, and stop for my approval before pushing.
+> their findings, commit locally, and — if it is a verified milestone and not a high-risk or
+> protected-file change — push it to main per AGENTS.md §5; otherwise stop for my approval to
+> open a PR.
 
 **Release review:**
 
-> Use release-gate-auditor on PR #<n>: verify the head SHA, every GitHub check run, the local
+> Use release-gate-auditor on PR #<n> (or on main's pushed commit <sha>): verify the head SHA, every GitHub check run, the local
 > evidence in the description, migration/journal/runbook consistency and the secret scans.
 > Report pending or unstarted checks as not passed. Do not merge or rerun anything.
 

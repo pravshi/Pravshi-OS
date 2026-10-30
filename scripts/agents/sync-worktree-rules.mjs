@@ -1,12 +1,12 @@
 /**
  * Give another worktree of this repository the agent rules, as checksum-verified copies.
  *
- * A worktree created from `main` has no AGENTS.md, CLAUDE.md, .claude/ or .agents/: those rule
- * files live only on the `chore/claude-engineering-system` branch (not on `main`), checked out in
- * the primary Pravshi-OS worktree. This copies the COMMITTED rule files from the primary worktree
- * (the one this script sits in) into another worktree, where both agents load them natively. The
- * copies are untracked and excluded from Git by .git/info/exclude, so they cannot be staged,
- * committed or pushed by accident.
+ * The rule files (AGENTS.md, CLAUDE.md, .claude/, .agents/) are tracked on `main` since PR #100,
+ * so a worktree created from the current `origin/main` already has them and this script refuses
+ * it. A worktree created BEFORE that has none; this copies the COMMITTED rule files from the
+ * primary worktree (the one this script sits in) into such a worktree, where both agents load
+ * them natively. The copies are untracked and excluded from Git by .git/info/exclude, so they
+ * cannot be staged, committed or pushed by accident.
  *
  *   node scripts/agents/sync-worktree-rules.mjs <worktree>          copy, then verify
  *   node scripts/agents/sync-worktree-rules.mjs <worktree> --check  verify only; writes nothing
