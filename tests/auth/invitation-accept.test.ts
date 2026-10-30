@@ -40,12 +40,13 @@ vi.mock('@/lib/auth/server', () => ({
 }));
 vi.mock('@/lib/db/auth-client', () => ({ authDb: { execute: mocks.execute } }));
 // acceptInvitation never reaches the authorised half of the invitations
-// service (only its InvitationError type crosses), but the import must
-// resolve without opening the real database path.
+// service: since Step 4 (ADR-010) it imports nothing from src/lib/invitations,
+// only the shared contract in src/lib/auth/invitation-contract.ts. The mock
+// stays as a fence so that no import path can open the real database.
 vi.mock('@/lib/db/authorized', () => ({ withAuthorizedDb: vi.fn() }));
 
 const { acceptInvitation } = await import('@/lib/auth/invitations');
-const { InvitationError } = await import('@/lib/invitations/service');
+const { InvitationError } = await import('@/lib/auth/invitation-contract');
 
 const TOKEN = 'invitation-token-plaintext';
 const STRONG = 'a very strong passphrase 42';

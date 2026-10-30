@@ -4,7 +4,7 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { auth, MIN_PASSWORD_LENGTH } from '@/lib/auth/server';
 import { authDb } from '@/lib/db/auth-client';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from '@/lib/db/auth-schema';
 
 /**
  * P1-2 (real-human E2E, 2026-10-03): POST /api/auth/change-password was

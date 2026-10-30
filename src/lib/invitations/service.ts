@@ -2,7 +2,8 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
 import { sqlstateOf } from '@/lib/auth/invitations';
-import { generateInvitationToken, hashInvitationToken } from './tokens';
+import { generateInvitationToken } from './tokens';
+import { hashInvitationToken, InvitationError } from '@/lib/auth/invitation-contract';
 import type { CreateInvitationInput } from './schema';
 
 /**
@@ -15,36 +16,6 @@ import type { CreateInvitationInput } from './schema';
  *                      auth module, because the invitee has no session yet and it must
  *                      reach the database through authDb (the sanctioned exception).
  */
-
-export class InvitationError extends Error {
-  constructor(
-    readonly code:
-      | 'EMAIL_HAS_LOGIN'
-      | 'INVITATION_ALREADY_LIVE'
-      | 'PERSON_NOT_FOUND'
-      | 'PERSON_NOT_INVITABLE'
-      | 'PERSON_EMAIL_MISMATCH'
-      | 'ENGAGEMENT_REQUIRED'
-      | 'DEPARTMENT_NOT_FOUND'
-      | 'ROLE_NOT_FOUND'
-      | 'ROLE_PROTECTED'
-      | 'INVITATION_NOT_FOUND'
-      | 'INVITATION_INVALID'
-      | 'INVITATION_ALREADY_ACCEPTED'
-      | 'INVITATION_CANNOT_COMPLETE'
-      | 'PASSWORD_TOO_SHORT'
-      | 'PASSWORD_TOO_LONG'
-      // F-11-07: the full shared password policy (common list + HIBP breach
-      // check) runs on invitation accept, not length alone — see
-      // src/lib/auth/invitations.ts.
-      | 'PASSWORD_TOO_COMMON'
-      | 'PASSWORD_BREACHED',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'InvitationError';
-  }
-}
 
 export interface CreatedInvitation {
   id: string;

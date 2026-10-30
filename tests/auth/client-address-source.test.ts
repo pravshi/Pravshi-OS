@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { betterAuthIpAddressOptions } from '@/lib/auth/better-auth-ip';
 import {
-  betterAuthIpAddressOptions,
   CLIENT_ADDRESS_HEADER,
   clientAddressFromHeaders,
   clientAddressSource,
-} from '@/lib/auth/client-address';
+} from '@/lib/observability/client-address';
 
 /**
  * D1 — the client address is read from the header the deployment guarantees, never from one a

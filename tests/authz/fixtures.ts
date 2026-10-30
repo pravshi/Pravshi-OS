@@ -5,7 +5,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { twoFactor } from 'better-auth/plugins';
 import { auth, MIN_PASSWORD_LENGTH } from '@/lib/auth/server';
 import { authDb } from '@/lib/db/auth-client';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from '@/lib/db/auth-schema';
 import { AuthorizationError } from '@/lib/authz/errors';
 
 /**

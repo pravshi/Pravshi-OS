@@ -94,6 +94,21 @@ the full run above passed. The cause of the failure on the restarted cluster is 
 it is recorded here, not waved through, and GitHub CI (PostgreSQL 18) on the pull request remains
 the authoritative check.
 
+**After Steps 3 and 4.** Step 3 (`3c3f04d`, merged as `9bf9d63`, the security inventory) was
+recorded in pull request #105; it is repeated here so §2 stays the single record. Step 4 is the
+foundation-cycles change (four moves, ADR-010); same environment, newly initialised cluster:
+
+| Check                                                    | Step 3 (`3c3f04d`)                  | Step 4                                                                                          |
+| -------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                                | pass                                                                                            |
+| `pnpm guards`                                             | pass (1,049 files)                  | pass (secret scan 1,051 tracked files; workflow secret flow 2 workflows)                        |
+| `pnpm audit --audit-level=high`                           | pass                                | pass (documented ignores only)                                                                  |
+| `pnpm build`                                              | pass                                | pass — the route list (63 pages, 99 route handlers, `/_not-found`, middleware) is identical     |
+| Migrations from zero                                      | 88 of 88                            | 88 of 88; the 88 migration files, the journal and the 14 rollback scripts are byte-identical    |
+| `pnpm test` (files)                                       | 271 passed, 0 failed, 1 skipped     | 271 passed, 0 failed, 1 skipped (272 files)                                                     |
+| `pnpm test` (tests)                                       | 4,209 passed, 0 failed, 10 skipped  | 4,210 passed, 0 failed, 10 skipped (4,220: one new guard test, `single-db-path`, review F-S4-1) |
+| Module-boundary baseline                                  | 17 entries                          | 13 entries — the four foundation entries removed, none added                                    |
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 

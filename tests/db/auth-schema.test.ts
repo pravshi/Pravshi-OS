@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Pool } from '@neondatabase/serverless';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from '@/lib/db/auth-schema';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 
 /**

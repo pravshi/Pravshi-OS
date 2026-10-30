@@ -7,7 +7,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { auth, MIN_PASSWORD_LENGTH } from '@/lib/auth/server';
 import { resolveAuthContext, revokeSessionsFor } from '@/lib/auth/session';
 import { authDb } from '@/lib/db/auth-client';
-import { authDbSchema } from '@/lib/auth/schema';
+import { authDbSchema } from '@/lib/db/auth-schema';
 
 /**
  * Task 1.12 — authentication establishes identity and nothing else.

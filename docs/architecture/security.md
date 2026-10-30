@@ -374,7 +374,7 @@ A Better Auth upgrade that adds a verification endpoint fails the pinned endpoin
 Still open:
 
 - **FU-1, the client address.** The address now comes only from the deployment's trusted header
-  (`src/lib/auth/client-address.ts`, D1): `x-vercel-forwarded-for` on Vercel, nothing on any
+  (`src/lib/observability/client-address.ts`, D1): `x-vercel-forwarded-for` on Vercel, nothing on any
   other production host. Pending: the founder's confirmation of the topology (Vercel direct,
   Cloudflare DNS only) and a preview check that external requests record a non-null address —
   if the header were missing, every client would share one bucket. The per-account bounds above

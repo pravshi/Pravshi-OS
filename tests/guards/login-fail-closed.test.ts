@@ -12,7 +12,8 @@ const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
 const EVENTS = read('lib/auth/login-events.ts');
-const ADDRESS = read('lib/auth/client-address.ts');
+const ADDRESS = read('lib/observability/client-address.ts');
+const BETTER_AUTH_IP = read('lib/auth/better-auth-ip.ts');
 
 describe('A1 review: every client address the auth plane uses is validated', () => {
   it('clientIp and the hooks read the trusted header (D1) through forwardedIp', () => {
@@ -32,6 +33,14 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     const advanced = SERVER.slice(start, SERVER.indexOf('\n  },', start));
     expect(advanced).toContain('ipAddress: betterAuthIpAddressOptions(),');
     expect(SERVER).not.toMatch(/disableIpTracking/);
+    // Step 4 split the option into its own file: the server must take it from there, and the
+    // option must build its list from the D1 module's header table, never switch tracking off.
+    expect(SERVER).toMatch(/import \{ betterAuthIpAddressOptions \} from '\.\/better-auth-ip';/);
+    expect(BETTER_AUTH_IP).toMatch(/from '@\/lib\/observability\/client-address'/);
+    expect(BETTER_AUTH_IP).toMatch(/const name = CLIENT_ADDRESS_HEADER\[source\];/);
+    // Code only: the option's doc comment names disableIpTracking to explain why it is never set.
+    const betterAuthIpCode = BETTER_AUTH_IP.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*/gm, '');
+    expect(betterAuthIpCode).not.toMatch(/disableIpTracking/);
   });
 
   it('no code outside the D1 module names a client-address header (review F-D1-3)', () => {
@@ -40,7 +49,7 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
     const files = (readdirSync('src', { recursive: true }) as string[])
       .map((f) => f.replace(/\\/g, '/'))
-      .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/auth/client-address.ts');
+      .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/observability/client-address.ts');
     expect(files.length).toBeGreaterThan(100);
     const offenders = files.filter((f) =>
       // Comments may name a header; code may not. Only comments that START a line are dropped

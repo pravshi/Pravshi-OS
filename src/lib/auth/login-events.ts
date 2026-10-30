@@ -1,4 +1,4 @@
-import { clientAddressFromHeaders } from './client-address';
+import { clientAddressFromHeaders } from '@/lib/observability/client-address';
 import { sql } from 'drizzle-orm';
 import { authDb } from '@/lib/db/auth-client';
 
@@ -73,7 +73,7 @@ export async function recordLoginEvent(opts: {
   }
 }
 
-export { forwardedIp } from './client-address';
+export { forwardedIp } from '@/lib/observability/client-address';
 
 /**
  * Best-effort client IP from the header this deployment trusts (client-address.ts, D1),
