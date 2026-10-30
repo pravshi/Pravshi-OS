@@ -33,14 +33,20 @@ grows, reintroducing `develop` is a deliberate decision, not a default.
 
 ## Rules
 
-1. **Nobody pushes directly to `main`.** A push to `main` that did not arrive through a
-   pull request fails the `direct-push-audit` workflow, which exists to make the
-   violation visible after the fact — it cannot prevent it.
-2. **All normal work branches from `main`** and returns through a pull request.
+1. **Two ways onto `main`.** (a) A merged pull request. (b) A direct _milestone push_: a
+   verified, plain fast-forward of finished work, pushed with an explicit refspec, never
+   forced. The `direct-push-audit` workflow checks every push after the fact — it cannot
+   prevent one. A direct push passes only if it is a fast-forward of the previous tip, changes
+   none of `.github/`, `scripts/ci/`, `scripts/guards/`, `scripts/db/`, `drizzle/` or
+   `scripts/migrate-ws.mjs`, asks for no CI skip, and its own `ci` run succeeded. There is no
+   bypass for any person or bot. Anything else fails the audit.
+2. **Work branches from `main`** and returns as a milestone push, or through a pull request
+   for high-risk or security-sensitive changes, major migrations, changes to the protected
+   files above, and whenever independent review adds value.
 3. **CI must be green before merge.** The `ci` check is not marked required on `main`, so
    a red run blocks a merge only because a human refuses to merge it. Merging over red CI
    requires a written justification in the pull request.
-4. **The founder or an authorised maintainer performs the merge to `main`.**
+4. **The founder or an authorised maintainer performs the merge of a pull request.**
 5. **CODEOWNERS requests review; it does not require it.** `.github/CODEOWNERS` causes
    GitHub to auto-request the right reviewers. With no branch protection requiring code
    owner review, that request can be dismissed or ignored, and merging without it is not

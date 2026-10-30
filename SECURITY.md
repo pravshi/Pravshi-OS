@@ -208,9 +208,12 @@ Two compensating controls exist, and both are **detection, not prevention**:
 
 - `scripts/guards/secret-scan.mjs` runs on every PR whatever GitHub's own secret scanning is
   set to.
-- `.github/workflows/direct-push-audit.yml` fails a run when a commit reaches `main` without
-  arriving through a merged pull request. It decides from GitHub's PR-association data, never
-  from a commit subject such as `(#123)`, which anyone can forge. It cannot stop the push.
+- `.github/workflows/direct-push-audit.yml` fails a run when a commit reaches `main` neither
+  through a merged pull request nor as a verified direct milestone push (a fast-forward whose
+  own `ci` run succeeded, touching no CI, guard, migration or role file, with no CI-skip
+  marker). It decides from GitHub's data, never from a commit subject such as `(#123)` or
+  from who pushed, and has no identity-based bypass. It cannot stop the push, and a hostile
+  pusher with write access could edit the audit itself; branch protection is the real control.
 
 Everything else is policy, enforced by people. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

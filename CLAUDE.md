@@ -26,7 +26,8 @@ worktree. Handoffs to and from Antigravity follow AGENTS.md §6. The private coo
 2. Inspect the relevant code, migrations, tests and architecture docs before deciding.
 3. Write a bounded plan with acceptance criteria.
 4. Delegate independent read-only investigations where useful (see the workflow guide).
-5. Implement narrow, reviewable changes on a feature branch.
+5. Implement narrow, reviewable changes as local commits on a task branch in its own worktree,
+   committing at stable checkpoints.
 6. Add regression tests, including forbidden and failure cases; prove them with a mutation
    check (the test must fail without the fix) where practical.
 7. Run the relevant verification and the release gates below.
@@ -34,8 +35,13 @@ worktree. Handoffs to and from Antigravity follow AGENTS.md §6. The private coo
    `database-migration-auditor` when their areas are touched).
 9. Fix findings; re-run the affected tests.
 10. Review the full diff and the documentation it affects.
-11. Commit locally; prepare the PR text.
-12. Wait for approval to push, open a PR or merge.
+11. At milestone completion run every release gate below on the exact commit.
+12. Publish. Default: a direct milestone push to `main` under AGENTS.md §5 (fast-forward,
+    explicit refspec), then verify the remote SHA, every GitHub check and a clean tree, and
+    record the milestone privately (`audit-output/milestones.md`, never committed). For
+    high-risk, security-sensitive or major-migration work, or changes to CI, guards, migrations
+    or roles: prepare the PR text and wait for approval to push the branch and open the PR; the
+    founder merges. Production, DNS, hosted databases, real email and bootstrap stay gated.
 
 ## Commands (from `package.json` and `.github/workflows/ci.yml` — do not invent others)
 
