@@ -27,10 +27,10 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { WAKE_TOKEN_HEADER } from '@/lib/jobs/wake-token';
 import type { WakeLatch } from './wake-latch';
 import type { LivenessStatus } from './liveness';
 
-export const WAKE_TOKEN_HEADER = 'x-pravshi-worker-token';
 export const WAKE_TOKEN_MIN_LENGTH = 32;
 /** A wake carries no data; anything announcing more than this is not a wake. */
 const MAX_BODY_BYTES = 1024;

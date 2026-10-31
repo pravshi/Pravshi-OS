@@ -5,7 +5,7 @@ import { env } from '@/env';
  * Resend email adapter — Phase 10 contract §4.6 item 1 (Wave P).
  *
  * This is the real transmission path behind the Phase 6 job email handler
- * (`sendEmailViaProvider` in src/lib/jobs/handlers.ts), which the Phase 8
+ * (`sendEmailViaProvider` in src/worker/handlers.ts), which the Phase 8
  * workflow `send_email` action enqueues into. It mirrors the conventions of
  * the two proven auth-adjacent mailers — src/lib/invitations/email.ts and
  * src/lib/auth/password-reset-email.ts: a lazily constructed module-level

@@ -5,7 +5,7 @@
  * file read: profiled, they were the bulk of start-ups that took over 20 s.
  *
  * The REAL entry point is launched exactly as `pnpm worker` launches it (Node's TypeScript
- * transform, the worker loader, src/lib/jobs/runner.ts), with a module-load recorder added. The
+ * transform, the worker loader, src/worker/runner.ts), with a module-load recorder added. The
  * worker is given the web runtime's login (app_user) as its worker login, so it loads every
  * module, prints its first line and then refuses to start at its own role check — a natural end
  * right after the module graph is complete. LIVE DB (that role check), gated behind DB_READY.
@@ -82,7 +82,7 @@ export async function load(url, context, nextLoad) {
           './scripts/ci/neon-local.mjs',
           '--import',
           './scripts/worker-loader.mjs',
-          'src/lib/jobs/runner.ts',
+          'src/worker/runner.ts',
         ],
         { env, stdio: ['ignore', 'pipe', 'pipe'] },
       );
@@ -116,12 +116,15 @@ export async function load(url, context, nextLoad) {
 
   it('loaded the whole worker graph, including the module that used to pull the auth server in', () => {
     for (const file of [
-      'src/lib/jobs/runner.ts',
-      'src/lib/jobs/worker.ts',
-      'src/lib/jobs/handlers.ts',
-      'src/lib/jobs/workflow-jobs.ts',
-      'src/lib/jobs/maintenance.ts',
-      'src/lib/jobs/scheduler.ts',
+      'src/worker/runner.ts',
+      'src/worker/worker.ts',
+      'src/worker/handlers.ts',
+      'src/worker/workflow-jobs.ts',
+      'src/worker/maintenance.ts',
+      'src/worker/scheduler.ts',
+      // The queue core the worker imports downward, including the handler registry (ADR-010 rule 5).
+      'src/lib/jobs/queue.ts',
+      'src/lib/jobs/handler-registry.ts',
       'src/lib/authz/require-permission.ts',
       // The modules that used to import Sentry directly, and what they report through now.
       'src/lib/workflows/engine.ts',

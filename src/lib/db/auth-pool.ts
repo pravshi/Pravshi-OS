@@ -20,7 +20,7 @@ import { isRetryableConnectError } from './pool';
  * refuses a deployment without it before anything runs.)
  *
  * CREATED ON FIRST USE, NOT AT IMPORT. The worker host must not hold DATABASE_URL_AUTH
- * (src/lib/jobs/runner.ts refuses it), yet its module graph reaches this file through shared
+ * (src/worker/runner.ts refuses it), yet its module graph reaches this file through shared
  * code (workflow engine → integrations fan-out → authorization helpers → session → auth client)
  * without ever authenticating anyone. So importing it must neither require the variable nor
  * open anything; only a call does. `authPool` is a Pool whose connect/query go to the real pool,

@@ -10,8 +10,9 @@
  * ── CONTRACTS ─────────────────────────────────────────────────────────────
  *   Architecture contracts §3.6 (workflow-jobs.ts), §3.4 (worker registration).
  *   Queue Engineer owns src/lib/jobs/types.ts — READ ONLY, never redefined.
- *   Worker Runtime Engineer owns src/lib/jobs/worker.ts — `registerHandler`
- *   is imported from there per contract §3.4.
+ *   Worker Runtime Engineer owns the worker loop (src/worker/worker.ts); `registerHandler`
+ *   (contract §3.4) is imported from the queue core's handler registry,
+ *   src/lib/jobs/handler-registry.ts (redesign Step 5).
  *
  * ── EXECUTION AUTHORITY (§3.6 + 0048) ──────────────────────────────────────
  *   The orgId ALWAYS comes from the job ROW (verified by the definer),
@@ -66,17 +67,17 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { sql } from 'drizzle-orm';
-import { withAuthorizedDb } from '../db/authorized';
-import type { Authorization } from '../authz/require-permission';
-import type { AuthContext } from '../db/context';
-import type { RequestMetadata } from '../audit/log';
-import { type WorkflowEvent, type WorkflowEventInput } from '../workflows/events';
-import { executeWorkflowManual, runWorkflowsForEvent } from '../workflows/engine';
-import { WORKFLOW_TRIGGER_TYPES } from '../workflows/schema';
-import { cronWindowStart } from './cron';
-import { WorkflowRunPayloadSchema, type Job, type JobType } from './types';
-import { registerHandler, type JobExecutionContext } from './worker';
-import { withQueueDb } from './queue';
+import { withAuthorizedDb } from '@/lib/db/authorized';
+import type { Authorization } from '@/lib/authz/require-permission';
+import type { AuthContext } from '@/lib/db/context';
+import type { RequestMetadata } from '@/lib/audit/log';
+import { type WorkflowEvent, type WorkflowEventInput } from '@/lib/workflows/events';
+import { executeWorkflowManual, runWorkflowsForEvent } from '@/lib/workflows/engine';
+import { WORKFLOW_TRIGGER_TYPES } from '@/lib/workflows/schema';
+import { cronWindowStart } from '@/lib/jobs/cron';
+import { WorkflowRunPayloadSchema, type Job, type JobType } from '@/lib/jobs/types';
+import { registerHandler, type JobExecutionContext } from '@/lib/jobs/handler-registry';
+import { withQueueDb } from '@/lib/jobs/queue';
 
 // ── D4 depth guard ────────────────────────────────────────────────────────────
 

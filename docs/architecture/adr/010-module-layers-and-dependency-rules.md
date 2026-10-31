@@ -19,13 +19,13 @@ relative paths and dynamic `import()` all resolved) shows:
   | `observability → jobs` — **removed, Step 4** | `src/lib/observability/report.ts` imported `jobs/process-context`; the flag now lives in `src/lib/observability/process-context.ts` |
   | `audit → auth` — **removed, Step 4** | `src/lib/audit/log.ts` imported `auth/client-address`; the trusted-header logic now lives in `src/lib/observability/client-address.ts` (Better Auth's option stays in `src/lib/auth/better-auth-ip.ts`) |
   | `auth → invitations` — **removed, Step 4** | `src/lib/auth/invitations.ts` imported the token hash, accept schema and `InvitationError` from `invitations`; they now live in `src/lib/auth/invitation-contract.ts`, which `invitations` imports (a permitted downward edge) |
-  | `jobs → domain modules`        | the worker entry (`runner.ts`, `handlers.ts`, `workflow-jobs.ts`) lives in `src/lib/jobs` |
+  | `jobs → domain modules` — **removed, Step 5** | the worker entry (`runner.ts`, `handlers.ts`, `workflow-jobs.ts`, `reminder-sweep.ts`) lived in `src/lib/jobs`; it now lives in `src/worker/`, and `src/lib/jobs` imports no L4 module |
   | `crm, work, integrations ↔ workflows` | event emission and workflow actions call each other directly |
   | `crm → integrations`           | `src/lib/crm/deals.ts` and `src/lib/crm/pipelines.ts` call `emitIntegrationEvent` (`integrations/fanout`) |
   | `work → integrations`          | `src/lib/work/tasks.ts` calls `emitIntegrationEvent` (`integrations/fanout`) |
 
   Step 4 removed the first four edges (the boundary guard's baseline went from 17 entries to 13)
-  and Step 5 removes the `jobs` edge. Step 6 removes the last three rows:
+  and Step 5 the `jobs` edge (13 to 8). Step 6 removes the last three rows:
   `crm → workflows`, `work → workflows`, `integrations → workflows`, `crm → integrations` and
   `work → integrations` all become emissions through the `events` port (rule 4).
 
@@ -71,7 +71,11 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
    authority, inline or queued execution.
 5. **The queue is not the worker.** `jobs` (L3) holds the queue core: job types, enqueue, wake,
    retry policy. Job handlers and the worker's entry point import domain modules, so they live in
-   the worker entry (`src/worker/` after Step 5), not in `src/lib/jobs`.
+   the worker entry (`src/worker/`), not in `src/lib/jobs`. The queue core keeps what both sides
+   need: the handler registry (`handler-registry.ts`), so a domain module that owns a job type
+   registers its handler without importing the worker, and the cron and audit helpers that
+   `queue.ts`, `workflows` and `src/app` already use. The worker imports the queue core downward;
+   the queue never imports the worker (the boundary guard enforces both).
 6. **Database access rules are unchanged.** `withAuthorizedDb()` remains the only business-data
    path; the `app_auth`, `app_worker` and `app_platform` pools remain restricted to their planes
    exactly as `tests/guards/single-db-path.test.ts` enforces today.

@@ -65,7 +65,7 @@ describe.skipIf(!DB_READY)('crm_import job errors carry no imported value (0081,
     const { handleCrmImport } = await import('@/lib/import/sales-sheet/job');
     const { classifyError } = await import('@/lib/jobs/retry');
     const { failJob } = await import('@/lib/jobs/queue');
-    const { buildJobAuthorization } = await import('@/lib/jobs/worker');
+    const { buildJobAuthorization } = await import('@/worker/worker');
     const requestId = randomUUID();
     const auth = {
       ctx: { personId: importer, orgId: org, aal: 'aal2' as const },

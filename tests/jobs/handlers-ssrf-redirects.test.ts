@@ -8,7 +8,7 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -75,8 +75,8 @@ function fakeRequest(
 vi.mock('node:http', () => ({ request: fakeRequest, default: { request: fakeRequest } }));
 vi.mock('node:https', () => ({ request: fakeRequest, default: { request: fakeRequest } }));
 
-import { handleWebhook } from '../../src/lib/jobs/handlers';
-import type { JobExecutionContext } from '../../src/lib/jobs/worker';
+import { handleWebhook } from '../../src/worker/handlers';
+import type { JobExecutionContext } from '../../src/lib/jobs/handler-registry';
 
 const answers = (...ips: string[]) =>
   ips.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));

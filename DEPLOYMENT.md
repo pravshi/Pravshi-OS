@@ -185,7 +185,7 @@ From the operator's machine, never from CI or Vercel, following
 
 Everything asynchronous in Pravshi OS — notifications, task reminders, email delivery
 (including **password-reset email**), outbound webhooks, workflow runs, scheduled
-triggers — executes in a separate long-running worker process (`src/lib/jobs/runner.ts`),
+triggers — executes in a separate long-running worker process (`src/worker/runner.ts`),
 not in the web app. **A deployment that starts only the web app
 is silently broken:** every one of those surfaces stalls, with no signal in the UI. The
 worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
@@ -338,7 +338,7 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 A job's lease renewal (every 15 s) proves the worker **process** is alive, not that its loop
 is getting anywhere: a handler that never returns keeps renewing its lease, so the reaper never
 frees the job and nothing else notices. The worker therefore runs an in-process watchdog
-(`src/lib/jobs/liveness.ts`). Before every wait the loop says what it waits for; a deep or
+(`src/worker/liveness.ts`). Before every wait the loop says what it waits for; a deep or
 idle sleep is held to the exact length it chose, a pass or a job to the budget below. The
 watchdog reads only a monotonic clock — **no database query, ever** (a health check that
 touched the database would keep Neon awake; `tests/guards/no-keepalive.test.ts` enforces

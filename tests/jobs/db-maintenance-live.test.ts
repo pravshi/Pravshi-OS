@@ -2,7 +2,7 @@
  * WP-2 (Core V1 audit D-1, D-2) — database maintenance LIVE DB tests.
  *
  * Migration 0065 adds two worker-plane SECURITY DEFINER functions, driven by
- * src/lib/jobs/maintenance.ts on the worker's maintenance cadence:
+ * src/worker/maintenance.ts on the worker's maintenance cadence:
  *
  *   - maintain_audit_log_partitions(): keeps audit_logs partitioned twelve
  *     months ahead (no DEFAULT partition exists, so a lapsed window would fail
@@ -42,12 +42,12 @@ describe.skipIf(!DB_READY)('database maintenance (live DB)', () => {
   let orgId = '';
   let personId = '';
 
-  let maintainAuditLogPartitions: typeof import('@/lib/jobs/maintenance').maintainAuditLogPartitions;
-  let runDataRetention: typeof import('@/lib/jobs/maintenance').runDataRetention;
+  let maintainAuditLogPartitions: typeof import('@/worker/maintenance').maintainAuditLogPartitions;
+  let runDataRetention: typeof import('@/worker/maintenance').runDataRetention;
 
   beforeAll(async () => {
     if (!DB_READY) return;
-    ({ maintainAuditLogPartitions, runDataRetention } = await import('@/lib/jobs/maintenance'));
+    ({ maintainAuditLogPartitions, runDataRetention } = await import('@/worker/maintenance'));
     orgId = await mkOrg(owner, `maint-${RUN}`);
     personId = await mkPerson(owner, orgId, `Maint ${RUN}`);
   }, 60_000);

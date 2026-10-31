@@ -2,7 +2,7 @@
  * WP-W — WakeLedger, the worker's own estimate of the Neon compute it causes. DB-free.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { NEON_SUSPEND_DELAY_MS, WakeLedger } from '@/lib/jobs/usage-estimate';
+import { NEON_SUSPEND_DELAY_MS, WakeLedger } from '@/worker/usage-estimate';
 
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 9, 12, 9, 0, 0); // 2026-10-12 09:00 UTC

@@ -395,8 +395,8 @@ describe.skipIf(!READY)('the cleanup job runs on the worker plane (0071, live DB
 
   // ── The real handler ──────────────────────────────────────────────────
   it('the handler drives it end to end on the worker connection', async () => {
-    const { handleCleanup } = await import('@/lib/jobs/handlers');
-    const { buildJobAuthorization } = await import('@/lib/jobs/worker');
+    const { handleCleanup } = await import('@/worker/handlers');
+    const { buildJobAuthorization } = await import('@/worker/worker');
     const org = await newOrg();
     const doomed = await mkJob(org, { status: 'cancelled', ageDays: 10 });
     const kept = await mkJob(org, { status: 'succeeded', ageDays: 1 });

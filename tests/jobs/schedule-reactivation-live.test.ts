@@ -97,7 +97,7 @@ describe.skipIf(!DB_READY)('schedule reactivation respects the minimum interval 
   });
 
   it('the scheduler library refuses resumeSchedule for a paused 15-minute schedule', async () => {
-    const { resumeSchedule } = await import('@/lib/jobs/scheduler');
+    const { resumeSchedule } = await import('@/worker/scheduler');
     const { outcome, row } = await attempt('*/15 * * * *', (id) => resumeSchedule(auth, id));
     expect(outcome.ok).toBe(false);
     expect(String((outcome as { error: Error }).error.message)).toMatch(/runs every 15 minutes/);
@@ -105,7 +105,7 @@ describe.skipIf(!DB_READY)('schedule reactivation respects the minimum interval 
   });
 
   it('the scheduler library resumes a paused hourly schedule', async () => {
-    const { resumeSchedule } = await import('@/lib/jobs/scheduler');
+    const { resumeSchedule } = await import('@/worker/scheduler');
     const { outcome, row } = await attempt('0 * * * *', (id) => resumeSchedule(auth, id));
     expect(outcome.ok).toBe(true);
     expect(row.is_active).toBe(true);

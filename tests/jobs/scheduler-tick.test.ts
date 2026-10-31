@@ -35,7 +35,7 @@ import {
   resumeSchedule,
   tickScheduler,
   type Schedule,
-} from '@/lib/jobs/scheduler';
+} from '@/worker/scheduler';
 
 const ready = DB_READY;
 const owner = new Pool({ connectionString: process.env.DATABASE_URL_MIGRATE });

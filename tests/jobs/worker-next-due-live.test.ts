@@ -168,7 +168,7 @@ describe.skipIf(!DB_READY)('worker_next_due_at (live DB)', () => {
     expect(
       await sqlstateOf(inContext(appUser, {}, `select public.worker_next_due_at() as due`)),
     ).toBe('42501');
-    const { workerNextDueAt } = await import('@/lib/jobs/worker');
+    const { workerNextDueAt } = await import('@/worker/worker');
     const due = await workerNextDueAt();
     expect(due === null || Number.isFinite(due.getTime())).toBe(true);
   });

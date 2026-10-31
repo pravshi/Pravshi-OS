@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { withAuthorizedDb } from '@/lib/db/authorized';
-import { checkWebhookUrlStatic } from '@/lib/jobs/handlers';
+import { checkWebhookUrlStatic } from './webhook-url-guard';
 import { assertCanCreateConnection } from './config';
 import { assertNoIdentityFields } from './connections';
 import { assertIntegrationUuid, fromVaultError, IntegrationsError } from './errors';
@@ -34,7 +34,7 @@ import { encryptSecret, serialiseEnvelope } from './secrets';
  *    (checkWebhookUrlStatic — no DNS): a fail-fast for the admin's
  *    benefit. It is never a substitute for the delivery-time guard, which
  *    re-validates statically, resolves DNS, checks every address and pins
- *    the connection (jobs/handlers.ts, untouched by this wave).
+ *    the connection (worker/handlers.ts, untouched by this wave).
  *  - Identity columns (id, org_id, created_by, created_at) are frozen by
  *    the 0056 BEFORE UPDATE trigger; the service guards them too
  *    (assertNoIdentityFields, shared with connections.ts) so an attempt

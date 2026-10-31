@@ -11,14 +11,14 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
 const { dnsLookup } = vi.hoisted(() => ({ dnsLookup: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: dnsLookup, default: { lookup: dnsLookup } }));
 
-import { assertWebhookTargetAllowed, fetchWebhookPinned } from '../../src/lib/jobs/handlers';
+import { assertWebhookTargetAllowed, fetchWebhookPinned } from '../../src/worker/handlers';
 
 const answers = (...ips: string[]) =>
   ips.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));

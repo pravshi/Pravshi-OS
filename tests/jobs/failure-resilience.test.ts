@@ -456,14 +456,9 @@ vi.mock('drizzle-orm/neon-serverless', () => ({
 
 // ── Real modules under test ─────────────────────────────────────────────────
 
-import {
-  buildJobAuthorization,
-  reapStaleJobs,
-  registerHandler,
-  resetHandlerRegistry,
-  runWorker,
-} from '@/lib/jobs/worker';
-import { scheduleDedupKey, tickScheduler } from '@/lib/jobs/scheduler';
+import { buildJobAuthorization, reapStaleJobs, runWorker } from '@/worker/worker';
+import { registerHandler, resetHandlerRegistry } from '@/lib/jobs/handler-registry';
+import { scheduleDedupKey, tickScheduler } from '@/worker/scheduler';
 import { classifyError } from '@/lib/jobs/retry';
 import type { Authorization } from '@/lib/authz/require-permission';
 import type { Job } from '@/lib/jobs/types';

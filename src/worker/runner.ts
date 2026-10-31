@@ -192,10 +192,10 @@ async function main(): Promise<void> {
   const { env } = await import('@/env');
   // Inside the worker, work enqueued by a handler is picked up by this loop: never send
   // a network wake to ourselves.
-  (await import('./wake')).markWorkerProcess();
+  (await import('@/lib/jobs/wake')).markWorkerProcess();
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
-  await import('../import/sales-sheet/job'); // crm_import
+  await import('@/lib/import/sales-sheet/job'); // crm_import
   const { runWorker, reapStaleJobs, workerNextDueAt } = await import('./worker');
   const { runDbMaintenance } = await import('./maintenance');
   const { tickScheduler } = await import('./scheduler');
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
   // Once per client, not once per checkout: the pool hands the same client out
   // again and again, and a listener added on every checkout accumulated for as
   // long as the client lived (MaxListenersExceededWarning, unbounded growth).
-  const { pool } = await import('../db/pool');
+  const { pool } = await import('@/lib/db/pool');
   const poolConnect = pool.connect.bind(pool);
   const guarded = new WeakSet<object>();
   pool.connect = (async () => {
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
-  const { workerSessionRole } = await import('../db/worker-pool');
+  const { workerSessionRole } = await import('@/lib/db/worker-pool');
   const workerRole = await workerSessionRole();
   if (workerRole !== 'app_worker') {
     console.error(

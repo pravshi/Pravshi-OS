@@ -54,7 +54,7 @@ describe.skipIf(!READY)('the app_auth pool (live DB)', () => {
     vi.resetModules();
     const actual = await vi.importActual<typeof import('@/env')>('@/env');
     vi.doMock('@/env', () => ({ ...actual, env: { ...actual.env, DATABASE_URL_AUTH: undefined } }));
-    await expect(import('@/lib/jobs/workflow-jobs')).resolves.toBeTruthy();
+    await expect(import('@/worker/workflow-jobs')).resolves.toBeTruthy();
   });
 
   it('refuses a DATABASE_URL_AUTH that authenticates as the business role, on first use', async () => {

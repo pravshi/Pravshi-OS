@@ -897,7 +897,7 @@ describe.skipIf(!READY)(
       // ── workflows and the worker ─────────────────────────────────────────────────
       it('workflow execution identities cannot reach it: app_worker, and app_user carrying a workflow principal', async () => {
         expect(await codeOf(action(appWorker, adminToken, target, 'list'))).toBe('42501');
-        // Exactly how src/lib/jobs/workflow-jobs.ts runs an action: app_user with the resolved
+        // Exactly how src/worker/workflow-jobs.ts runs an action: app_user with the resolved
         // principal (here even an administrator) and organization set, and no session.
         const c = await appUser.connect();
         try {

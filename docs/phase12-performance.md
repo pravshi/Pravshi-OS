@@ -105,7 +105,7 @@ The job plane's execution contract, stated plainly so it is a conscious assumpti
 rather than a surprise:
 
 - **One job at a time per worker process.** The claim loop `await`s each job before
-  claiming the next (`src/lib/jobs/worker.ts`). A single long job — a 30 s webhook
+  claiming the next (`src/worker/worker.ts`). A single long job — a 30 s webhook
   timeout chain is the worst current case — head-of-line blocks every other job type
   behind it **on that process**.
 - **Throughput per process ≈ 3600 ÷ mean job seconds** (jobs/hour). Horizontal scale is

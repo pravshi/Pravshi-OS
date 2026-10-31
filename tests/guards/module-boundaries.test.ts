@@ -72,6 +72,9 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   // src/hooks and src/middleware.ts are mapped to the same tier — frontend and middleware
   // consumed only by src/app, imported by no src/lib module.
   app: 'entry',
+  // src/worker: the background worker's entry point and job handlers (Step 5). It composes the
+  // queue core and the domain modules, like src/app, and no src/lib module may import it.
+  worker: 'entry',
   components: 'entry',
   hooks: 'entry',
   middleware: 'entry',
@@ -97,12 +100,6 @@ type Rule = 'rule-1' | 'rule-2' | 'rule-3' | 'rule-5' | 'rule-7' | 'cycle';
 
 /** `<importing file> -> <target module> [<rule>]`, with the step that removes it. */
 const BASELINE: readonly string[] = [
-  // Step 5 — the worker entry and handlers leave src/lib/jobs
-  'src/lib/jobs/handlers.ts -> integrations [rule-5]',
-  'src/lib/jobs/reminder-sweep.ts -> work [rule-5]',
-  'src/lib/jobs/runner.ts -> import [rule-5]',
-  'src/lib/jobs/workflow-jobs.ts -> workflows [rule-5]',
-  'src/lib/jobs/reminder-sweep.ts -> notifications [cycle]',
   // Step 6 — domain reactions become events
   'src/lib/crm/deals.ts -> integrations [rule-3]',
   'src/lib/crm/deals.ts -> workflows [rule-3]',
@@ -444,6 +441,7 @@ describe('module-boundary checker', () => {
     expect(moduleOf('src/env.ts')).toBe('env');
     expect(moduleOf('src/middleware.ts')).toBe('middleware');
     expect(moduleOf('src/app/(app)/crm/page.tsx')).toBe('app');
+    expect(moduleOf('src/worker/runner.ts')).toBe('worker');
     expect(moduleOf('src/lib/newthing/x.ts')).toBeNull();
     expect(moduleOf('src/other/x.ts')).toBeNull();
     expect(() => violationsOf([edge('src/lib/newthing/x.ts', 'src/lib/db/pool.ts')], [])).toThrow(
@@ -465,6 +463,10 @@ describe('module-boundary checker', () => {
     expect(ruleFor('jobs', 'work')).toBe('rule-5');
     expect(ruleFor('notifications', 'crm')).toBe('rule-1');
     expect(ruleFor('crm', 'app')).toBe('rule-1');
+    expect(ruleFor('jobs', 'worker')).toBe('rule-1'); // the queue never imports the worker
+    expect(ruleFor('crm', 'worker')).toBe('rule-1');
+    expect(ruleFor('worker', 'jobs')).toBeNull(); // the worker imports the queue core downward
+    expect(ruleFor('worker', 'import')).toBeNull();
     expect(ruleFor('app', 'platform')).toBeNull();
   });
 

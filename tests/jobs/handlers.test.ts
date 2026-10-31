@@ -11,7 +11,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 
-vi.mock('../../src/lib/jobs/worker', () => ({
+vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -48,7 +48,7 @@ vi.mock('resend', () => ({
   },
 }));
 
-import type { JobExecutionContext } from '../../src/lib/jobs/worker';
+import type { JobExecutionContext } from '../../src/lib/jobs/handler-registry';
 import {
   assertValidEmailAddress,
   buildEmailIdempotencyKey,
@@ -61,7 +61,7 @@ import {
   normalizeNotificationPayload,
   normalizeWebhookPayload,
   signWebhookBody,
-} from '../../src/lib/jobs/handlers';
+} from '../../src/worker/handlers';
 import { classifyError } from '../../src/lib/jobs/retry';
 import { env } from '../../src/env';
 import type { Job } from '../../src/lib/jobs/types';

@@ -25,7 +25,7 @@ import { sql } from 'drizzle-orm';
 import type { AuthContext } from '@/lib/db/context';
 import { withQueueDb } from '@/lib/jobs/queue';
 import { CrmImportPayloadSchema } from '@/lib/jobs/types';
-import { registerHandler, type JobExecutionContext } from '@/lib/jobs/worker';
+import { registerHandler, type JobExecutionContext } from '@/lib/jobs/handler-registry';
 import { pgError, runImportCommit } from './commit';
 
 const SAFE_NAME = 'CrmImportJobError';
