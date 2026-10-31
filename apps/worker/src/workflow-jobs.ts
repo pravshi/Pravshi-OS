@@ -10,7 +10,7 @@
  * ── CONTRACTS ─────────────────────────────────────────────────────────────
  *   Architecture contracts §3.6 (workflow-jobs.ts), §3.4 (worker registration).
  *   Queue Engineer owns src/lib/jobs/types.ts — READ ONLY, never redefined.
- *   Worker Runtime Engineer owns the worker loop (src/worker/worker.ts); `registerHandler`
+ *   Worker Runtime Engineer owns the worker loop (apps/worker/src/worker.ts); `registerHandler`
  *   (contract §3.4) is imported from the queue core's handler registry,
  *   src/lib/jobs/handler-registry.ts (redesign Step 5).
  *

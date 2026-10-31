@@ -36,7 +36,7 @@ const uuidSchema = z.string().uuid();
  * (no person detail page exists in the app) all yield null.
  *
  * This is only the *candidate* link. The server-side resolver
- * (src/app/(app)/notifications/resolve-links.ts) additionally verifies the
+ * (apps/web/src/app/(app)/notifications/resolve-links.ts) additionally verifies the
  * caller holds the entity's view permission AND the row exists, is
  * undeleted, and is visible through scope-aware RLS before a link is served.
  */

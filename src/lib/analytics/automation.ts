@@ -20,7 +20,7 @@
  * Tenant isolation: every query re-states `org_id = ctx.orgId`, where ctx is
  * the authenticated session context — NEVER a caller-supplied org id. All
  * reads go through withAuthorizedDb; the RLS policies fail closed on top.
- * Pattern mirrors getJobsStats in src/app/(app)/jobs/_jobs.ts.
+ * Pattern mirrors getJobsStats in apps/web/src/app/(app)/jobs/_jobs.ts.
  *
  * Phase 12 (F-12-01): every metric accepts an optional trailing `tx?: Tx`.
  * When a caller (an analytics route composing a dashboard) supplies one, the

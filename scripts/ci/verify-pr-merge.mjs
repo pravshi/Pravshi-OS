@@ -100,13 +100,21 @@ export const PROTECTED_PATHS = [
   'patches/',
   'vitest.config.mts',
   'tsconfig.json',
+  'tsconfig.base.json',
   'eslint.config.mjs',
   'next.config.ts',
   'playwright.config.ts',
   'vercel.json',
+  // the workspace packages (redesign Step 7): their manifests and the web app's tool configuration
+  'apps/web/package.json',
+  'apps/worker/package.json',
+  'apps/web/tsconfig.json',
+  'apps/worker/tsconfig.json',
+  'apps/web/next.config.ts',
+  'apps/web/vercel.json',
   // migrations, roles and the shared security entry points the founder decides
   'drizzle/',
-  'src/middleware.ts',
+  'apps/web/src/middleware.ts',
   'src/env.ts',
   // the agent rules (AGENTS.md §3: the founder decides)
   'AGENTS.md',

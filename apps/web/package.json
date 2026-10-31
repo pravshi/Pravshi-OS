@@ -1,0 +1,19 @@
+{
+  "name": "@pravshi/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pravshi OS web application (Next.js). Shared server code is src/ at the repository root until Step 8; every dependency is declared in the root package.json, which this package resolves through the workspace root.",
+  "engines": {
+    "node": ">=22.12 <23"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "15.5.28",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}

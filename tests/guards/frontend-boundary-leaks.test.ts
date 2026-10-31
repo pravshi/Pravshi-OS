@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
  * WHOLE app tree, so a future nested segment cannot quietly reintroduce
  * the leak:
  *
- *  1. NO ERROR INTERNALS, ANYWHERE. Every error boundary in src/app —
+ *  1. NO ERROR INTERNALS, ANYWHERE. Every error boundary in apps/web/src/app —
  *     found by walking the tree for error.tsx / global-error.tsx, not by
  *     a hardcoded list — may read exactly ONE property of its error:
  *     `digest`, the opaque Next.js reference that is safe to show. Any
@@ -47,7 +47,7 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const appFiles = walk('src/app');
+const appFiles = walk('apps/web/src/app');
 const errorBoundaries = appFiles.filter(
   (p) => p.endsWith('/error.tsx') || p.endsWith('/global-error.tsx'),
 );
@@ -55,10 +55,10 @@ const notFounds = appFiles.filter((p) => p.endsWith('/not-found.tsx'));
 
 describe('error boundaries never render internals (Wave J)', () => {
   it('the walk finds the contracted boundaries (guard sanity)', () => {
-    expect(errorBoundaries).toContain('src/app/global-error.tsx');
-    expect(errorBoundaries).toContain('src/app/(app)/error.tsx');
-    expect(notFounds).toContain('src/app/not-found.tsx');
-    expect(notFounds).toContain('src/app/(app)/not-found.tsx');
+    expect(errorBoundaries).toContain('apps/web/src/app/global-error.tsx');
+    expect(errorBoundaries).toContain('apps/web/src/app/(app)/error.tsx');
+    expect(notFounds).toContain('apps/web/src/app/not-found.tsx');
+    expect(notFounds).toContain('apps/web/src/app/(app)/not-found.tsx');
   });
 
   it('every error boundary reads only error.digest from its error', () => {
@@ -101,16 +101,16 @@ describe('lazy fallbacks never fetch (Wave J)', () => {
 
   it('the three *Lazy wrappers are pure skeleton shells', () => {
     for (const path of [
-      'src/app/(app)/workflows/_components/WorkflowBuilderLazy.tsx',
-      'src/app/(app)/workflows/_components/EditWorkflowClientLazy.tsx',
-      'src/app/(app)/work/_components/EditTaskFormLazy.tsx',
+      'apps/web/src/app/(app)/workflows/_components/WorkflowBuilderLazy.tsx',
+      'apps/web/src/app/(app)/workflows/_components/EditWorkflowClientLazy.tsx',
+      'apps/web/src/app/(app)/work/_components/EditTaskFormLazy.tsx',
     ]) {
       expectFetchFree(read(path), path);
     }
   });
 
   it("the board's inline TaskFormSkeleton body is fetch-free", () => {
-    const src = read('src/app/(app)/work/_components/TaskBoard.tsx');
+    const src = read('apps/web/src/app/(app)/work/_components/TaskBoard.tsx');
     const start = src.indexOf('function TaskFormSkeleton');
     expect(start).toBeGreaterThan(-1);
     // Brace-matched extraction of just the skeleton's own body — the
@@ -137,6 +137,9 @@ describe('lazy fallbacks never fetch (Wave J)', () => {
   });
 
   it('the (app) loading boundary is a pure skeleton', () => {
-    expectFetchFree(read('src/app/(app)/loading.tsx'), 'src/app/(app)/loading.tsx');
+    expectFetchFree(
+      read('apps/web/src/app/(app)/loading.tsx'),
+      'apps/web/src/app/(app)/loading.tsx',
+    );
   });
 });

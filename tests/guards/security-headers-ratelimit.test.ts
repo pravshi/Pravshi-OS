@@ -14,16 +14,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const root = (...p: string[]) => join(process.cwd(), ...p);
 const read = (p: string) => readFileSync(root(...p.split('/')), 'utf8');
 
-const CONFIG = read('next.config.ts');
+const CONFIG = read('apps/web/next.config.ts');
 const HELPER = read('src/lib/auth/rate-limit.ts');
-const ACCEPT = read('src/app/api/invitations/accept/route.ts');
-const PREVIEW = read('src/app/api/invitations/preview/route.ts');
-const BOOTSTRAP = read('src/app/api/bootstrap/complete/route.ts');
-const INVITE_CREATE = read('src/app/api/invitations/route.ts');
-const INVITE_REVOKE = read('src/app/api/invitations/[id]/revoke/route.ts');
-const INBOUND = read('src/app/api/integrations/inbound/[endpointKey]/route.ts');
-const SEARCH = read('src/app/api/search/route.ts');
-const AUDIT_EXPORT = read('src/app/api/admin/audit-logs/export/route.ts');
+const ACCEPT = read('apps/web/src/app/api/invitations/accept/route.ts');
+const PREVIEW = read('apps/web/src/app/api/invitations/preview/route.ts');
+const BOOTSTRAP = read('apps/web/src/app/api/bootstrap/complete/route.ts');
+const INVITE_CREATE = read('apps/web/src/app/api/invitations/route.ts');
+const INVITE_REVOKE = read('apps/web/src/app/api/invitations/[id]/revoke/route.ts');
+const INBOUND = read('apps/web/src/app/api/integrations/inbound/[endpointKey]/route.ts');
+const SEARCH = read('apps/web/src/app/api/search/route.ts');
+const AUDIT_EXPORT = read('apps/web/src/app/api/admin/audit-logs/export/route.ts');
 
 describe('security headers: next.config.ts ships a complete set', () => {
   it('defines headers() applying to every route', () => {
@@ -51,7 +51,7 @@ describe('security headers: next.config.ts ships a complete set', () => {
     const scriptSrcFor = async (nodeEnv: string) => {
       vi.stubEnv('NODE_ENV', nodeEnv);
       vi.resetModules();
-      const { default: config } = await import('../../next.config');
+      const { default: config } = await import('../../apps/web/next.config');
       const routes = (await config.headers!()) as { headers: { key: string; value: string }[] }[];
       const csp = routes.flatMap((r) => r.headers).find((h) => h.key === 'Content-Security-Policy');
       return csp!.value

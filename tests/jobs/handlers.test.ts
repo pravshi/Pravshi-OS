@@ -61,7 +61,7 @@ import {
   normalizeNotificationPayload,
   normalizeWebhookPayload,
   signWebhookBody,
-} from '../../src/worker/handlers';
+} from '../../apps/worker/src/handlers';
 import { classifyError } from '../../src/lib/jobs/retry';
 import { env } from '../../src/env';
 import type { Job } from '../../src/lib/jobs/types';

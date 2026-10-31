@@ -13,7 +13,7 @@ import type { ProjectLinkSummary } from '@/lib/work/schema';
  * to the project, or a "not linked" state explaining that linking happens
  * from the project side. Pure display: it never writes.
  *
- * INTEGRATION POINT — add this to src/app/(app)/crm/deals/[id]/page.tsx
+ * INTEGRATION POINT — add this to apps/web/src/app/(app)/crm/deals/[id]/page.tsx
  * (see docs/deal-project-integration.md §4) without editing any other CRM
  * file:
  *   import { RelatedProjectSection } from '@/components/crm/related-project-section';

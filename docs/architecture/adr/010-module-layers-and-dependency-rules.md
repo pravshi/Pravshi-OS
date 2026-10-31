@@ -113,3 +113,13 @@ Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), th
 - A new CRM product module is approved: it joins L4 with no edge to another product module, and
   shares code only through L0–L3.
 - A rule blocks a legitimate design that an event or a lower-layer helper cannot express.
+
+## Amendment — logical paths after Step 7
+
+This record, the module map and the boundary guard speak in **logical** paths (`src/app`,
+`src/worker`, `src/lib/…`). Since Step 7 the files live in three physical roots, which
+`tests/guards/module-boundaries.test.ts` maps to the logical paths (and fails if two files claim the
+same one): `src/…` stays `src/…` (shared server code until Step 8), `apps/web/src/…` is `src/…`
+(`app`, `components`, `hooks`, `middleware`, `instrumentation`) and `apps/worker/src/…` is
+`src/worker/…`. No rule, layer or module changed.
+

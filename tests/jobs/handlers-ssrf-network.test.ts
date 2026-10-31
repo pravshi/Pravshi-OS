@@ -18,7 +18,7 @@ vi.mock('../../src/lib/jobs/handler-registry', () => ({
 const { dnsLookup } = vi.hoisted(() => ({ dnsLookup: vi.fn() }));
 vi.mock('node:dns/promises', () => ({ lookup: dnsLookup, default: { lookup: dnsLookup } }));
 
-import { assertWebhookTargetAllowed, fetchWebhookPinned } from '../../src/worker/handlers';
+import { assertWebhookTargetAllowed, fetchWebhookPinned } from '../../apps/worker/src/handlers';
 
 const answers = (...ips: string[]) =>
   ips.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));

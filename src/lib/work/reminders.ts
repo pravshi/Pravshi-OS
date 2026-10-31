@@ -23,7 +23,7 @@ import { requestWorkerWake } from '@/lib/jobs/wake';
  *  - remind_at must be a future instant (checked at the boundary; a CHECK
  *    constraint can't use now(), which is not immutable)
  *  - is_sent records delivery: the worker-plane reminder sweep
- *    (src/worker/reminder-sweep.ts, claim definer in migration 0064)
+ *    (apps/worker/src/reminder-sweep.ts, claim definer in migration 0064)
  *    flips it atomically at claim time when a due reminder is delivered
  *    as a TASK_DUE notification to the reminder's owner (person_id —
  *    reminders are self-reminders, so the owner is the recipient). This

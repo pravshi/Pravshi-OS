@@ -73,7 +73,11 @@ vi.mock('../../src/lib/integrations/secrets', async (importOriginal) => ({
 }));
 
 import { classifyError } from '../../src/lib/jobs/retry';
-import { handleWebhook, normalizeWebhookPayload, signWebhookBody } from '../../src/worker/handlers';
+import {
+  handleWebhook,
+  normalizeWebhookPayload,
+  signWebhookBody,
+} from '../../apps/worker/src/handlers';
 import { WebhookPayloadSchema } from '../../src/lib/jobs/types';
 import type { JobExecutionContext } from '../../src/lib/jobs/handler-registry';
 

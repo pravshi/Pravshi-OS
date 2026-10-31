@@ -157,6 +157,19 @@ and leaves the root file as it was. With it, a build emits `instrumentation.js`,
 unchanged (163 entries), and a `next start` process shows both ports registered once start-up
 completes.
 
+**After Step 7** (workspace skeleton; same environment, newly initialised cluster; base `7bc91d9`):
+
+| Check                                                    | Step 6                             | Step 7                                                                                              |
+| -------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                               | pass (`pnpm lint` is now `eslint` over the three source roots)                                      |
+| `pnpm build`                                              | pass                               | pass from the workspace root — the route list (163 entries) is identical to `main`'s                |
+| Migrations from zero                                      | 88 of 88                           | 88 of 88; no file under `drizzle/` or `scripts/db/` is in the diff                                  |
+| `pnpm test` (files)                                       | 274 passed, 0 failed, 1 skipped    | 275 passed, 0 failed, 1 skipped (276 files)                                                         |
+| `pnpm test` (tests)                                       | 4,232 passed, 0 failed, 10 skipped | 4,239 passed, 0 failed, 10 skipped (4,249: the workspace-root mapping test, the workspace-roots guard and four protected paths) |
+| Worker end-to-end suite (opt-in, `WPW_E2E=1`)             | 7 of 7 (one run)                   | 7 of 7 in two runs (Node 22.22.0), the worker started from `apps/worker/src/runner.ts`              |
+| Real `next start` from `apps/web`                         | both ports registered              | both ports registered after start-up                                                                |
+| Module-boundary baseline                                  | 0 entries                          | 0 entries; the guard maps the three physical roots to the logical paths                             |
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 
@@ -301,6 +314,11 @@ ADR-009, ADR-010 and this document. Documentation only.
   `apps/web` as its root.
 - **Done when:** all release gates pass from the workspace root; `pnpm build` produces the same
   routes as the baseline; the worker starts from `apps/worker`; CI is green.
+- **Result (Step 7):** see ADR-009's "Step 7 result" amendment for the layout and the one
+  deviation (`apps/web` keeps its own `src/`). 373 files were renamed without change; about 100
+  files changed path strings, among them the guards that name `src/` paths, which now read all
+  three source roots (a guard that walks `src` alone would have silently checked less). Results
+  are in §2.
 
 ### Step 8 — Package extraction (planned; one pull request and one approval per package)
 

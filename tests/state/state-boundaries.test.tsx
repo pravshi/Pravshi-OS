@@ -35,7 +35,7 @@ import { LoginForm } from '@/app/(auth)/login/login-form';
 describe('Auth error boundary (AuthError)', () => {
   it('binds Sentry exception capture for reporting in its source contract', async () => {
     const fs = await import('node:fs');
-    const source = fs.readFileSync('src/app/(auth)/error.tsx', 'utf8');
+    const source = fs.readFileSync('apps/web/src/app/(auth)/error.tsx', 'utf8');
 
     expect(source).toContain("import * as Sentry from '@sentry/nextjs'");
     expect(source).toContain('Sentry.captureException(error)');
@@ -131,7 +131,7 @@ describe('LoginForm 429 rate limit and error handling', () => {
   it('source contract check: handles 429 and RATE_LIMITED error with clear retry advice', async () => {
     // Read the source of LoginForm to ensure the 429 handling pattern is strictly maintained
     const fs = await import('node:fs');
-    const source = fs.readFileSync('src/app/(auth)/login/login-form.tsx', 'utf8');
+    const source = fs.readFileSync('apps/web/src/app/(auth)/login/login-form.tsx', 'utf8');
 
     expect(source).toContain("res.status === 429 || data?.error === 'RATE_LIMITED'");
     expect(source).toContain('Too many sign-in attempts. Please wait a minute and try again.');

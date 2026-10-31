@@ -1,7 +1,7 @@
 /**
  * Jobs UI server helpers (Phase 6).
  *
- * Server-only data access for src/app/(app)/jobs/**. There is no queue
+ * Server-only data access for apps/web/src/app/(app)/jobs/**. There is no queue
  * service read path yet (queue.ts exposes enqueue/claim/start/complete/fail/
  * /heartbeat/cancel/retry; the read API belongs to the API Engineer under
  * contract §4), so these helpers query through withAuthorizedDb: org_id is

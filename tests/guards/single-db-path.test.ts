@@ -7,13 +7,15 @@ const grep = (args: string) => execSync(`git grep ${args} || true`, { encoding: 
 
 describe('there is exactly one path to Postgres', () => {
   it('nothing calls pool.connect() outside src/lib/db/pool.ts', () => {
-    const hits = grep(`-l "pool.connect(" -- src ":!src/lib/db/pool.ts"`);
+    const hits = grep(
+      `-l "pool.connect(" -- src apps/web/src apps/worker/src ":!src/lib/db/pool.ts"`,
+    );
     expect(hits, `Direct pool.connect() bypasses cold-start retry, in:\n${hits}`).toBe('');
   });
 
   it('nothing outside the db module imports the pool', () => {
     const hits = grep(
-      `-lE "from '@/lib/db/pool'" -- src ":!src/lib/db/*" ":!src/app/health/db/route.ts"`,
+      `-lE "from '@/lib/db/pool'" -- src apps/web/src apps/worker/src ":!src/lib/db/*" ":!apps/web/src/app/health/db/route.ts"`,
     );
     expect(hits, `Unexpected pool import — use withAuthorizedDb(), in:\n${hits}`).toBe('');
   });
@@ -24,7 +26,7 @@ describe('there is exactly one path to Postgres', () => {
     // for authentication and nothing else: business data still goes through
     // withAuthorizedDb(), where RLS meets it.
     const hits = grep(
-      `-lE "from '@/lib/db/auth-client'" -- src ":!src/lib/auth/*" ":!src/lib/db/*"`,
+      `-lE "from '@/lib/db/auth-client'" -- src apps/web/src apps/worker/src ":!src/lib/auth/*" ":!src/lib/db/*"`,
     );
     expect(
       hits,
@@ -32,12 +34,12 @@ describe('there is exactly one path to Postgres', () => {
     ).toBe('');
   });
 
-  it('only the worker plane (src/lib/jobs, src/worker) uses the app_worker pool', () => {
+  it('only the worker plane (src/lib/jobs, apps/worker/src) uses the app_worker pool', () => {
     // worker-pool.ts connects as app_worker (migration 0070): the role that can claim every
     // organization's jobs. Only the job runtime may reach it — never a route, a page or
     // feature code — and the web app does not even hold its credential (src/env.ts).
     const hits = grep(
-      `-lE "db/worker-pool'" -- src ":!src/lib/jobs/*" ":!src/worker/*" ":!src/lib/db/*"`,
+      `-lE "db/worker-pool'" -- src apps/web/src apps/worker/src ":!src/lib/jobs/*" ":!apps/worker/src/*" ":!src/lib/db/*"`,
     );
     expect(hits, `app_worker pool imported outside the worker plane, in:\n${hits}`).toBe('');
   });
@@ -48,7 +50,7 @@ describe('there is exactly one path to Postgres', () => {
     // that binds it to the app_auth login may import it — the move into src/lib/db must not
     // hand the credential-table definitions to any other module. Relative imports count.
     const hits = grep(
-      `-lE "(db/auth-schema|[.]/auth-schema)'" -- src ":!src/lib/auth/*" ":!src/lib/db/auth-client.ts"`,
+      `-lE "(db/auth-schema|[.]/auth-schema)'" -- src apps/web/src apps/worker/src ":!src/lib/auth/*" ":!src/lib/db/auth-client.ts"`,
     );
     expect(
       hits,
@@ -58,7 +60,7 @@ describe('there is exactly one path to Postgres', () => {
 
   it('no feature code queries the credential tables by hand', () => {
     const hits = grep(
-      `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src ":!src/lib/auth/*"`,
+      `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src apps/web/src apps/worker/src ":!src/lib/auth/*"`,
     );
     expect(hits, `Direct auth-table access outside the auth layer, in:\n${hits}`).toBe('');
   });
@@ -67,7 +69,7 @@ describe('there is exactly one path to Postgres', () => {
 
   it('only the auth client (and the health check of its login) imports the app_auth pool', () => {
     const hits = grep(
-      `-lE "db/auth-pool'" -- src ":!src/lib/db/auth-client.ts" ":!src/app/health/db/route.ts"`,
+      `-lE "db/auth-pool'" -- src apps/web/src apps/worker/src ":!src/lib/db/auth-client.ts" ":!apps/web/src/app/health/db/route.ts"`,
     );
     expect(hits, `app_auth pool imported outside the auth client, in:\n${hits}`).toBe('');
   });
@@ -104,7 +106,7 @@ describe('there is exactly one path to Postgres', () => {
     // platform-pool.ts connects as app_platform: the login that provisions, suspends and
     // reactivates organizations. Only the platform module, behind its gate, may reach it.
     const hits = grep(
-      `-lE "db/platform-pool'" -- src ":!src/lib/platform/*" ":!src/lib/db/platform-pool.ts"`,
+      `-lE "db/platform-pool'" -- src apps/web/src apps/worker/src ":!src/lib/platform/*" ":!src/lib/db/platform-pool.ts"`,
     );
     expect(hits, `app_platform pool imported outside src/lib/platform, in:\n${hits}`).toBe('');
   });
@@ -139,7 +141,7 @@ describe('there is exactly one path to Postgres', () => {
     // because the auth pool is created on first use and needs no configuration to load — pinned
     // by tests/db/auth-pool-config.test.ts and by the worker E2E starting without the variable.
     const hits = grep(
-      `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs src/worker src/lib/workflows`,
+      `-lE "from '(@/lib/auth/|\\.\\./auth/|@/lib/db/auth-client|@/lib/db/auth-pool|\\.\\./db/auth-client|\\.\\./db/auth-pool)" -- src/lib/jobs apps/worker/src src/lib/workflows`,
     );
     expect(hits, `worker-plane code imports the authentication plane, in:\n${hits}`).toBe('');
   });

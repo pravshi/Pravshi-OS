@@ -17,11 +17,11 @@ const read = (path: string) => readFileSync(path, 'utf8');
 
 describe('route resilience boundaries (F-12-05)', () => {
   it('keeps global-error.tsx as the root last resort', () => {
-    expect(existsSync('src/app/global-error.tsx')).toBe(true);
+    expect(existsSync('apps/web/src/app/global-error.tsx')).toBe(true);
   });
 
   it('(app) error boundary is a client component with retry, home link and Sentry reporting', () => {
-    const src = read('src/app/(app)/error.tsx');
+    const src = read('apps/web/src/app/(app)/error.tsx');
     expect(src.startsWith("'use client'")).toBe(true);
     expect(src).toContain('Sentry.captureException');
     expect(src).toContain('onClick={reset}');
@@ -30,9 +30,9 @@ describe('route resilience boundaries (F-12-05)', () => {
 
   it('segment boundaries render no stack traces or document elements', () => {
     for (const path of [
-      'src/app/(app)/error.tsx',
-      'src/app/(app)/not-found.tsx',
-      'src/app/not-found.tsx',
+      'apps/web/src/app/(app)/error.tsx',
+      'apps/web/src/app/(app)/not-found.tsx',
+      'apps/web/src/app/not-found.tsx',
     ]) {
       const src = read(path);
       expect(src, path).not.toContain('error.stack');
@@ -45,20 +45,20 @@ describe('route resilience boundaries (F-12-05)', () => {
   });
 
   it('(app) loading boundary renders a skeleton inside the shell', () => {
-    const src = read('src/app/(app)/loading.tsx');
+    const src = read('apps/web/src/app/(app)/loading.tsx');
     expect(src).toContain('Skeleton');
     expect(src).toContain('aria-busy');
   });
 
   it('not-found boundaries offer a way home', () => {
-    expect(read('src/app/(app)/not-found.tsx')).toContain('href="/"');
-    expect(read('src/app/not-found.tsx')).toContain('href="/"');
+    expect(read('apps/web/src/app/(app)/not-found.tsx')).toContain('href="/"');
+    expect(read('apps/web/src/app/not-found.tsx')).toContain('href="/"');
   });
 });
 
 describe('fonts are loaded, not phantom (F-12-07)', () => {
   it('root layout loads Inter and JetBrains Mono via next/font with swap', () => {
-    const src = read('src/app/layout.tsx');
+    const src = read('apps/web/src/app/layout.tsx');
     expect(src).toContain("from 'next/font/google'");
     expect(src).toContain('Inter(');
     expect(src).toContain('JetBrains_Mono(');
@@ -68,7 +68,7 @@ describe('fonts are loaded, not phantom (F-12-07)', () => {
   });
 
   it('globals.css consumes the next/font variables and names no unloaded font', () => {
-    const css = read('src/app/globals.css');
+    const css = read('apps/web/src/app/globals.css');
     expect(css).toContain('var(--font-inter)');
     expect(css).toContain('var(--font-jetbrains-mono)');
     expect(css).not.toContain("'Inter var'");
@@ -77,9 +77,9 @@ describe('fonts are loaded, not phantom (F-12-07)', () => {
 });
 
 describe('notification bell polling (F-12-08)', () => {
-  const src = read('src/components/notifications/NotificationBell.tsx');
+  const src = read('apps/web/src/components/notifications/NotificationBell.tsx');
   // WP-W moved the interval into poll-policy.ts alongside the idle rule.
-  const policy = read('src/components/notifications/poll-policy.ts');
+  const policy = read('apps/web/src/components/notifications/poll-policy.ts');
 
   it('polls every 60s, not 30s', () => {
     expect(policy).toContain('POLL_INTERVAL_MS = 60_000');
@@ -110,10 +110,10 @@ describe('heavy editor surfaces are code-split (F-12-09)', () => {
   // Pages are server components (where ssr:false is not allowed), so the
   // dynamic import lives in a small client *Lazy wrapper per surface.
   it('workflow builder on /workflows/new loads through its lazy wrapper', () => {
-    const page = read('src/app/(app)/workflows/new/page.tsx');
+    const page = read('apps/web/src/app/(app)/workflows/new/page.tsx');
     expect(page).toContain('WorkflowBuilderLazy');
     expect(page).not.toContain("import { WorkflowBuilder } from '../_components/WorkflowBuilder'");
-    const wrapper = read('src/app/(app)/workflows/_components/WorkflowBuilderLazy.tsx');
+    const wrapper = read('apps/web/src/app/(app)/workflows/_components/WorkflowBuilderLazy.tsx');
     expect(wrapper).toContain("from 'next/dynamic'");
     expect(wrapper).toContain("import('./WorkflowBuilder')");
     expect(wrapper).toContain('ssr: false');
@@ -121,12 +121,12 @@ describe('heavy editor surfaces are code-split (F-12-09)', () => {
   });
 
   it('workflow editor on /workflows/[id]/edit loads through its lazy wrapper', () => {
-    const page = read('src/app/(app)/workflows/[id]/edit/page.tsx');
+    const page = read('apps/web/src/app/(app)/workflows/[id]/edit/page.tsx');
     expect(page).toContain('EditWorkflowClientLazy');
     expect(page).not.toContain(
       "import { EditWorkflowClient } from '../../_components/EditWorkflowClient'",
     );
-    const wrapper = read('src/app/(app)/workflows/_components/EditWorkflowClientLazy.tsx');
+    const wrapper = read('apps/web/src/app/(app)/workflows/_components/EditWorkflowClientLazy.tsx');
     expect(wrapper).toContain("from 'next/dynamic'");
     expect(wrapper).toContain("import('./EditWorkflowClient')");
     expect(wrapper).toContain('ssr: false');
@@ -134,7 +134,7 @@ describe('heavy editor surfaces are code-split (F-12-09)', () => {
   });
 
   it("the board's task form is dynamically imported with a fallback", () => {
-    const src = read('src/app/(app)/work/_components/TaskBoard.tsx');
+    const src = read('apps/web/src/app/(app)/work/_components/TaskBoard.tsx');
     expect(src).toContain("from 'next/dynamic'");
     expect(src).toContain("import('./TaskForm')");
     expect(src).toContain('ssr: false');
@@ -143,10 +143,10 @@ describe('heavy editor surfaces are code-split (F-12-09)', () => {
   });
 
   it('the task detail editor loads through its lazy wrapper', () => {
-    const page = read('src/app/(app)/work/tasks/[id]/page.tsx');
+    const page = read('apps/web/src/app/(app)/work/tasks/[id]/page.tsx');
     expect(page).toContain('EditTaskFormLazy');
     expect(page).not.toContain("import { EditTaskForm } from '../../_components/EditTaskForm'");
-    const wrapper = read('src/app/(app)/work/_components/EditTaskFormLazy.tsx');
+    const wrapper = read('apps/web/src/app/(app)/work/_components/EditTaskFormLazy.tsx');
     expect(wrapper).toContain("from 'next/dynamic'");
     expect(wrapper).toContain("import('./EditTaskForm')");
     expect(wrapper).toContain('ssr: false');

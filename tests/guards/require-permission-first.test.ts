@@ -25,37 +25,37 @@ import { describe, expect, it } from 'vitest';
 
 const PRE_AUTH_ROUTES = [
   // Better Auth itself: it establishes identity, so it cannot require one.
-  'src/app/api/auth/[...all]/route.ts',
+  'apps/web/src/app/api/auth/[...all]/route.ts',
   // Task 1.14: the one-time setup token is the credential; no session exists yet.
-  'src/app/api/bootstrap/complete/route.ts',
+  'apps/web/src/app/api/bootstrap/complete/route.ts',
   // Task 1.17: the invitation token is the credential; no session exists yet. The accept
   // page reads it from the URL fragment and posts it in the body, so it never appears
   // in a request line or an access log.
-  'src/app/api/invitations/preview/route.ts',
-  'src/app/api/invitations/accept/route.ts',
+  'apps/web/src/app/api/invitations/preview/route.ts',
+  'apps/web/src/app/api/invitations/accept/route.ts',
   // Task 1.18: these routes establish identity, so they cannot require one. They
   // delegate to Better Auth and record every outcome as a login event.
-  'src/app/api/auth/login/route.ts',
-  'src/app/api/auth/mfa/verify/route.ts',
+  'apps/web/src/app/api/auth/login/route.ts',
+  'apps/web/src/app/api/auth/mfa/verify/route.ts',
   // Password reset: the emailed token is the credential; no session exists yet.
   // The forgot endpoint answers generic success to every caller so it cannot
   // become an account-enumeration oracle; the reset endpoint's token is
   // single-use and unguessable.
-  'src/app/api/auth/forgot-password/route.ts',
-  'src/app/api/auth/reset-password/route.ts',
+  'apps/web/src/app/api/auth/forgot-password/route.ts',
+  'apps/web/src/app/api/auth/reset-password/route.ts',
   // Public liveness. Touches nothing, by guard.
-  'src/app/health/route.ts',
+  'apps/web/src/app/health/route.ts',
   // Database reachability for CI and humans, gated by HEALTH_CHECK_TOKEN.
-  'src/app/health/db/route.ts',
+  'apps/web/src/app/health/db/route.ts',
   // Phase 10 (Wave W-in): the inbound webhook endpoint key is the credential;
   // no session exists. The handler resolves the org ONLY from the hashed key
   // (contract §4.4) and answers one uniform, unrevealing shape to unknown
   // keys and refused deliveries alike.
-  'src/app/api/integrations/inbound/[endpointKey]/route.ts',
+  'apps/web/src/app/api/integrations/inbound/[endpointKey]/route.ts',
   // ADR-008: the platform's two one-time setup links. The setup token is the credential;
   // no session exists yet (as for /api/bootstrap/complete).
-  'src/app/api/platform/setup/complete/route.ts',
-  'src/app/api/setup/organization/complete/route.ts',
+  'apps/web/src/app/api/platform/setup/complete/route.ts',
+  'apps/web/src/app/api/setup/organization/complete/route.ts',
 ] as const;
 
 /**
@@ -64,7 +64,7 @@ const PRE_AUTH_ROUTES = [
  * platform session, the administrator, MFA, the platform permission, step-up — and nothing
  * else. Exactly the routes under this prefix, and no other, are built that way.
  */
-const PLATFORM_ROUTE_PREFIX = 'src/app/api/platform/';
+const PLATFORM_ROUTE_PREFIX = 'apps/web/src/app/api/platform/';
 
 const METHODS = 'GET|HEAD|OPTIONS|POST|PUT|PATCH|DELETE';
 
@@ -190,7 +190,9 @@ export function analyseServerActions(source: string, file?: string): string[] {
   return problems;
 }
 
-const sources = walk('src').map((file) => ({ file, source: readFileSync(file, 'utf8') }));
+const sources = ['src', 'apps/web/src', 'apps/worker/src']
+  .flatMap((dir) => walk(dir))
+  .map((file) => ({ file, source: readFileSync(file, 'utf8') }));
 
 describe('the analysers themselves', () => {
   it('accept a route built with withPermission and refuse every other shape', () => {

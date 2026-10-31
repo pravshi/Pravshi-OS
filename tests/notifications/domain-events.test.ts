@@ -15,7 +15,7 @@
  * with no notification — pinned by the last actor test below.
  *
  * AUD-04: task reminders had storage + CRUD but no reader. P1b adds the
- * worker-plane sweep (src/worker/reminder-sweep.ts + the 0064 claim
+ * worker-plane sweep (apps/worker/src/reminder-sweep.ts + the 0064 claim
  * definer): a due reminder is claimed (is_sent flips atomically) and
  * delivered as a TASK_DUE in-app notification to the reminder's owner,
  * through the notification family's definers, honouring the recipient's

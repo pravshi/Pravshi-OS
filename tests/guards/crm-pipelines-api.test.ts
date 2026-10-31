@@ -51,17 +51,17 @@ import {
  */
 
 const SERVICE_FILE = 'src/lib/crm/pipelines.ts';
-const ACTION_FILE = 'src/app/(app)/crm/pipelines/_actions.ts';
+const ACTION_FILE = 'apps/web/src/app/(app)/crm/pipelines/_actions.ts';
 // Route paths as implemented (reconciled 2026-10-01: the stage route is
 // `pipeline-stages/[stageId]`, not the draft `stages/[stageId]`).
 const ROUTE_FILES = [
-  'src/app/api/crm/pipelines/route.ts', // GET list · POST create
-  'src/app/api/crm/pipelines/[id]/route.ts', // GET · PATCH · DELETE
-  'src/app/api/crm/pipelines/[id]/stages/route.ts', // GET · POST
-  'src/app/api/crm/pipeline-stages/[stageId]/route.ts', // PATCH only (no DELETE: append-only)
-  'src/app/api/crm/deals/[id]/move/route.ts', // POST moveDealToStage
-  'src/app/api/crm/pipelines/[id]/forecast/route.ts', // GET forecast
-  'src/app/api/crm/pipelines/[id]/velocity/route.ts', // GET velocity
+  'apps/web/src/app/api/crm/pipelines/route.ts', // GET list · POST create
+  'apps/web/src/app/api/crm/pipelines/[id]/route.ts', // GET · PATCH · DELETE
+  'apps/web/src/app/api/crm/pipelines/[id]/stages/route.ts', // GET · POST
+  'apps/web/src/app/api/crm/pipeline-stages/[stageId]/route.ts', // PATCH only (no DELETE: append-only)
+  'apps/web/src/app/api/crm/deals/[id]/move/route.ts', // POST moveDealToStage
+  'apps/web/src/app/api/crm/pipelines/[id]/forecast/route.ts', // GET forecast
+  'apps/web/src/app/api/crm/pipelines/[id]/velocity/route.ts', // GET velocity
 ] as const;
 
 const stripComments = (source: string) =>
@@ -250,19 +250,19 @@ describe('pipelines entry points authorize first', () => {
   });
 
   it.each([
-    ['src/app/api/crm/pipelines/route.ts', ['pipelines.create', 'pipelines.view']],
+    ['apps/web/src/app/api/crm/pipelines/route.ts', ['pipelines.create', 'pipelines.view']],
     [
-      'src/app/api/crm/pipelines/[id]/route.ts',
+      'apps/web/src/app/api/crm/pipelines/[id]/route.ts',
       ['pipelines.delete', 'pipelines.edit', 'pipelines.view'],
     ],
     [
-      'src/app/api/crm/pipelines/[id]/stages/route.ts',
+      'apps/web/src/app/api/crm/pipelines/[id]/stages/route.ts',
       ['pipeline_stages.manage', 'pipelines.view'],
     ],
-    ['src/app/api/crm/pipeline-stages/[stageId]/route.ts', ['pipeline_stages.manage']],
-    ['src/app/api/crm/deals/[id]/move/route.ts', ['deals.edit']],
-    ['src/app/api/crm/pipelines/[id]/forecast/route.ts', ['pipelines.view']],
-    ['src/app/api/crm/pipelines/[id]/velocity/route.ts', ['pipelines.view']],
+    ['apps/web/src/app/api/crm/pipeline-stages/[stageId]/route.ts', ['pipeline_stages.manage']],
+    ['apps/web/src/app/api/crm/deals/[id]/move/route.ts', ['deals.edit']],
+    ['apps/web/src/app/api/crm/pipelines/[id]/forecast/route.ts', ['pipelines.view']],
+    ['apps/web/src/app/api/crm/pipelines/[id]/velocity/route.ts', ['pipelines.view']],
   ] as const)('%s gates on exactly %s', (file, permissions) => {
     const keys = [...stripComments(read(file)).matchAll(/permission:\s*'([^']+)'/g)].map(
       (m) => m[1] as string,

@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest';
  * the lockout check back into fail-open or move the login route's rate limit
  * behind the credential check. The behaviour itself is tested in tests/auth.
  */
-const read = (p: string) => readFileSync(`src/${p}`, 'utf8');
+// Redesign Step 7: the app's folders live in apps/web/src; everything else is shared src/.
+const read = (p: string) =>
+  readFileSync(/^(app|components|hooks)\//.test(p) ? `apps/web/src/${p}` : `src/${p}`, 'utf8');
 const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
@@ -47,15 +49,23 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     // Every file under src/, however it spells the name: a route or helper that read one of
     // these directly would bypass the deployment's trusted-header choice.
     const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
-    const files = (readdirSync('src', { recursive: true }) as string[])
-      .map((f) => f.replace(/\\/g, '/'))
-      .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'lib/observability/client-address.ts');
+    const files = ['src', 'apps/web/src', 'apps/worker/src']
+      .flatMap((dir) =>
+        (readdirSync(dir, { recursive: true }) as string[]).map(
+          (f) => `${dir}/${f.replace(/\\/g, '/')}`,
+        ),
+      )
+      .filter(
+        (f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'src/lib/observability/client-address.ts',
+      );
     expect(files.length).toBeGreaterThan(100);
     const offenders = files.filter((f) =>
       // Comments may name a header; code may not. Only comments that START a line are dropped
       // (a block comment, or a whole-line //): a '//' inside a string, such as a URL, never
       // hides the rest of its line. A trailing comment on a code line still counts — stricter.
-      ADDRESS_HEADER.test(read(f).replace(/^\s*\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*/gm, '')),
+      ADDRESS_HEADER.test(
+        readFileSync(f, 'utf8').replace(/^\s*\/\*[\s\S]*?\*\/|^\s*\/\/[^\n]*/gm, ''),
+      ),
     );
     expect(offenders).toEqual([]);
   });

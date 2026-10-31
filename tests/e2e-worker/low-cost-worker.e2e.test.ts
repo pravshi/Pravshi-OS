@@ -1,5 +1,5 @@
 /**
- * WP-W — end-to-end: the REAL worker process (`src/worker/runner.ts`, default low-cost
+ * WP-W — end-to-end: the REAL worker process (`apps/worker/src/runner.ts`, default low-cost
  * mode) against a real Postgres, measured from outside.
  *
  * OPT-IN: runs only with WPW_E2E=1 (plus the usual database env). It spawns the worker
@@ -87,7 +87,7 @@ describe.skipIf(!ENABLED)('low-cost worker, end to end (real process, real datab
     './scripts/ci/neon-local.mjs',
     '--import',
     './scripts/worker-loader.mjs',
-    'src/worker/runner.ts',
+    'apps/worker/src/runner.ts',
   ];
 
   function startWorker(): void {

@@ -75,7 +75,7 @@ function fakeRequest(
 vi.mock('node:http', () => ({ request: fakeRequest, default: { request: fakeRequest } }));
 vi.mock('node:https', () => ({ request: fakeRequest, default: { request: fakeRequest } }));
 
-import { handleWebhook } from '../../src/worker/handlers';
+import { handleWebhook } from '../../apps/worker/src/handlers';
 import type { JobExecutionContext } from '../../src/lib/jobs/handler-registry';
 
 const answers = (...ips: string[]) =>

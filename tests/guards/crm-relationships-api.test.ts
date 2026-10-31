@@ -31,7 +31,7 @@ import {
  */
 
 const SERVICE_FILE = 'src/lib/crm/relationships.ts';
-const ACTION_FILE = 'src/app/(app)/crm/actions.ts';
+const ACTION_FILE = 'apps/web/src/app/(app)/crm/actions.ts';
 
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

@@ -22,7 +22,7 @@ import { PIPELINE_STAGES_MANAGE } from '../_permissions';
 /**
  * /crm/pipelines Server Actions — authorize first, always.
  *
- * Same envelope convention as src/app/(app)/crm/actions.ts: each action takes
+ * Same envelope convention as apps/web/src/app/(app)/crm/actions.ts: each action takes
  * untrusted `input: unknown`; the service layer validates with zod; failures
  * return the actionError() envelope (data, not a throw).
  *

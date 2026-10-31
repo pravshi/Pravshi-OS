@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
  * delegates the factor check, and fails closed when the limiter cannot answer.
  * Behaviour is tested in tests/auth/mfa-verify-rate-limit.test.ts.
  */
-const ROUTE = readFileSync('src/app/api/auth/mfa/verify/route.ts', 'utf8');
+const ROUTE = readFileSync('apps/web/src/app/api/auth/mfa/verify/route.ts', 'utf8');
 const LIMIT_CALL = 'await checkIpRateLimit(';
 const FIRST_FACTOR_CALL = 'await auth.api.verify';
 

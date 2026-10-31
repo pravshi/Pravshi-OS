@@ -3,7 +3,7 @@
  * failure-resilience.test.ts: retryable failures parked in 'failed' with a
  * backoff next_run_at, but nothing automatically re-drove failed→pending).
  *
- * Real module under test: sweepRetryableJobs (src/worker/retry-sweeper.ts).
+ * Real module under test: sweepRetryableJobs (apps/worker/src/retry-sweeper.ts).
  *
  * Mocked at the module boundary (repo convention, cf. failure-resilience.test.ts):
  *   - '@/lib/db/pool' → fake connectWithWake

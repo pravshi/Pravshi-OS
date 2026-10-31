@@ -14,8 +14,11 @@ import { describe, expect, it } from 'vitest';
 
 const root = (...p: string[]) => join(process.cwd(), ...p);
 const SERVICE = readFileSync(root('src/lib/auth/password-reset.ts'), 'utf8');
-const FORGOT_ROUTE = readFileSync(root('src/app/api/auth/forgot-password/route.ts'), 'utf8');
-const RESET_ROUTE = readFileSync(root('src/app/api/auth/reset-password/route.ts'), 'utf8');
+const FORGOT_ROUTE = readFileSync(
+  root('apps/web/src/app/api/auth/forgot-password/route.ts'),
+  'utf8',
+);
+const RESET_ROUTE = readFileSync(root('apps/web/src/app/api/auth/reset-password/route.ts'), 'utf8');
 const COMMON = readFileSync(root('src/lib/auth/common-passwords.ts'), 'utf8');
 const EMAIL = readFileSync(root('src/lib/auth/password-reset-email.ts'), 'utf8');
 const INVITATIONS = readFileSync(root('src/lib/auth/invitations.ts'), 'utf8');
@@ -184,16 +187,16 @@ describe('routes and pages', () => {
   });
 
   it('both pages exist and the login page links to forgot-password', () => {
-    expect(existsSync(root('src/app/(auth)/forgot-password/page.tsx'))).toBe(true);
-    expect(existsSync(root('src/app/(auth)/reset-password/page.tsx'))).toBe(true);
+    expect(existsSync(root('apps/web/src/app/(auth)/forgot-password/page.tsx'))).toBe(true);
+    expect(existsSync(root('apps/web/src/app/(auth)/reset-password/page.tsx'))).toBe(true);
     // The link lives in the client form the page renders (P1c split page.tsx
     // into a server wrapper + login-form.tsx for the signed-in redirect).
-    const login = readFileSync(root('src/app/(auth)/login/login-form.tsx'), 'utf8');
+    const login = readFileSync(root('apps/web/src/app/(auth)/login/login-form.tsx'), 'utf8');
     expect(login).toMatch(/href="\/forgot-password"/);
   });
 
   it('the reset page shows the four weak-password reasons distinctly', () => {
-    const page = readFileSync(root('src/app/(auth)/reset-password/page.tsx'), 'utf8');
+    const page = readFileSync(root('apps/web/src/app/(auth)/reset-password/page.tsx'), 'utf8');
     for (const reason of ['TOO_SHORT', 'TOO_LONG', 'TOO_COMMON', 'BREACHED']) {
       expect(page).toContain(reason);
     }

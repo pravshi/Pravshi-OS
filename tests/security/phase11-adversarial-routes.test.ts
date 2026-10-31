@@ -197,6 +197,8 @@ describe('F-11-11 / F-11-14: retired files are absent and unreferenced', () => {
       ...walk(join(ROOT, 'drizzle')),
       ...walk(join(ROOT, 'scripts')),
       ...walk(join(ROOT, 'src')),
+      ...walk(join(ROOT, 'apps/web/src')),
+      ...walk(join(ROOT, 'apps/worker/src')),
       join(ROOT, 'package.json'),
       join(ROOT, 'pnpm-workspace.yaml'),
     ];

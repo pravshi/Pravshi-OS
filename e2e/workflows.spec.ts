@@ -15,7 +15,7 @@ import { hashPassword } from 'better-auth/crypto';
  * plus the 404 concealment for invisible workflows.
  *
  * ── Contracts under test ────────────────────────────────────────────────────
- * API (src/app/api/workflows/*):
+ * API (apps/web/src/app/api/workflows/*):
  *   GET  /api/workflows                               → { rows, total, limit, offset }
  *   POST /api/workflows            { name, trigger, conditions?, actions? } → 201
  *   GET  /api/workflows/[id]                          → workflow | 404
@@ -23,7 +23,7 @@ import { hashPassword } from 'better-auth/crypto';
  *   POST /api/workflows/[id]/execute                  → 202 { executionId, status }
  *   GET  /api/workflows/[id]/executions               → { rows, total, limit, offset }
  *   GET  /api/workflow-executions/[id]                 → execution + steps[]
- * UI (src/app/(app)/workflows/*):
+ * UI (apps/web/src/app/(app)/workflows/*):
  *   /workflows              heading "Automations"; empty state "No workflows yet";
  *                           "New workflow" → /workflows/new
  *   /workflows/new          builder: "Workflow name *"; trigger select aria

@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
  *   - the web app loads it: instrumentation.ts, in the nodejs runtime branch only (Next calls
  *     register() once per server instance, before any request; the edge runtime cannot run the
  *     database-backed subscribers and emits nothing);
- *   - the worker loads it: src/worker/runner.ts, with the modules that register job handlers;
+ *   - the worker loads it: apps/worker/src/runner.ts, with the modules that register job handlers;
  *   - nothing else in src loads it or registers a subscriber, so there is one wiring, in one place.
  *
  * The files are found by walking the file system, not with `git grep`, so a file that is not yet
@@ -37,7 +37,8 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const SRC = walk('src');
+const SOURCE_ROOTS = ['src', 'apps/web/src', 'apps/worker/src'] as const;
+const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
 /** Code only: comments dropped, so a path named in prose never counts as an import. */
 const code = (source: string) =>
@@ -52,30 +53,30 @@ describe('domain events are wired in every emitting process', () => {
     expect(source).toMatch(/emitIntegrationEvent\(auth, eventKey, data, options\)/);
   });
 
-  it('the web app loads it from src/instrumentation.ts, in the nodejs runtime branch only', () => {
-    // With a src/ folder Next 15 loads src/instrumentation.ts and IGNORES a root instrumentation.ts
+  it('the web app loads it from apps/web/src/instrumentation.ts, in the nodejs runtime branch only', () => {
+    // With a src/ folder Next 15 loads apps/web/src/instrumentation.ts and IGNORES a root instrumentation.ts
     // (a real build emits no .next/server/instrumentation.js for the root file), so the wiring must
     // live here — a first version of Step 6 put it in the root file and registered nothing.
-    expect(existsSync(join(ROOT, 'src/instrumentation.ts'))).toBe(true);
-    const source = code(read('src/instrumentation.ts'));
+    expect(existsSync(join(ROOT, 'apps/web/src/instrumentation.ts'))).toBe(true);
+    const source = code(read('apps/web/src/instrumentation.ts'));
     const nodejs = /if \(process\.env\.NEXT_RUNTIME === 'nodejs'\) \{([\s\S]*?)\n {2}\}/.exec(
       source,
     );
-    expect(nodejs, 'src/instrumentation.ts has no nodejs runtime branch').not.toBeNull();
-    expect(nodejs![1]).toContain("await import('./lib/composition/domain-events');");
+    expect(nodejs, 'apps/web/src/instrumentation.ts has no nodejs runtime branch').not.toBeNull();
+    expect(nodejs![1]).toContain("await import('@/lib/composition/domain-events');");
     expect(source).not.toMatch(/NEXT_RUNTIME === 'edge'/);
     expect(source).toMatch(/export async function register\(/);
     // Registration only: nothing in instrumentation may touch the database (its own contract).
     expect(source).not.toMatch(/withAuthorizedDb|@\/lib\/db|connectWithWake/);
   });
 
-  it('the root instrumentation.ts is not relied on (Next ignores it when src/ exists)', () => {
-    expect(existsSync(join(ROOT, 'src/app'))).toBe(true);
-    expect(code(read('instrumentation.ts'))).not.toContain('composition');
+  it('apps/web/instrumentation.ts (beside src/) is not relied on: Next ignores it when src/ exists', () => {
+    expect(existsSync(join(ROOT, 'apps/web/src/app'))).toBe(true);
+    expect(code(read('apps/web/instrumentation.ts'))).not.toContain('composition');
   });
 
-  it('the worker loads it from src/worker/runner.ts', () => {
-    expect(code(read('src/worker/runner.ts'))).toContain(
+  it('the worker loads it from apps/worker/src/runner.ts', () => {
+    expect(code(read('apps/worker/src/runner.ts'))).toContain(
       "await import('@/lib/composition/domain-events');",
     );
   });
@@ -94,8 +95,8 @@ describe('domain events are wired in every emitting process', () => {
       if (file !== 'src/lib/events/index.ts' && registers.test(source)) registrars.push(file);
     }
     expect(importers, 'only the entry points may load the composition root').toEqual([
-      'src/instrumentation.ts',
-      'src/worker/runner.ts',
+      'apps/web/src/instrumentation.ts',
+      'apps/worker/src/runner.ts',
     ]);
     expect(registrars, 'only the composition root may register a subscriber').toEqual([]);
   });

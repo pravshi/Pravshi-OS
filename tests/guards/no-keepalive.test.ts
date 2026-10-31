@@ -10,19 +10,19 @@ import { describe, expect, it } from 'vitest';
 // Files whose only "heartbeat" matches are Phase 6 job-lease liveness
 // timestamps (see the keep-alive test below for the rationale).
 const JOB_HEARTBEAT_ALLOWLIST = new Set([
-  'src/app/(app)/jobs/[id]/page.tsx',
-  'src/app/(app)/jobs/_components/JobActions.tsx',
-  'src/app/(app)/jobs/_jobs.ts',
-  'src/app/api/jobs/store.ts',
+  'apps/web/src/app/(app)/jobs/[id]/page.tsx',
+  'apps/web/src/app/(app)/jobs/_components/JobActions.tsx',
+  'apps/web/src/app/(app)/jobs/_jobs.ts',
+  'apps/web/src/app/api/jobs/store.ts',
   'src/lib/jobs/queue.ts',
   'src/lib/jobs/types.ts',
-  'src/worker/handlers.ts',
-  'src/worker/worker.ts',
+  'apps/worker/src/handlers.ts',
+  'apps/worker/src/worker.ts',
 ]);
 
 describe('nothing defeats Neon autosuspend', () => {
   it('declares no cron jobs in vercel.json', () => {
-    const cfg = JSON.parse(readFileSync('vercel.json', 'utf8')) as Record<string, unknown>;
+    const cfg = JSON.parse(readFileSync('apps/web/vercel.json', 'utf8')) as Record<string, unknown>;
     expect(
       cfg.crons,
       'Adding a cron requires a founder decision — see LOCKED DECISIONS',
@@ -31,7 +31,7 @@ describe('nothing defeats Neon autosuspend', () => {
 
   it('has no keep-alive, heartbeat or warmup code', () => {
     const hits = execSync(
-      `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src scripts || true`,
+      `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts || true`,
       { encoding: 'utf8' },
     )
       .trim()
@@ -48,9 +48,9 @@ describe('nothing defeats Neon autosuspend', () => {
   });
 
   it('keeps /health free of database access', () => {
-    const health = readFileSync('src/app/health/route.ts', 'utf8');
+    const health = readFileSync('apps/web/src/app/health/route.ts', 'utf8');
     expect(health).not.toMatch(/lib\/db/);
-    expect(existsSync('src/app/health/db/route.ts')).toBe(true);
+    expect(existsSync('apps/web/src/app/health/db/route.ts')).toBe(true);
   });
 
   // REL-11: the worker's liveness watchdog runs on a timer for as long as the worker lives, and
@@ -58,9 +58,9 @@ describe('nothing defeats Neon autosuspend', () => {
   // and every monitor poll would keep Neon compute awake. Each file's complete import list is
   // pinned below, so a new dependency — in any import form — fails here and must be reviewed.
   const LIVENESS_PATH_IMPORTS: Record<string, string[]> = {
-    'src/worker/liveness.ts': [],
-    'src/worker/wake-latch.ts': [],
-    'src/worker/wake-server.ts': [
+    'apps/worker/src/liveness.ts': [],
+    'apps/worker/src/wake-latch.ts': [],
+    'apps/worker/src/wake-server.ts': [
       './liveness',
       './wake-latch',
       '@/lib/jobs/wake-token',

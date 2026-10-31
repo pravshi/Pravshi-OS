@@ -36,7 +36,7 @@ import {
 /**
  * /work Server Actions — authorize first, always.
  *
- * Same convention as src/app/(app)/crm/pipelines/_actions.ts: each action
+ * Same convention as apps/web/src/app/(app)/crm/pipelines/_actions.ts: each action
  * takes untrusted input, calls requirePermission() as its first statement,
  * then delegates to the service layer. Failures return the actionError()
  * envelope (data, not a throw).

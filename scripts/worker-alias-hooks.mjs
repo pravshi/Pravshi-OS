@@ -6,7 +6,7 @@
  * tsconfig path alias (`@/*` -> `./src/*`). This hook fills both gaps so the
  * worker's import graph loads without tsx/ts-node:
  *
- * 1. `@/...` specifiers are mapped into `./src/...`.
+ * 1. `@/...` specifiers are mapped into `./src/...` (`@/worker/...` into `./apps/worker/src/...`).
  * 2. Relative/absolute specifiers that do not name an existing file are
  *    probed with TypeScript extensions (`.ts`, `.tsx`, `/index.ts`).
  *
@@ -18,7 +18,11 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Workspace layout (redesign Step 7): shared code stays in ./src until Step 8, and the worker's
+// own modules live in apps/worker/src, reached as `@/worker/...` (tsconfig.json paths).
+const SRC_DIR = path.join(REPO_ROOT, 'src');
+const WORKER_DIR = path.join(REPO_ROOT, 'apps', 'worker', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -44,7 +48,12 @@ export async function resolve(specifier, context, nextResolve) {
   // 1. The `@/` tsconfig path alias.
   if (specifier === '@' || specifier.startsWith('@/')) {
     const relative = specifier === '@' ? '' : specifier.slice(2);
-    const url = probe(path.join(SRC_DIR, relative));
+    const workerRelative = relative.startsWith('worker/') ? relative.slice('worker/'.length) : null;
+    const url = probe(
+      workerRelative !== null
+        ? path.join(WORKER_DIR, workerRelative)
+        : path.join(SRC_DIR, relative),
+    );
     if (url) return { url, shortCircuit: true };
     // Fall through so the error mentions the original `@/...` specifier.
     return nextResolve(specifier, context);

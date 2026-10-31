@@ -12,18 +12,23 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
-    ignores: ['node_modules/**', '.next/**', 'out/**', 'build/**', 'next-env.d.ts'],
+    // eslint-config-next's rules that look for the pages/app directory need to know where the
+    // Next.js app is now that it lives in the workspace (redesign Step 7).
+    settings: { next: { rootDir: 'apps/web' } },
+  },
+  {
+    ignores: ['node_modules/**', '**/.next/**', '**/out/**', '**/build/**', '**/next-env.d.ts'],
   },
   {
     // Configuration is read through src/env.ts, which validates it. Reading process.env
     // directly bypasses that validation and the credential-separation rules built on it.
     // src/env.ts is the one file that must read it, so it is exempt.
     //
-    // The Sentry config files live at the repository root, outside src/, so this rule
+    // The Sentry config files live in apps/web, outside its src/, so this rule
     // does not fight them — and instrumentation-client.ts documents why the browser DSN
     // must be read as a literal. The exception is now written in three places that have
     // to agree: that file, this message, and ENVIRONMENT.md.
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps/worker/src/**/*.{ts,tsx}'],
     ignores: ['src/env.ts'],
     rules: {
       'no-restricted-syntax': [

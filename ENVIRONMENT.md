@@ -1,7 +1,7 @@
 # Environment
 
 `.env.example` carries every variable name with documentation and **no values**. Copy it to
-`.env`, which is gitignored and must never be committed.
+`.env`, which is gitignored and must never be committed. The web app runs from `apps/web` and Next reads `.env*` files there, while the worker, the migration runner and the tests read the repository root, so link one file: `ln -s ../../.env apps/web/.env`.
 
 ## Credential separation — the most important rule in this file
 
@@ -173,7 +173,7 @@ external senders are built from `APP_URL` (documented above).
 
 | Variable              | Required | Notes                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SCHEDULER_TICK_MS`   | optional | Worker only. Read directly by `src/worker/runner.ts` from the process environment (not part of the `src/env.ts` runtime schema). Scheduler tick interval in milliseconds; default 60000, and an invalid or blank value falls back to the default                                                                                                                      |
+| `SCHEDULER_TICK_MS`   | optional | Worker only. Read directly by `apps/worker/src/runner.ts` from the process environment (not part of the `src/env.ts` runtime schema). Scheduler tick interval in milliseconds; default 60000, and an invalid or blank value falls back to the default                                                                                                                 |
 | `WORKFLOWS_USE_QUEUE` | optional | Part of the `src/env.ts` runtime schema. Only the exact string `true` enqueues top-level workflow dispatches as `workflow_run` jobs; unset, blank or any other value means inline execution in the HTTP request. Set it **only** when a worker process is running to claim those jobs — otherwise dispatches queue unexecuted (see DEPLOYMENT.md, "The worker plane") |
 
 ### Low-cost worker mode (WP-W) — optional
@@ -188,7 +188,7 @@ DEPLOYMENT.md, "The worker plane", for delays and costs.
 | `WORKER_WAKE_TOKEN`             | web app **and** worker | Shared secret, at least 32 characters, identical on both. Part of the `src/env.ts` runtime schema. Server-side only, never logged                                                                                                                   |
 | `WORKER_WAKE_URL`               | web app                | The worker's `/wake` endpoint. Must be `https://` in production (the token would otherwise travel in clear). Part of the `src/env.ts` runtime schema                                                                                                |
 | `SCHEDULE_MIN_INTERVAL_MINUTES` | web app                | Shortest gap allowed between two runs of one schedule. Default 60; `0` disables. Checked on create, on a cron/timezone change, and when a paused schedule is enabled again; existing active schedules untouched                                     |
-| `WORKER_IDLE_MODE`              | worker                 | `deep-sleep` (default) or `poll` (always-on polling, for paid database plans). Read by `src/worker/runner.ts`                                                                                                                                       |
+| `WORKER_IDLE_MODE`              | worker                 | `deep-sleep` (default) or `poll` (always-on polling, for paid database plans). Read by `apps/worker/src/runner.ts`                                                                                                                                  |
 | `WORKER_ACTIVE_WINDOW_MS`       | worker                 | How long the worker stays active after its last job or wake. Default 60000                                                                                                                                                                          |
 | `WORKER_MAX_SLEEP_MS`           | worker                 | Longest deep sleep — the safety net for a lost wake. Default 7200000 (2 h), clamped to 24 h. Longer than a password-reset link's 1 h validity by choice: a reset email whose wake was lost can arrive expired (DEPLOYMENT.md, "Known rare failure") |
 | `PORT`                          | worker                 | Port of the wake endpoint (`POST /wake`, `GET /healthz`). Default 8080; platforms set it                                                                                                                                                            |

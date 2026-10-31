@@ -7,11 +7,11 @@
   },
   "packageManager": "pnpm@12.3.4",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "pnpm --filter @pravshi/web dev",
+    "build": "pnpm --filter @pravshi/web build",
+    "start": "pnpm --filter @pravshi/web start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
+    "lint": "eslint src apps/web/src apps/worker/src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
@@ -19,7 +19,7 @@
     "e2e": "playwright test",
     "guards": "node scripts/guards/secret-scan.mjs && node scripts/guards/workflow-secret-flow.mjs",
     "ci:branch": "node scripts/ci/provision-branch-role.mjs",
-    "worker": "node --experimental-transform-types --import ./scripts/worker-loader.mjs src/worker/runner.ts"
+    "worker": "node --experimental-transform-types --import ./scripts/worker-loader.mjs apps/worker/src/runner.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

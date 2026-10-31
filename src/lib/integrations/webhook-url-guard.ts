@@ -4,7 +4,7 @@
  *
  * It lives with the integrations module, which owns webhook URLs: subscription create/update
  * validates a URL here fail-fast (src/lib/integrations/subscriptions.ts), and the worker's webhook
- * delivery (src/worker/handlers.ts) runs the same checks again at send time and adds DNS
+ * delivery (apps/worker/src/handlers.ts) runs the same checks again at send time and adds DNS
  * resolution and connection pinning. The code below is unchanged from its former home in the job
  * handlers; moving it keeps the integrations module from importing the worker (ADR-010).
  */

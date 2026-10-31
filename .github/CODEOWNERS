@@ -12,12 +12,12 @@
 
 # ── Frontend ────────────────────────────────────────────────────────────────
 # Routes, UI, styles and public assets.
-/src/app/               @pravshi/developers
-/src/components/        @pravshi/developers
-/public/                @pravshi/developers
+/apps/web/src/app/      @pravshi/developers
+/apps/web/src/components/ @pravshi/developers
+/apps/web/public/       @pravshi/developers
 /e2e/                   @pravshi/developers
-/postcss.config.mjs     @pravshi/developers
-/components.json        @pravshi/developers
+/apps/web/postcss.config.mjs @pravshi/developers
+/apps/web/components.json @pravshi/developers
 
 # ── Backend / security ──────────────────────────────────────────────────────
 # Database, authorization, migrations, DB tests and the security guards.
@@ -33,9 +33,9 @@
 /tests/health/          @pravshi/maintainers
 /tests/env.test.ts      @pravshi/maintainers
 
-# Health routes sit under src/app but gate database access, so they are
-# owned as backend rather than as frontend. Listed after /src/app/ on purpose.
-/src/app/health/        @pravshi/maintainers
+# Health routes sit under apps/web/src/app but gate database access, so they are
+# owned as backend rather than as frontend. Listed after /apps/web/src/app/ on purpose.
+/apps/web/src/app/health/ @pravshi/maintainers
 
 # ── Founder / architect ─────────────────────────────────────────────────────
 # Architecture, shared configuration, and deployment/security configuration.
@@ -46,11 +46,16 @@
 /.gitattributes         @pravshi/owners
 /.gitignore             @pravshi/owners
 /eslint.config.mjs      @pravshi/owners
-/next.config.ts         @pravshi/owners
+/apps/web/next.config.ts @pravshi/owners
+/apps/web/package.json   @pravshi/owners
+/apps/web/tsconfig.json  @pravshi/owners
+/apps/worker/package.json @pravshi/owners
+/apps/worker/tsconfig.json @pravshi/owners
 /package.json           @pravshi/owners
 /playwright.config.ts   @pravshi/owners
 /pnpm-lock.yaml         @pravshi/owners
 /pnpm-workspace.yaml    @pravshi/owners
 /tsconfig.json          @pravshi/owners
-/vercel.json            @pravshi/owners
+/tsconfig.base.json     @pravshi/owners
+/apps/web/vercel.json   @pravshi/owners
 /vitest.config.mts      @pravshi/owners

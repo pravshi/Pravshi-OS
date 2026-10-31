@@ -1,5 +1,5 @@
 /**
- * REL-11 — the worker-loop watchdog (src/worker/liveness.ts), driven by a fake monotonic
+ * REL-11 — the worker-loop watchdog (apps/worker/src/liveness.ts), driven by a fake monotonic
  * clock: every check is deterministic and nothing here touches a database or a real timer
  * (except the one test that proves the timer is unref'd and reads a lagging clock).
  *
