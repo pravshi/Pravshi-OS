@@ -95,14 +95,11 @@ export type WorkflowEventInput = Omit<
 >;
 
 /**
- * Joins the non-empty parts with `:`, e.g.
- * `buildDedupKey('deal_stage_history', historyId)` →
- * `'deal_stage_history:<uuid>'`. Used by integration agents for stable
- * dedup keys (D4: the engine makes re-delivery a no-op on dedup key).
+ * Joins the non-empty parts with `:`, e.g. `buildDedupKey('deal_stage_history', historyId)`.
+ * Defined with the domain-event port (@/lib/events), which the emitting modules import; re-exported
+ * here so existing import sites of `@/lib/workflows/events` keep working.
  */
-export function buildDedupKey(...parts: string[]): string {
-  return parts.filter((p) => p !== '').join(':');
-}
+export { buildDedupKey } from '@/lib/events';
 
 /** Maximum chained-dispatch depth per originating request (D4). */
 const MAX_DISPATCH_DEPTH = 5;

@@ -193,6 +193,9 @@ async function main(): Promise<void> {
   // Inside the worker, work enqueued by a handler is picked up by this loop: never send
   // a network wake to ourselves.
   (await import('@/lib/jobs/wake')).markWorkerProcess();
+  // Connects the workflow dispatcher and the webhook fan-out to the domain-event ports (a workflow
+  // action that changes a deal or task emits events inside this process).
+  await import('@/lib/composition/domain-events');
   await import('./handlers'); // notification, webhook, email, cleanup
   await import('./workflow-jobs'); // workflow_run, scheduled_trigger
   await import('@/lib/import/sales-sheet/job'); // crm_import

@@ -346,3 +346,15 @@ the probe or record an explicit risk-acceptance before merge.
   assertions and the in-function org derivation close the parameterized-org
   vector; cross-org references fail closed with 42501 at the org-guard
   triggers and inside every definer.
+
+## Amendment — Step 6 of the redesign (domain-event port)
+
+`dispatchWorkflowEvent` is still the dispatcher (`src/lib/workflows/events.ts`), but `crm`, `work`
+and `integrations` no longer import it: they call a same-signature function from the L3 port
+`src/lib/events`, which forwards to the one subscriber the composition root
+(`src/lib/composition/domain-events.ts`) registers at start-up ([ADR-010](010-module-layers-and-dependency-rules.md),
+rule 4). D1–D4 are unchanged: the call is made after the commit, awaited inline in the caller's
+async context, with the same `Authorization` object (so the depth bound and the trigger actor's
+authority hold), and never throws. One addition: an event emitted in a process that did not load
+the composition root is logged and reported on every occurrence rather than silently dropped;
+`tests/guards/domain-events-wired.test.ts` pins that the web app and the worker load it.

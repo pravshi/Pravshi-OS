@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { writeAuditEntry } from '@/lib/audit/log';
-import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
+import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/events';
 import { isPgCode, parseRequest } from './errors';
 import {
   AddProjectMemberSchema,

@@ -52,9 +52,10 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   auth: 'L2',
   authz: 'L2',
   identity: 'L2',
-  // L3 shared services (`events` is added by Step 6)
+  // L3 shared services
   jobs: 'L3',
   notifications: 'L3',
+  events: 'L3', // the domain-event ports (Step 6): what crm, work and integrations emit through
   // L4 tenant domain modules
   crm: 'L4',
   work: 'L4',
@@ -75,9 +76,15 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   // src/worker: the background worker's entry point and job handlers (Step 5). It composes the
   // queue core and the domain modules, like src/app, and no src/lib module may import it.
   worker: 'entry',
+  // src/lib/composition: the composition roots that connect subscribers to the domain-event ports
+  // (Step 6). They import workflows and integrations, so they sit above the domain modules like an
+  // entry point; being 'entry', no other src/lib module may import them.
+  composition: 'entry',
   components: 'entry',
   hooks: 'entry',
   middleware: 'entry',
+  // src/instrumentation.ts: Next's start-up hook (Step 6) — loads the composition root.
+  instrumentation: 'entry',
 };
 
 /** L2's internal order (ADR-010): a lower index may not import a higher one. */
@@ -94,22 +101,12 @@ const L4_EDGES: ReadonlySet<string> = new Set([
   'import->crm',
 ]);
 
-// ── the baseline: violations at eb4eca3, file → module, shrink-only ───────────────────────
+// ── the baseline: empty since Step 6 (it held 17 entries at eb4eca3) ──────────────────────
 
 type Rule = 'rule-1' | 'rule-2' | 'rule-3' | 'rule-5' | 'rule-7' | 'cycle';
 
 /** `<importing file> -> <target module> [<rule>]`, with the step that removes it. */
-const BASELINE: readonly string[] = [
-  // Step 6 — domain reactions become events
-  'src/lib/crm/deals.ts -> integrations [rule-3]',
-  'src/lib/crm/deals.ts -> workflows [rule-3]',
-  'src/lib/crm/pipelines.ts -> integrations [rule-3]',
-  'src/lib/crm/pipelines.ts -> workflows [rule-3]',
-  'src/lib/integrations/inbound.ts -> workflows [rule-3]',
-  'src/lib/work/projects.ts -> workflows [rule-3]',
-  'src/lib/work/tasks.ts -> integrations [rule-3]',
-  'src/lib/work/tasks.ts -> workflows [rule-3]',
-];
+const BASELINE: readonly string[] = [];
 
 // ── the analysis (pure: the self-tests at the bottom run it on synthetic graphs) ──────────
 
@@ -440,6 +437,7 @@ describe('module-boundary checker', () => {
     expect(moduleOf('src/lib/utils.ts')).toBe('utils');
     expect(moduleOf('src/env.ts')).toBe('env');
     expect(moduleOf('src/middleware.ts')).toBe('middleware');
+    expect(moduleOf('src/instrumentation.ts')).toBe('instrumentation');
     expect(moduleOf('src/app/(app)/crm/page.tsx')).toBe('app');
     expect(moduleOf('src/worker/runner.ts')).toBe('worker');
     expect(moduleOf('src/lib/newthing/x.ts')).toBeNull();
@@ -467,6 +465,14 @@ describe('module-boundary checker', () => {
     expect(ruleFor('crm', 'worker')).toBe('rule-1');
     expect(ruleFor('worker', 'jobs')).toBeNull(); // the worker imports the queue core downward
     expect(ruleFor('worker', 'import')).toBeNull();
+    expect(ruleFor('crm', 'events')).toBeNull(); // domain modules emit through the L3 port
+    expect(ruleFor('integrations', 'events')).toBeNull();
+    expect(ruleFor('events', 'workflows')).toBe('rule-1'); // the port never imports a subscriber
+    expect(ruleFor('events', 'integrations')).toBe('rule-1');
+    expect(ruleFor('crm', 'composition')).toBe('rule-1'); // only entry points load the composition root
+    expect(ruleFor('events', 'composition')).toBe('rule-1');
+    expect(ruleFor('composition', 'workflows')).toBeNull();
+    expect(ruleFor('crm', 'workflows')).toBe('rule-3'); // the reaction edges are gone for good
     expect(ruleFor('app', 'platform')).toBeNull();
   });
 

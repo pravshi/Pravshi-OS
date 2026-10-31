@@ -3,8 +3,7 @@ import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
-import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
-import { emitIntegrationEvent } from '@/lib/integrations/fanout';
+import { dispatchWorkflowEvent, emitIntegrationEvent, buildDedupKey } from '@/lib/events';
 import { emitNotificationSafely, notificationTitle, stableEventId } from '@/lib/notifications/emit';
 import {
   CreatePipelineSchema,

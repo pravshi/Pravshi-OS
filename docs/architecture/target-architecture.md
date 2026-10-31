@@ -134,6 +134,29 @@ loop phase and shut down gracefully. Seven of the eight job types have a registe
 each is exercised by its tests; `retry` is a job type with no handler on `main` either — retries
 are the retry sweeper's job (`src/worker/retry-sweeper.ts`) — and is pinned as such.
 
+**After Step 6** (domain events; same environment, newly initialised cluster; base `06c3458`):
+
+| Check                                                    | Step 5                             | Step 6                                                                                              |
+| -------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                               | pass (lint: no warnings)                                                                            |
+| `pnpm audit --audit-level=high`                           | pass                               | pass (documented ignores only)                                                                      |
+| `pnpm build`                                              | pass                               | pass — the route list (symbol and path of all 163 entries) is identical to `main`'s                 |
+| Migrations from zero                                      | 88 of 88                           | 88 of 88; no file under `drizzle/` or `scripts/db/` is in the diff                                  |
+| `pnpm test` (files)                                       | 272 passed, 0 failed, 1 skipped    | 274 passed, 0 failed, 1 skipped (275 files: two new test files)                                     |
+| `pnpm test` (tests)                                       | 4,213 passed, 0 failed, 10 skipped | 4,232 passed, 0 failed, 10 skipped (4,242: new port, wiring and boundary self-tests)                |
+| Worker end-to-end suite (opt-in, `WPW_E2E=1`)             | 7 of 7 passed                      | 7 of 7 passed in one run (Node 22.22.0, throwaway database); a single run, not repeated             |
+| Real `next start` probe                                   | —                                  | both event ports are functions after start-up (see the note below)                                  |
+| Module-boundary baseline                                  | 8 entries                          | 0 entries — the five remaining edges removed, none added; the module graph has no cycle             |
+
+**Start-up hook location.** With a `src/` folder, Next 15.5 loads `src/instrumentation.ts` and
+ignores a root-level `instrumentation.ts`: a build with the root file emits no
+`.next/server/instrumentation.js`, and a real `next start` showed both ports unregistered. (This
+also means the root file's Sentry initialisation has never run on `main`; that is unchanged here
+and is a separate decision.) Step 6 therefore wires the web app from a new `src/instrumentation.ts`
+and leaves the root file as it was. With it, a build emits `instrumentation.js`, the route list is
+unchanged (163 entries), and a `next start` process shows both ports registered once start-up
+completes.
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 
@@ -245,6 +268,13 @@ ADR-009, ADR-010 and this document. Documentation only.
   finds no blocking issue; all release gates pass.
 - **Touches:** `src/lib/{crm,work,integrations,workflows,events}`, `src/app` and `src/worker`
   wiring, tests, ADR-005 cross-reference.
+- **Result (Step 6):** two typed ports in `src/lib/events` (`dispatchWorkflowEvent`,
+  `emitIntegrationEvent`) with the signatures the call sites already used, so each of the 15 call
+  sites changed by its import line only. `src/lib/composition/domain-events.ts` registers the real
+  subscribers; `src/instrumentation.ts` (nodejs branch) and `src/worker/runner.ts` load it, and
+  `tests/guards/domain-events-wired.test.ts` pins both. The registry lives on `globalThis`, so
+  separate Next bundles share it; an emission with no subscriber is logged and reported on every
+  occurrence and never throws. The boundary baseline is empty. Results are in §2.
 
 ## 5. Phase 2 — workspace (Steps 7–8), then Phase 3
 
