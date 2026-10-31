@@ -1,48 +1,19 @@
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { FlatCompat } from '@eslint/eslintrc';
+import { createEslintConfig } from './packages/shared-config/eslint.base.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const compat = new FlatCompat({
+// The rule set lives in packages/shared-config (redesign Step 8); this file only says where this
+// repository's Next.js app is and which files the process.env rule covers.
+export default createEslintConfig({
   baseDirectory: __dirname,
+  nextRootDir: 'apps/web',
+  envRuleFiles: [
+    'src/**/*.{ts,tsx}',
+    'apps/web/src/**/*.{ts,tsx}',
+    'apps/worker/src/**/*.{ts,tsx}',
+  ],
+  envRuleIgnores: ['src/env.ts'],
 });
-
-const eslintConfig = [
-  ...compat.extends('next/core-web-vitals', 'next/typescript'),
-  {
-    // eslint-config-next's rules that look for the pages/app directory need to know where the
-    // Next.js app is now that it lives in the workspace (redesign Step 7).
-    settings: { next: { rootDir: 'apps/web' } },
-  },
-  {
-    ignores: ['node_modules/**', '**/.next/**', '**/out/**', '**/build/**', '**/next-env.d.ts'],
-  },
-  {
-    // Configuration is read through src/env.ts, which validates it. Reading process.env
-    // directly bypasses that validation and the credential-separation rules built on it.
-    // src/env.ts is the one file that must read it, so it is exempt.
-    //
-    // The Sentry config files live in apps/web, outside its src/, so this rule
-    // does not fight them — and instrumentation-client.ts documents why the browser DSN
-    // must be read as a literal. The exception is now written in three places that have
-    // to agree: that file, this message, and ENVIRONMENT.md.
-    files: ['src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps/worker/src/**/*.{ts,tsx}'],
-    ignores: ['src/env.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "MemberExpression[object.name='process'][property.name='env']",
-          message:
-            'Read configuration through src/env.ts, not process.env. ' +
-            'The only exception is instrumentation-client.ts — see ENVIRONMENT.md.',
-        },
-      ],
-    },
-  },
-  ...compat.extends('prettier'),
-];
-
-export default eslintConfig;

@@ -180,3 +180,17 @@ Step 7 is implemented as follows; where it differs from the plan above, the diff
 - **Vercel.** The project's Root Directory must be `apps/web` with "include source files outside the
   Root Directory" on. That is a deployment setting changed by the founder; no Vercel project exists.
 
+## Amendment — Step 8, package 1: `shared-config`
+
+`packages/shared-config` holds the workspace's shared tool configuration: `tsconfig.base.json`, the
+Prettier style (`prettier.json`, which `.prettierrc` points at), the ESLint rule set
+(`eslint.base.mjs`, a `createEslintConfig` function) and the Vitest base options
+(`vitest.base.mjs`). It is configuration only — no source code and no runtime dependency; the
+tools' own packages stay declared in the root `package.json`, and `src/lib`, `src/env.ts` and every
+migration are untouched. The root `eslint.config.mjs` and `vitest.config.mts` keep what is specific
+to this repository (where the Next.js app is, the process.env rule's file list, the setup file and
+the project groups) and call or spread the package. Its files are protected paths
+(`packages/shared-config/`, `.prettierrc`) and owned by the founder in CODEOWNERS. Because the
+package has no `src/`, the source roots the guards walk do not change; `tests/guards/workspace-roots`
+fails when another package appears, so a package with source must extend those roots.
+

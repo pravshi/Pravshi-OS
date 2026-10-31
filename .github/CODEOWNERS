@@ -57,5 +57,7 @@
 /pnpm-workspace.yaml    @pravshi/owners
 /tsconfig.json          @pravshi/owners
 /tsconfig.base.json     @pravshi/owners
+/packages/shared-config/ @pravshi/owners
+/.prettierrc           @pravshi/owners
 /apps/web/vercel.json   @pravshi/owners
 /vitest.config.mts      @pravshi/owners

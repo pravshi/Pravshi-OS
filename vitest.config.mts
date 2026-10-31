@@ -1,22 +1,15 @@
 import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
+// Plugins, path resolution, the node environment and the timeouts live in packages/shared-config
+// (redesign Step 8); this file keeps what is specific to this repository's suites.
+import { baseVitestConfig } from './packages/shared-config/vitest.base.mjs';
 
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    tsconfigPaths: true,
-  },
+  ...baseVitestConfig,
   test: {
-    environment: 'node',
+    ...baseVitestConfig.test,
     // include is per project below: with extends: true a root include would be MERGED into
     // each project's, and the perf project would then run every file a second time.
     setupFiles: ['tests/setup.ts'],
-    testTimeout: 30_000, // Neon cold starts are legitimate; see Global Constraints
-    // Same reason, and it needs saying separately: vitest defaults hooks to 10s regardless
-    // of testTimeout, and a beforeAll that builds organizations, people and engagements
-    // over a cold branch legitimately exceeds that. Fixtures are parallelised where the
-    // rows are independent; this covers the round-trip latency that remains.
-    hookTimeout: 30_000,
     // Two groups, run one after the other (sequence.groupOrder, lowest first). The perf
     // harness (tests/perf) seeds its dataset in ONE transaction of about two minutes — on
     // purpose, so no suite ever sees it half-seeded — and that transaction holds ordinary

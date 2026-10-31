@@ -170,6 +170,16 @@ completes.
 | Real `next start` from `apps/web`                         | both ports registered              | both ports registered after start-up                                                                |
 | Module-boundary baseline                                  | 0 entries                          | 0 entries; the guard maps the three physical roots to the logical paths                             |
 
+**After Step 8, package 1 — `shared-config`** (base `8d63b68`; same environment, newly initialised cluster):
+
+| Check                                                    | Step 7                             | Package 1                                                                                           |
+| -------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                               | pass; the resolved ESLint (6 files), TypeScript (root, `apps/web`), Prettier and Vitest configs are identical to `main`'s |
+| `pnpm build`                                              | pass                               | pass — the route list (163 entries) is identical                                                    |
+| `pnpm test` (files)                                       | 275 passed, 0 failed, 1 skipped    | 276 passed, 0 failed, 1 skipped (277 files: the shared ESLint config test)                          |
+| `pnpm test` (tests)                                       | 4,239 passed, 0 failed, 10 skipped | 4,247 passed, 0 failed, 10 skipped (4,257)                                                          |
+| Source, migrations, dependency versions                   | —                                  | unchanged; the lockfile gains one empty importer                                                    |
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 

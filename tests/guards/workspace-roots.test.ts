@@ -24,7 +24,10 @@ describe('workspace source roots', () => {
     expect(existsSync('apps/worker/src')).toBe(true);
   });
 
-  it('there is no packages/ directory yet (Step 8 adds it together with the guard roots)', () => {
-    expect(existsSync('packages')).toBe(false);
+  it('packages/ holds exactly shared-config, which is configuration only (no src folder)', () => {
+    // Step 8 extracts one package per pull request. A package with source code must extend the
+    // source roots every guard walks (see the header); shared-config has none, so it adds no root.
+    expect(dirs('packages').filter((d) => d !== 'node_modules')).toEqual(['shared-config']);
+    expect(existsSync('packages/shared-config/src')).toBe(false);
   });
 });
