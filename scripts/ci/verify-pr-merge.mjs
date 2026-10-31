@@ -101,6 +101,9 @@ export const PROTECTED_PATHS = [
   'vitest.config.mts',
   'tsconfig.json',
   'tsconfig.base.json',
+  // shared tool configuration (redesign Step 8): the TypeScript, Prettier, ESLint and Vitest bases
+  'packages/shared-config/',
+  '.prettierrc',
   'eslint.config.mjs',
   'next.config.ts',
   'playwright.config.ts',

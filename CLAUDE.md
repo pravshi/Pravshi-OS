@@ -25,6 +25,7 @@ worktree. Handoffs to and from Antigravity follow AGENTS.md §6. The private coo
 pnpm workspace: `apps/web` (Next.js; own `src/`), `apps/worker` (`apps/worker/src/`), and the shared
 server code at the root `src/lib` + `src/env.ts` until Step 8. Root scripts (`pnpm build`,
 `pnpm worker`, …) delegate to the apps; every dependency is declared in the root `package.json`.
+Tool configuration bases are in `packages/shared-config` (Step 8, package 1).
 
 ## Engineering workflow (substantial work)
 

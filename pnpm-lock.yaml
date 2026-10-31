@@ -250,6 +250,8 @@ importers:
 
   apps/worker: {}
 
+  packages/shared-config: {}
+
 packages:
 
   '@alloc/quick-lru@5.3.0':

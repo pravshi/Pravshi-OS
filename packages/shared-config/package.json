@@ -1,0 +1,13 @@
+{
+  "name": "@pravshi/shared-config",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared tool configuration for the workspace: TypeScript base options, the Prettier style, the ESLint rule set and the Vitest base options. Configuration only — no source code, no runtime dependency. The tools' own packages stay declared in the root package.json.",
+  "type": "module",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./prettier.json": "./prettier.json",
+    "./eslint": "./eslint.base.mjs",
+    "./vitest": "./vitest.base.mjs"
+  }
+}
