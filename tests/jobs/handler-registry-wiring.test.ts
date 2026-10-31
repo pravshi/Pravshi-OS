@@ -21,6 +21,7 @@ const REGISTERING_IMPORTS = [
   "await import('./handlers')", // notification, webhook, email, cleanup
   "await import('./workflow-jobs')", // workflow_run, scheduled_trigger
   "await import('@/lib/import/sales-sheet/job')", // crm_import
+  "await import('@/lib/composition/domain-events')", // Step 6: wires the domain-event ports
 ] as const;
 
 const HANDLED = [

@@ -35,8 +35,9 @@ const hoisted = vi.hoisted(() => ({
 
 // The workflow dispatch is the only seam between "receipt written" and
 // "receipt marked PROCESSED"; it records its dedup key and runs the hook.
-vi.mock('@/lib/workflows/events', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/workflows/events')>();
+// inbound.ts emits through the domain-event port (Step 6), so the seam is mocked there.
+vi.mock('@/lib/events', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/events')>();
   return {
     ...actual,
     dispatchWorkflowEvent: vi.fn(async (_auth: unknown, event: { dedupKey: string }) => {

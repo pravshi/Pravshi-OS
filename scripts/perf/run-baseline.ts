@@ -175,6 +175,8 @@ async function main(): Promise<void> {
   const automationAnalytics = await import('@/lib/analytics/automation');
   const crm = await import('@/lib/crm/companies');
   const deals = await import('@/lib/crm/deals');
+  // The deal service emits through the domain-event ports; load the subscribers as production does.
+  await import('@/lib/composition/domain-events');
   const search = await import('@/lib/search/query');
   const ai = await import('@/lib/ai/orchestrator');
   const aiUsage = await import('@/lib/ai/usage');

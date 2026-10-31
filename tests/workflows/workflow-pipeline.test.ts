@@ -13,6 +13,9 @@ import {
 } from './helpers';
 import { mkAccount, headersFor } from '../authz/fixtures';
 import '@/lib/workflows/triggers';
+// crm and work emit through the domain-event port; the composition root wires it to the real
+// dispatcher, exactly as instrumentation.ts / the worker runner do in production.
+import '@/lib/composition/domain-events';
 import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
 import { executeWorkflowManual } from '@/lib/workflows/engine';
 import { createTask } from '@/lib/work/tasks';

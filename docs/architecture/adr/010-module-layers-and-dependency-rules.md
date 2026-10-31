@@ -20,14 +20,14 @@ relative paths and dynamic `import()` all resolved) shows:
   | `audit → auth` — **removed, Step 4** | `src/lib/audit/log.ts` imported `auth/client-address`; the trusted-header logic now lives in `src/lib/observability/client-address.ts` (Better Auth's option stays in `src/lib/auth/better-auth-ip.ts`) |
   | `auth → invitations` — **removed, Step 4** | `src/lib/auth/invitations.ts` imported the token hash, accept schema and `InvitationError` from `invitations`; they now live in `src/lib/auth/invitation-contract.ts`, which `invitations` imports (a permitted downward edge) |
   | `jobs → domain modules` — **removed, Step 5** | the worker entry (`runner.ts`, `handlers.ts`, `workflow-jobs.ts`, `reminder-sweep.ts`) lived in `src/lib/jobs`; it now lives in `src/worker/`, and `src/lib/jobs` imports no L4 module |
-  | `crm, work, integrations ↔ workflows` | event emission and workflow actions call each other directly |
-  | `crm → integrations`           | `src/lib/crm/deals.ts` and `src/lib/crm/pipelines.ts` call `emitIntegrationEvent` (`integrations/fanout`) |
-  | `work → integrations`          | `src/lib/work/tasks.ts` calls `emitIntegrationEvent` (`integrations/fanout`) |
+  | `crm, work, integrations → workflows` — **removed, Step 6** | event emission called the workflow dispatcher directly; `crm`, `work` and `integrations` now call `dispatchWorkflowEvent` from the L3 `events` port, and the composition root registers `workflows/events` as its subscriber |
+  | `crm → integrations` — **removed, Step 6** | `crm/deals.ts` and `crm/pipelines.ts` called `emitIntegrationEvent`; they now call the `events` port, whose subscriber is `integrations/fanout` |
+  | `work → integrations` — **removed, Step 6** | `work/tasks.ts` called `emitIntegrationEvent`; same port |
 
-  Step 4 removed the first four edges (the boundary guard's baseline went from 17 entries to 13)
-  and Step 5 the `jobs` edge (13 to 8). Step 6 removes the last three rows:
-  `crm → workflows`, `work → workflows`, `integrations → workflows`, `crm → integrations` and
-  `work → integrations` all become emissions through the `events` port (rule 4).
+  Step 4 removed the first four edges (the boundary guard's baseline went from 17 entries to 13),
+  Step 5 the `jobs` edge (13 to 8) and Step 6 the last five (8 to 0): `crm → workflows`,
+  `work → workflows`, `integrations → workflows`, `crm → integrations` and `work → integrations`
+  became emissions through the `events` port (rule 4). The baseline is empty.
 
 - `platform`, `admin`, `search`, `analytics`, `ai`, `identity` and `storage` are imported by no
   other `src/lib` module; nothing in `src/lib` imports `src/app` or `src/components`.
@@ -48,7 +48,7 @@ layer or across layers.
 | L3 Shared services          | `jobs` (queue core), `notifications`, `events` (new, Step 6)                                         | Enqueue and job types, notification delivery, the internal domain-event port                |
 | L4 Tenant domain modules    | `crm`, `work`, `workflows`, `integrations`, `import`, `ai`, `analytics`, `search`, `admin`, `invitations` | Tenant business capabilities and tenant administration                                 |
 | Control plane               | `platform`                                                                                           | Platform administration (ADR-008); may import L0–L2 only                                    |
-| Entry points                | `src/app` (pages, layouts, route handlers, server actions), the worker entry, `scripts/`             | Composition roots: wire modules together; may import any layer                             |
+| Entry points                | `src/app` (pages, layouts, route handlers, server actions), the worker entry, `src/lib/composition` (Step 6), `scripts/` | Composition roots: wire modules together; may import any layer. `src/lib/composition/domain-events.ts` registers the `events` port subscribers; only `src/instrumentation.ts` (web, nodejs runtime) and `src/worker/runner.ts` load it |
 
 Order inside L2: `audit` is the lowest (it may not import `auth` or `authz`), then `auth`, then
 `authz`. `identity` imports L1 only.

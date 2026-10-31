@@ -4,8 +4,7 @@ import { assertTargetAffected, type Authorization } from '@/lib/authz/require-pe
 import { softDeleteRow } from './soft-delete';
 import { writeAuditEntry } from '@/lib/audit/log';
 import { assertDealReferences } from './refs';
-import { dispatchWorkflowEvent, buildDedupKey } from '@/lib/workflows/events';
-import { emitIntegrationEvent } from '@/lib/integrations/fanout';
+import { dispatchWorkflowEvent, emitIntegrationEvent, buildDedupKey } from '@/lib/events';
 import { emitNotificationSafely, notificationTitle, stableEventId } from '@/lib/notifications/emit';
 import {
   CreateDealSchema,

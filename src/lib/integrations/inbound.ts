@@ -4,7 +4,7 @@ import { writeAuditEntry, type RequestMetadata } from '@/lib/audit/log';
 import { assertTargetAffected, type Authorization } from '@/lib/authz/require-permission';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { AuthContext } from '@/lib/db/context';
-import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/workflows/events';
+import { buildDedupKey, dispatchWorkflowEvent } from '@/lib/events';
 import { assertIntegrationUuid, IntegrationsError } from './errors';
 import { getProviderDefinition } from './providers';
 
