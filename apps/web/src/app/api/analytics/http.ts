@@ -8,7 +8,7 @@ import type { TaskPriority, TaskStatus } from '@/lib/work/schema';
 
 /**
  * REST plumbing shared by the Phase 7 analytics API routes.
- * Mirrors src/app/api/jobs/http.ts: request-validation failures are a 400
+ * Mirrors apps/web/src/app/api/jobs/http.ts: request-validation failures are a 400
  * INVALID_REQUEST with the problem described; everything else propagates to
  * withPermission(), which answers with the standard authorization envelope.
  */

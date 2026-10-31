@@ -2,7 +2,7 @@
  * Frontend integrations UI tests (Phase 10, Wave G).
  *
  * Covers the UI↔API contract surface owned by G: the pure shaping logic
- * in src/components/integrations/integrations-client.ts (form body
+ * in apps/web/src/components/integrations/integrations-client.ts (form body
  * builders, status shaping, wire converters), the config-field
  * descriptors pinned against the REAL provider registry (a descriptor
  * key the provider schema would reject fails here, not in production),

@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
 
 const root = (...p: string[]) => join(process.cwd(), ...p);
 const SERVICE = readFileSync(root('src/lib/auth/change-password.ts'), 'utf8');
-const ACTIONS = readFileSync(root('src/app/(app)/me/security/actions.ts'), 'utf8');
-const CLIENT = readFileSync(root('src/app/(app)/me/security/security-client.tsx'), 'utf8');
+const ACTIONS = readFileSync(root('apps/web/src/app/(app)/me/security/actions.ts'), 'utf8');
+const CLIENT = readFileSync(root('apps/web/src/app/(app)/me/security/security-client.tsx'), 'utf8');
 const MIGRATION_29 = readFileSync(root('drizzle/0029_login_events_self_read.sql'), 'utf8');
 const JOURNAL = readFileSync(root('drizzle/meta/_journal.json'), 'utf8');
 

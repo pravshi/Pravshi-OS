@@ -11,7 +11,9 @@ import { describe, expect, it } from 'vitest';
  * app_user).
  */
 
-const root = (p: string) => `src/${p}`;
+// Redesign Step 7: the app's folders live in apps/web/src; everything else is shared src/.
+const root = (p: string) =>
+  /^(app|components|hooks)\//.test(p) ? `apps/web/src/${p}` : `src/${p}`;
 const read = (p: string) => readFileSync(root(p), 'utf8');
 
 describe('admin page authorization', () => {

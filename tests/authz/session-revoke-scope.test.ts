@@ -14,7 +14,7 @@ import {
 
 /**
  * CONCERN-2 (scope escalation): the three session actions in
- * src/app/(app)/admin/users/actions.ts carry minScope: 'GLOBAL' (pinned by
+ * apps/web/src/app/(app)/admin/users/actions.ts carry minScope: 'GLOBAL' (pinned by
  * tests/guards/session-revoke-scope.test.ts). This file pins the enforcement
  * those specs rely on: a DEPARTMENT-scoped holder of sessions.revoke gets a
  * clean 403 SCOPE_DENIED — audited — instead of reaching the revocation.

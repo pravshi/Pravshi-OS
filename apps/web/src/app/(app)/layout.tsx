@@ -8,7 +8,7 @@ import { requireAuthenticated } from '@/lib/authz/page';
  * redirects to /login before any page renders. Individual pages add their own
  * requirePagePermission() for step-4 authorization.
  *
- * Route groups don't affect URLs: src/app/(app)/page.tsx still serves /.
+ * Route groups don't affect URLs: apps/web/src/app/(app)/page.tsx still serves /.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   await requireAuthenticated();

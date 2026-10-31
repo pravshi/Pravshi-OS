@@ -5,7 +5,7 @@ import { requireAuthenticated } from '@/lib/authz/page';
 /**
  * Workflow permission gates (Phase 5).
  *
- * Mirrors the WORK_PERMISSIONS style from src/app/(app)/work/_permissions.ts.
+ * Mirrors the WORK_PERMISSIONS style from apps/web/src/app/(app)/work/_permissions.ts.
  * Permission keys follow the Phase 1 naming convention (<resource>.<verb>)
  * and are seeded in migration 0044 (module 'workflow') — if any key here
  * ever stops matching the catalogue, reconcile this module, not the pages.

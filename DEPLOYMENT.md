@@ -30,7 +30,9 @@ a separate Neon project, never against the production project.
 
 ## What already exists
 
-`vercel.json` is committed and correct:
+`apps/web/vercel.json` is committed and correct (since redesign Step 7 the Next.js application
+lives in `apps/web`; the Vercel project's **Root Directory must be `apps/web`**, a deployment
+setting only the founder changes):
 
 ```json
 {
@@ -73,7 +75,10 @@ API token scoped to `Zone:DNS:Edit` on `pravshi.com` only.
 ### 1. Create and link the Vercel project
 
 Link the project to `https://github.com/pravshi/Pravshi-OS.git`, with `main` as the
-production branch. Confirm the region resolves to `sin1` from `vercel.json`.
+production branch. Set the Root Directory to `apps/web` (the workspace root is installed
+automatically; "include source files outside of the Root Directory" must stay on, because the
+shared server code is `src/` at the repository root until Step 8). Confirm the region resolves to
+`sin1` from `apps/web/vercel.json`.
 
 ### 2. Set environment variables per environment
 
@@ -167,7 +172,7 @@ step. Executing the runbook requires founder approval (gate HG-2).
 ### 7. Bootstrap the first SUPER_ADMIN — once
 
 **Unperformed (gate HG-9).** The `/setup` page that completes the one-time link exists
-(`src/app/setup/`) — what remains is the operator act, with a human at the keyboard: the
+(`apps/web/src/app/setup/`) — what remains is the operator act, with a human at the keyboard: the
 link expires 60 minutes after it is printed and cannot be re-issued, so the bootstrap is
 run only when that human is ready to complete it immediately.
 
@@ -185,7 +190,7 @@ From the operator's machine, never from CI or Vercel, following
 
 Everything asynchronous in Pravshi OS — notifications, task reminders, email delivery
 (including **password-reset email**), outbound webhooks, workflow runs, scheduled
-triggers — executes in a separate long-running worker process (`src/worker/runner.ts`),
+triggers — executes in a separate long-running worker process (`apps/worker/src/runner.ts`),
 not in the web app. **A deployment that starts only the web app
 is silently broken:** every one of those surfaces stalls, with no signal in the UI. The
 worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
@@ -338,7 +343,7 @@ worker is a required part of the deployment, not an add-on. (Phase 12, F-12-11.)
 A job's lease renewal (every 15 s) proves the worker **process** is alive, not that its loop
 is getting anywhere: a handler that never returns keeps renewing its lease, so the reaper never
 frees the job and nothing else notices. The worker therefore runs an in-process watchdog
-(`src/worker/liveness.ts`). Before every wait the loop says what it waits for; a deep or
+(`apps/worker/src/liveness.ts`). Before every wait the loop says what it waits for; a deep or
 idle sleep is held to the exact length it chose, a pass or a job to the budget below. The
 watchdog reads only a monotonic clock — **no database query, ever** (a health check that
 touched the database would keep Neon awake; `tests/guards/no-keepalive.test.ts` enforces

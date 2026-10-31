@@ -34,12 +34,12 @@ const WRITERS: Array<{ file: string; fn: string; what: string }> = [
     what: 'a new reminder',
   },
   {
-    file: 'src/app/api/jobs/store.ts',
+    file: 'apps/web/src/app/api/jobs/store.ts',
     fn: 'export async function createSchedule(',
     what: 'a new schedule',
   },
   {
-    file: 'src/app/api/jobs/store.ts',
+    file: 'apps/web/src/app/api/jobs/store.ts',
     fn: 'export async function updateSchedule(',
     what: 'a rescheduled schedule',
   },
@@ -62,7 +62,7 @@ describe('worker work writers wake the worker after committing', () => {
   });
 
   it('the forgot-password route wakes after the reset step, outside any branch', () => {
-    const route = read('src/app/api/auth/forgot-password/route.ts');
+    const route = read('apps/web/src/app/api/auth/forgot-password/route.ts');
     const reset = route.indexOf('await requestPasswordReset(');
     const wake = route.indexOf(
       '  await requestWorkerWake();\n  return reply(200, { ok: true });\n}',

@@ -1,3 +1,6 @@
+packages:
+  - 'apps/*'
+
 allowBuilds:
   '@sentry/cli': true
   esbuild: true

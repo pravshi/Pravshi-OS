@@ -18,6 +18,6 @@ export async function register() {
   // the check keeps the Node-only import out of the edge bundle.
   // eslint-disable-next-line no-restricted-syntax
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    await import('./lib/composition/domain-events');
+    await import('@/lib/composition/domain-events');
   }
 }

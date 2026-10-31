@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
  * fails closed on any shape it does not recognise.
  */
 
-const ROUTE = 'src/app/api/admin/audit-logs/export/route.ts';
+const ROUTE = 'apps/web/src/app/api/admin/audit-logs/export/route.ts';
 
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

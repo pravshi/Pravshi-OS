@@ -16,9 +16,9 @@ import { describe, expect, it } from 'vitest';
  */
 
 const ENTRY_POINTS = [
-  'src/app/api/invitations/route.ts',
-  'src/app/api/invitations/[id]/revoke/route.ts',
-  'src/app/(app)/admin/users/actions.ts',
+  'apps/web/src/app/api/invitations/route.ts',
+  'apps/web/src/app/api/invitations/[id]/revoke/route.ts',
+  'apps/web/src/app/(app)/admin/users/actions.ts',
 ] as const;
 
 const stripComments = (source: string) =>

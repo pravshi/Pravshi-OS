@@ -11,7 +11,7 @@ import { RUN, tryImport } from '../work/helpers';
  * (RLS identity) → the 0044 triggers → soft-delete.
  *
  * ── Contract this file pins ──────────────────────────────────────────────────
- * Route → service mapping (src/app/api/workflows/* + src/app/api/workflow-executions/*):
+ * Route → service mapping (apps/web/src/app/api/workflows/* + apps/web/src/app/api/workflow-executions/*):
  *  - GET    /api/workflows                    → listWorkflows    → { rows, total, limit, offset }
  *  - POST   /api/workflows                    → createWorkflow   → 201 + workflow (status DRAFT)
  *  - GET    /api/workflows/[id]               → getWorkflow      → workflow | NOT_FOUND (404)

@@ -2,7 +2,7 @@
  * Invitation-accept error copy — AUD-02.
  *
  * POST /api/invitations/accept answers a machine code (InvitationError.code in
- * src/lib/auth/invitations.ts, shaped by src/app/api/invitations/accept/route.ts).
+ * src/lib/auth/invitations.ts, shaped by apps/web/src/app/api/invitations/accept/route.ts).
  * The page used to map only PASSWORD_TOO_SHORT and report EVERYTHING else —
  * including a breached or common password — as "this invitation link is
  * invalid, expired, or already used": a false statement about the invitation

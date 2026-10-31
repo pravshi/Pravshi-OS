@@ -11,7 +11,7 @@ import type { Workflow, WorkflowPage, WorkflowResult } from './_types';
 /**
  * /workflows Server Actions — authorize first, always.
  *
- * Same convention as src/app/(app)/work/_actions.ts: each action takes
+ * Same convention as apps/web/src/app/(app)/work/_actions.ts: each action takes
  * untrusted input, calls requirePermission() as its first statement, then
  * delegates to the service layer. Failures return the actionError()
  * envelope (data, not a throw).

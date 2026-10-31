@@ -228,7 +228,7 @@ async function main(): Promise<void> {
   });
 
   // The composed overview — mirrors buildOverview in
-  // src/app/api/analytics/overview/route.ts call-for-call (the route is
+  // apps/web/src/app/api/analytics/overview/route.ts call-for-call (the route is
   // the production caller; this is its Tier-2 timing twin, exactly as
   // tests/perf/overview-concurrency.test.ts mirrors it for CI).
   const composeOverview = () =>

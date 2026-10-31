@@ -20,6 +20,12 @@ do not edit its files outside a task the founder assigned to Claude, and never i
 worktree. Handoffs to and from Antigravity follow AGENTS.md §6. The private coordination ledger
 (`.coordination/` at the primary worktree root) does not exist yet — collaboration Phase 1.
 
+## Layout (since redesign Step 7)
+
+pnpm workspace: `apps/web` (Next.js; own `src/`), `apps/worker` (`apps/worker/src/`), and the shared
+server code at the root `src/lib` + `src/env.ts` until Step 8. Root scripts (`pnpm build`,
+`pnpm worker`, …) delegate to the apps; every dependency is declared in the root `package.json`.
+
 ## Engineering workflow (substantial work)
 
 1. Establish state: `git fetch`, the actual `origin/main` SHA, branch, worktrees, clean tree.

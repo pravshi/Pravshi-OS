@@ -159,9 +159,9 @@ describe('Sentry: the real SDK pipeline with each runtime’s own options', asyn
   };
 
   const runtimes: [string, string][] = [
-    ['server', '../../sentry.server.config'],
-    ['edge', '../../sentry.edge.config'],
-    ['browser', '../../instrumentation-client'],
+    ['server', '../../apps/web/sentry.server.config'],
+    ['edge', '../../apps/web/sentry.edge.config'],
+    ['browser', '../../apps/web/instrumentation-client'],
   ];
 
   const consoleSpies: { mockRestore(): void }[] = [];

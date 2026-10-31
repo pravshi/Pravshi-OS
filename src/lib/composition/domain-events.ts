@@ -19,8 +19,8 @@ import { emitIntegrationEvent, type IntegrationEventKey } from '@/lib/integratio
  * no module in src/lib may import it.
  *
  * Importing this module IS the registration. The entry points load it:
- *   - the web app: src/instrumentation.ts, in the nodejs runtime, before any request is served;
- *   - the worker: src/worker/runner.ts, with the other modules that register at start-up.
+ *   - the web app: apps/web/src/instrumentation.ts, in the nodejs runtime, before any request is served;
+ *   - the worker: apps/worker/src/runner.ts, with the other modules that register at start-up.
  * tests/guards/domain-events-wired.test.ts pins both. A process that emits without having loaded
  * it reports every undelivered event (see src/lib/events).
  */

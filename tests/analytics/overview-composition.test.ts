@@ -54,7 +54,7 @@ const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL
  *     fan-out opens exactly 1.
  *
  * The composition below mirrors buildOverview in
- * src/app/api/analytics/overview/route.ts call-for-call (same metrics, same
+ * apps/web/src/app/api/analytics/overview/route.ts call-for-call (same metrics, same
  * arguments, same assembly); the route is the production caller of the
  * shared-tx path, this suite is its proof.
  *

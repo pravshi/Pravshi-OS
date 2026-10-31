@@ -147,3 +147,36 @@ at, so it carries these conditions:
 
 - A Phase 3 stage is approved and needs a structure Phases 1–2 did not provide.
 - Measured load or isolation needs justify another deployable.
+
+## Amendment — Step 7 result (workspace skeleton)
+
+Step 7 is implemented as follows; where it differs from the plan above, the difference is stated.
+
+- **Layout.** `apps/web` (the Next.js application) and `apps/worker` (the worker) are workspace
+  packages; the pnpm workspace is declared in `pnpm-workspace.yaml` (`packages: apps/*`). The shared
+  server code — `src/lib/**` and `src/env.ts` — **stays at the repository root** until Step 8, because
+  both apps import it and a package cannot be extracted without its own approval.
+- **`apps/web` keeps a `src/` folder** (`apps/web/src/{app,components,hooks}`, `middleware.ts`,
+  `instrumentation.ts`) instead of the flat `apps/web/app/**` this record sketched. Reason: Next 15
+  chooses which `instrumentation.ts` and `middleware.ts` to load by whether a `src/` folder exists
+  (Step 6 found that a root-level `instrumentation.ts` is ignored beside `src/`). Keeping `src/`
+  keeps every file Next loads, and every file it ignores, exactly as on `main`; a flat layout would
+  have switched on Sentry's server initialisation and moved the domain-event wiring. The rule files
+  name the `apps/web/src/…` paths.
+- **Aliases.** `@/worker/*` → `apps/worker/src/*`; `@/*` → `apps/web/src/*`, then `src/*`
+  (`tsconfig.json`, `apps/web/tsconfig.json`, the worker's alias hook). A guard fails if two roots
+  define the same logical path.
+- **Dependencies.** Every dependency stays declared in the root `package.json` (shared code needs
+  them, and Step 8 moves them with their packages). `apps/web/package.json` additionally declares
+  `next`, `react` and `react-dom` at the same pinned versions, so Vercel's framework detection finds
+  Next in the Root Directory. The lockfile change is the two new importers only.
+- **Configuration.** `tsconfig.base.json` is shared; `eslint.config.mjs`, `vitest.config.mts`,
+  `playwright.config.ts` and `.prettierrc` stay at the root. `next.config.ts`, `postcss.config.mjs`,
+  `components.json`, the Sentry and instrumentation files, `public/` and `vercel.json` moved into
+  `apps/web`. `next.config.ts` gains `experimental.externalDir` and `outputFileTracingRoot` so the
+  app can compile the shared root `src/`.
+- **Root scripts keep their names** (`pnpm build`, `dev`, `start`, `lint`, `worker`, …) and delegate;
+  the `lint` script is now `eslint` over the same three source roots instead of `next lint`.
+- **Vercel.** The project's Root Directory must be `apps/web` with "include source files outside the
+  Root Directory" on. That is a deployment setting changed by the founder; no Vercel project exists.
+

@@ -1,0 +1,9 @@
+{
+  "name": "@pravshi/worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pravshi OS background worker. Its entry point is src/runner.ts; start it with `pnpm worker` from the repository root. Shared server code is src/ at the repository root until Step 8.",
+  "engines": {
+    "node": ">=22.12 <23"
+  }
+}

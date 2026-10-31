@@ -14,9 +14,9 @@ import { describe, expect, it } from 'vitest';
 
 const ROOTS = [
   'src/lib/workflows',
-  'src/app/api/workflows',
-  'src/app/api/workflow-executions',
-  'src/app/(app)/workflows',
+  'apps/web/src/app/api/workflows',
+  'apps/web/src/app/api/workflow-executions',
+  'apps/web/src/app/(app)/workflows',
 ];
 
 // Matches real dynamic-code constructs, not comments that merely mention

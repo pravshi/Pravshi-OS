@@ -167,7 +167,7 @@ describe('withPermission request timing — adversarial (Wave J)', () => {
       'src/lib/workflows/http.ts',
       'src/lib/search/http.ts',
       'src/lib/integrations/http.ts',
-      'src/app/api/analytics/http.ts',
+      'apps/web/src/app/api/analytics/http.ts',
     ]) {
       const src = readFileSync(path, 'utf8');
       expect(src, path).not.toContain('emitRequestTiming');

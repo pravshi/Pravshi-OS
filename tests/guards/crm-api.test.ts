@@ -37,17 +37,17 @@ const SERVICE_FILES = [
   'src/lib/crm/activities.ts',
 ] as const;
 
-const ACTION_FILE = 'src/app/(app)/crm/actions.ts';
+const ACTION_FILE = 'apps/web/src/app/(app)/crm/actions.ts';
 
 const ROUTE_FILES = [
-  'src/app/api/crm/companies/route.ts',
-  'src/app/api/crm/companies/[id]/route.ts',
-  'src/app/api/crm/contacts/route.ts',
-  'src/app/api/crm/contacts/[id]/route.ts',
-  'src/app/api/crm/deals/route.ts',
-  'src/app/api/crm/deals/[id]/route.ts',
-  'src/app/api/crm/activities/route.ts',
-  'src/app/api/crm/activities/[id]/route.ts',
+  'apps/web/src/app/api/crm/companies/route.ts',
+  'apps/web/src/app/api/crm/companies/[id]/route.ts',
+  'apps/web/src/app/api/crm/contacts/route.ts',
+  'apps/web/src/app/api/crm/contacts/[id]/route.ts',
+  'apps/web/src/app/api/crm/deals/route.ts',
+  'apps/web/src/app/api/crm/deals/[id]/route.ts',
+  'apps/web/src/app/api/crm/activities/route.ts',
+  'apps/web/src/app/api/crm/activities/[id]/route.ts',
 ] as const;
 
 const stripComments = (source: string) =>

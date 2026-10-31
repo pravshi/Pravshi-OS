@@ -14,28 +14,28 @@ import { describe, expect, it } from 'vitest';
  * detail pages, so the regression surfaces in CI instead of production.
  */
 const PAGES = [
-  'src/app/(app)/crm/companies/[id]/page.tsx',
-  'src/app/(app)/crm/contacts/[id]/page.tsx',
-  'src/app/(app)/crm/deals/[id]/page.tsx',
-  'src/app/(app)/crm/activities/[id]/page.tsx',
+  'apps/web/src/app/(app)/crm/companies/[id]/page.tsx',
+  'apps/web/src/app/(app)/crm/contacts/[id]/page.tsx',
+  'apps/web/src/app/(app)/crm/deals/[id]/page.tsx',
+  'apps/web/src/app/(app)/crm/activities/[id]/page.tsx',
 ] as const;
 
 /** Bound/direct references each detail page must keep wired (guards against "fixing" by deleting the prop). */
 const REQUIRED_WIRING: Record<(typeof PAGES)[number], string[]> = {
-  'src/app/(app)/crm/companies/[id]/page.tsx': [
+  'apps/web/src/app/(app)/crm/companies/[id]/page.tsx': [
     'onSave={updateCompanyAction.bind(null, company.id)}',
     'onDelete={deleteCompanyAction.bind(null, company.id)}',
   ],
-  'src/app/(app)/crm/contacts/[id]/page.tsx': [
+  'apps/web/src/app/(app)/crm/contacts/[id]/page.tsx': [
     'onSave={updateContactAction.bind(null, contact.id)}',
     'onDelete={deleteContactAction.bind(null, contact.id)}',
   ],
-  'src/app/(app)/crm/deals/[id]/page.tsx': [
+  'apps/web/src/app/(app)/crm/deals/[id]/page.tsx': [
     'onSave={updateDealAction.bind(null, deal.id)}',
     'onDelete={deleteDealAction.bind(null, deal.id)}',
     'onTransition={updateDealAction}',
   ],
-  'src/app/(app)/crm/activities/[id]/page.tsx': [
+  'apps/web/src/app/(app)/crm/activities/[id]/page.tsx': [
     'onSave={updateActivityAction.bind(null, activity.id)}',
     'onDelete={deleteActivityAction.bind(null, activity.id)}',
   ],

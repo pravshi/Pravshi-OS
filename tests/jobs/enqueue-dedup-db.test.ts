@@ -21,7 +21,7 @@
  *    SQLSTATE 23505 (jobs_org_dedup_uidx) → the defect is CONFIRMED:
  *    queue.ts's isPgCode() reads only the outer error, but drizzle wraps the
  *    driver error (the sqlstate lives on `cause`) — the repository
- *    convention documented in src/worker/handlers.ts (sqlstateOf) exists
+ *    convention documented in apps/worker/src/handlers.ts (sqlstateOf) exists
  *    for exactly this reason — so the dedup fallback never fires and
  *    duplicate enqueues throw instead of returning the existing job.
  *

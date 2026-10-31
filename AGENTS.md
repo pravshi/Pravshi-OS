@@ -48,22 +48,29 @@ enforced are the database (separate logins, forced RLS), the CI guards and human
 
 ## 3. File ownership
 
+**Workspace layout (redesign Step 7).** The repository is a pnpm workspace: `apps/web` (the
+Next.js application, which keeps its own `src/` folder: `apps/web/src/{app,components,hooks}`,
+`middleware.ts`, `instrumentation.ts`), `apps/worker` (`apps/worker/src/`) and, until Step 8
+extracts packages, the shared server code at the repository root: `src/lib/**` and `src/env.ts`.
+The `@/` import alias resolves `@/worker/*` to `apps/worker/src/*` and `@/*` to `apps/web/src/*`,
+then `src/*`. Ownership is unchanged; only the paths are.
+
 - **Claude Code:**
   - `drizzle/`, `scripts/db/`, `scripts/migrate-ws.mjs`, and every database schema, migration,
     role and RLS policy;
   - `src/lib/**` (backend services, data access, auth, authz), except the shared
     `src/lib/utils.ts`;
-  - `src/worker/**` (the background worker plane: its entry point, job handlers, scheduler and
+  - `apps/worker/src/**` (the background worker plane: its entry point, job handlers, scheduler and
     maintenance — ADR-010, redesign Step 5);
-  - inside `src/app/`: `src/app/api/**`, every `route.ts`, every file starting with
+  - inside `apps/web/src/app/`: `apps/web/src/app/api/**`, every `route.ts`, every file starting with
     `'use server'`, and the server-side calls in pages and layouts (`withAuthorizedDb`,
     `withPermission`, `requirePermission`);
   - `.github/` (CI), `scripts/guards/`, `scripts/ci/`, and the tests of backend, security and
     database behaviour.
-- **Antigravity** (under its frontend rule): the rest of `src/app/` (pages, layouts, client
-  components, styles), `src/components/`, `src/modules/`, frontend assets and frontend-specific
+- **Antigravity** (under its frontend rule): the rest of `apps/web/src/app/` (pages, layouts, client
+  components, styles), `apps/web/src/components/`, `src/modules/`, frontend assets and frontend-specific
   tests.
-- **Shared — the founder decides:** `package.json`, `pnpm-lock.yaml`, `src/middleware.ts`,
+- **Shared — the founder decides:** `package.json`, `pnpm-lock.yaml`, `apps/web/src/middleware.ts`,
   `src/env.ts`, `src/lib/utils.ts`, root configuration files, shared contracts and validation
   schemas, and the agent rule files (`AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`).
 - **Neither agent — founder only:** secrets, `.env*`, deployment configuration, billing,
@@ -203,10 +210,10 @@ to the next.
 The essentials of [`.agents/rules/pravshi-frontend-only.md`](.agents/rules/pravshi-frontend-only.md),
 which stays the detailed reference. Where the two differ, the stricter text wins.
 
-- **May modify, on an assigned task only:** the frontend parts of `src/app/` (pages, layouts,
-  client components, styles), `src/components/`, `src/modules/`, frontend assets,
+- **May modify, on an assigned task only:** the frontend parts of `apps/web/src/app/` (pages, layouts,
+  client components, styles), `apps/web/src/components/`, `src/modules/`, frontend assets,
   frontend-specific tests, and UI documentation when necessary.
-- **Never modify (Claude-owned, §3):** `src/app/api/**`; every `route.ts`; every file that starts
+- **Never modify (Claude-owned, §3):** `apps/web/src/app/api/**`; every `route.ts`; every file that starts
   with `'use server'`; the server-side calls in pages and layouts (`withAuthorizedDb`,
   `withPermission`, `requirePermission` — the markup around them may change, the calls may
   not); all of `src/lib/` except the shared `src/lib/utils.ts`; `drizzle/`; `scripts/db/`,
@@ -222,7 +229,7 @@ which stays the detailed reference. Where the two differ, the stricter text wins
   mechanism.
 - **Missing backend:** do not build it. Report `BACKEND CONTRACT REQUIRED` with the operation,
   input, output, required permission and expected errors.
-- **Shared files (§3)** — `package.json`, `pnpm-lock.yaml`, `src/middleware.ts`, `src/env.ts`,
+- **Shared files (§3)** — `package.json`, `pnpm-lock.yaml`, `apps/web/src/middleware.ts`, `src/env.ts`,
   `src/lib/utils.ts`, root configuration, shared contracts and validation schemas, the agent rule
   files: stop and ask the founder.
 - **Scope:** implement only the requested frontend task — no backend, database,

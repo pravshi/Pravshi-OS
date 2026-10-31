@@ -19,7 +19,7 @@ import type { Authorization } from '@/lib/authz/require-permission';
  *
  * Both keep the exact call shapes the emitting modules had before, so each call site changed by
  * its import line only. The registrations are made by src/lib/composition/domain-events.ts, a
- * composition root that the entry points load (src/instrumentation.ts for the web app, the worker's
+ * composition root that the entry points load (apps/web/src/instrumentation.ts for the web app, the worker's
  * runner) — never by a module in src/lib, which may not import it.
  *
  * ── WHAT IS PRESERVED (ADR-005) ──────────────────────────────────────────────────────────────

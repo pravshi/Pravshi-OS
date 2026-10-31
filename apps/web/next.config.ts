@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
@@ -69,6 +70,15 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  /*
+   * Workspace layout (redesign Step 7). The shared server code (src/lib, src/env.ts) stays at the
+   * repository root until Step 8 extracts it into packages, so this app imports TypeScript from
+   * outside its own directory: externalDir lets Next compile it, and the tracing root makes the
+   * production output trace those files from the repository root.
+   */
+  experimental: { externalDir: true },
+  outputFileTracingRoot: path.join(__dirname, '../..'),
+
   /*
    * Sentry's Node SDK loads OpenTelemetry, which patches modules at runtime via
    * `require-in-the-middle`. That instrumentation only works if Node resolves these

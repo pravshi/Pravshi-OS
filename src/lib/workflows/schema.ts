@@ -407,7 +407,7 @@ export type ImplementedActionType = (typeof IMPLEMENTED_ACTION_TYPES)[number];
  * Phase 8 (Workstream F): send_notification and send_email are IMPLEMENTED at
  * runtime and accepted by the save-time ActionConfigSchema below. They remain
  * in this list (not in IMPLEMENTED_ACTION_TYPES) for UI-label compatibility:
- * src/app/(app)/workflows/_components/schemas.ts builds
+ * apps/web/src/app/(app)/workflows/_components/schemas.ts builds
  * Record<(typeof DEFERRED_ACTION_TYPES)[number], string> label maps, so
  * membership here must stay stable.
  *

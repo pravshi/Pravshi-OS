@@ -30,7 +30,7 @@ because it is followed.
 - **Pull request instead** for high-risk or security-sensitive changes, any migration, and any
   change to a protected path — `PROTECTED_PATHS` in `scripts/ci/verify-pr-merge.mjs`: `.github/`,
   `scripts/`, `tests/guards/`, `tests/ci/`, `package.json`, the lockfile and tool configuration,
-  `drizzle/`, `src/middleware.ts`, `src/env.ts`, the agent rules. The direct-push audit flags a
+  `drizzle/`, `apps/web/src/middleware.ts`, `src/env.ts`, the agent rules. The direct-push audit flags a
   direct push touching them only after the fact; it cannot prevent it. Dependency and shared-file
   changes also need the founder's approval (AGENTS.md §3–§4) and never ride in a milestone push
   without it. Independent review is a further reason for a PR. Push the branch and open the PR **only when explicitly

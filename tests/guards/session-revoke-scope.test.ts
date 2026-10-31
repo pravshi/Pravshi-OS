@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
  * user's sessions — including a SUPER_ADMIN's. The breadth check therefore
  * belongs on the entry point (a clean 403 SCOPE_DENIED) rather than failing
  * later at the database. This guard pins the three session actions in
- * src/app/(app)/admin/users/actions.ts; the enforcement itself is pinned
+ * apps/web/src/app/(app)/admin/users/actions.ts; the enforcement itself is pinned
  * against a real database in tests/authz/session-revoke-scope.test.ts.
  *
  * Like the other guards this is a heuristic over source text, not a type proof:
@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
  * a new session action without the floor fails the build.
  */
 
-const ACTIONS = 'src/app/(app)/admin/users/actions.ts';
+const ACTIONS = 'apps/web/src/app/(app)/admin/users/actions.ts';
 
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

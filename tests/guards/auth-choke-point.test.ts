@@ -23,7 +23,7 @@ const root = (...p: string[]) => join(process.cwd(), ...p);
 const read = (p: string) => readFileSync(root(...p.split('/')), 'utf8');
 
 const SERVER = read('src/lib/auth/server.ts');
-const LOGIN_ROUTE = read('src/app/api/auth/login/route.ts');
+const LOGIN_ROUTE = read('apps/web/src/app/api/auth/login/route.ts');
 const CLIENT = read('src/lib/auth/client.ts');
 
 describe('choke point: both hooks are registered on the auth instance', () => {

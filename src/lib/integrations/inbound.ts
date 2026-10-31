@@ -83,7 +83,7 @@ import { getProviderDefinition } from './providers';
  *
  * Processing dispatches ONE workflow event of the (Phase 10-enabled)
  * `webhook` trigger type under the connection's connected_by person — the
- * machine-actor shape of src/worker/workflow-jobs.ts
+ * machine-actor shape of apps/worker/src/workflow-jobs.ts
  * resolveJobExecutionAuth: a constructed Authorization for a principal the
  * database record itself names, whose live permissions the engine
  * re-derives on every call. The event payload is

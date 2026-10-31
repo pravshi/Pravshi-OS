@@ -30,10 +30,10 @@ import {
  */
 
 const SERVICE_FILE = 'src/lib/crm/activities.ts';
-const ACTION_FILE = 'src/app/(app)/crm/actions.ts';
+const ACTION_FILE = 'apps/web/src/app/(app)/crm/actions.ts';
 const ROUTE_FILES = [
-  'src/app/api/crm/activities/route.ts',
-  'src/app/api/crm/activities/[id]/route.ts',
+  'apps/web/src/app/api/crm/activities/route.ts',
+  'apps/web/src/app/api/crm/activities/[id]/route.ts',
 ] as const;
 
 const stripComments = (source: string) =>
@@ -162,7 +162,7 @@ describe('activities entry points authorize first', () => {
   });
 
   it('activities routes gate DELETE on the .delete key (A2)', () => {
-    const code = stripComments(read('src/app/api/crm/activities/[id]/route.ts'));
+    const code = stripComments(read('apps/web/src/app/api/crm/activities/[id]/route.ts'));
     expect(code).toMatch(
       /export const DELETE = withPermission<\{ id: string \}>\(\s*\{\s*permission: 'activities\.delete'/,
     );
@@ -175,7 +175,7 @@ describe('activities entry points authorize first', () => {
   });
 
   it('the collection route exposes the entity and type filters', () => {
-    const code = stripComments(read('src/app/api/crm/activities/route.ts'));
+    const code = stripComments(read('apps/web/src/app/api/crm/activities/route.ts'));
     for (const param of ['entityType', 'entityId', 'type', 'search', 'limit', 'offset']) {
       expect(code, param).toMatch(new RegExp(`searchParams\\.get\\('${param}'\\)`));
     }

@@ -220,10 +220,15 @@ describe('db-target guard: Playwright (E2E) entry point', () => {
 
   it('runs at the top of playwright.config.ts, before defineConfig', () => {
     const config = readFileSync('playwright.config.ts', 'utf8');
-    const callAt = config.indexOf(
-      'assertTestDatabaseTargets(nextProductionEnv(process.cwd(), process.env));',
+    // Both places a value can come from: the repository root and apps/web, where Next now runs.
+    const loopAt = config.indexOf(
+      "for (const dir of [process.cwd(), join(process.cwd(), 'apps/web')])",
     );
-    expect(callAt).toBeGreaterThan(0);
+    const callAt = config.indexOf(
+      'assertTestDatabaseTargets(nextProductionEnv(dir, process.env));',
+    );
+    expect(loopAt).toBeGreaterThan(0);
+    expect(callAt).toBeGreaterThan(loopAt);
     expect(callAt).toBeLessThan(config.indexOf('export default defineConfig('));
   });
 });

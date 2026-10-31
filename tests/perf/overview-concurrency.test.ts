@@ -14,7 +14,7 @@ const HAS_DB = Boolean(process.env.DATABASE_URL_TEST && process.env.DATABASE_URL
  * excess checkouts queued behind connectionTimeoutMillis (10 s) until
  * they failed. This suite runs the composed overview — the exact
  * composition buildOverview performs in
- * src/app/api/analytics/overview/route.ts, mirrored call-for-call the
+ * apps/web/src/app/api/analytics/overview/route.ts, mirrored call-for-call the
  * same way tests/analytics/overview-composition.test.ts mirrors it —
  * four times CONCURRENTLY at service level against the Tier-1 dataset
  * (tests/perf/seed.ts) and pins the regression shut two ways:

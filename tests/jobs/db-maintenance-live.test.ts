@@ -2,7 +2,7 @@
  * WP-2 (Core V1 audit D-1, D-2) — database maintenance LIVE DB tests.
  *
  * Migration 0065 adds two worker-plane SECURITY DEFINER functions, driven by
- * src/worker/maintenance.ts on the worker's maintenance cadence:
+ * apps/worker/src/maintenance.ts on the worker's maintenance cadence:
  *
  *   - maintain_audit_log_partitions(): keeps audit_logs partitioned twelve
  *     months ahead (no DEFAULT partition exists, so a lapsed window would fail

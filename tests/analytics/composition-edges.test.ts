@@ -387,7 +387,7 @@ describe.skipIf(!HAS_DB)('analytics composition — adversarial shapes (Phase 12
   });
 
   it('budget: the automation route composition opens 1 transaction, its legacy fan-out 8', async () => {
-    // Mirrors buildAutomationDashboard in src/app/api/analytics/automation/
+    // Mirrors buildAutomationDashboard in apps/web/src/app/api/analytics/automation/
     // route.ts call-for-call — the second route proven against the counter
     // (Wave A proved the overview: 12 vs 1).
     const ctx = emptyCtx;

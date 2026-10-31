@@ -112,7 +112,7 @@ export function isRoutedSignInChallengeVerification(ctx: VerificationHookContext
  * ── THE SIGN-IN CHOKE POINT (Phase 11, F-11-04 / F-11-05) ─────────────────────
  *
  * The per-account lockout and the login-event recording used to live only in the
- * mediated route (src/app/api/auth/login/route.ts). Better Auth's own
+ * mediated route (apps/web/src/app/api/auth/login/route.ts). Better Auth's own
  * POST /api/auth/sign-in/email — mounted by the [...all] catch-all — skipped
  * both: credential stuffing against one account was bounded only per-IP, and
  * the attempt left no trace in public.login_events. A comment in the client

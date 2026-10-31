@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * source facts that behaviour rests on.
  */
 const SERVER = readFileSync('src/lib/auth/server.ts', 'utf8');
-const ROUTE = readFileSync('src/app/api/auth/mfa/verify/route.ts', 'utf8');
+const ROUTE = readFileSync('apps/web/src/app/api/auth/mfa/verify/route.ts', 'utf8');
 
 describe('FU-2: one HTTP path for the sign-in second factor', () => {
   it('the mediated route never hands auth.api a request', () => {

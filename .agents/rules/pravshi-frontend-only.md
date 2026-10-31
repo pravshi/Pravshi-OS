@@ -28,20 +28,20 @@ authorization, RLS, and security implementation.
 
 ## ANTIGRAVITY MAY MODIFY
 
-- src/app/
-- src/components/
+- apps/web/src/app/
+- apps/web/src/components/
 - src/modules/
 - src/styles/
-  (does not exist: styles are in src/app/globals.css, covered by
-  src/app/ above. Creating src/styles/ needs founder approval.)
+  (does not exist: styles are in apps/web/src/app/globals.css, covered by
+  apps/web/src/app/ above. Creating src/styles/ needs founder approval.)
 - frontend-specific assets
 - frontend-specific tests
 - frontend UI documentation when necessary
 
-Inside src/app/, these are backend and stay CLAUDE-OWNED:
+Inside apps/web/src/app/, these are backend and stay CLAUDE-OWNED:
 
-- src/app/api/**
-- every route.ts (including src/app/health/)
+- apps/web/src/app/api/**
+- every route.ts (including apps/web/src/app/health/)
 - every file that starts with 'use server' (actions.ts, _actions.ts)
 - the server-side calls in pages and layouts: withAuthorizedDb,
   withPermission, requirePermission — their markup may change, these

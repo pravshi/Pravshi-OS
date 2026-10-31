@@ -16,7 +16,7 @@ import { hashPassword } from 'better-auth/crypto';
  * and error states.
  *
  * ── Contracts under test ────────────────────────────────────────────────────
- * API (src/app/api/work/*):
+ * API (apps/web/src/app/api/work/*):
  *   POST /api/work/projects            { name, description? }            → 201
  *   GET  /api/work/projects            ?search=&limit=&offset=           → { rows, total, limit, offset }
  *                                        &includeArchived=&sort=&order=    rows carry taskCount/openTaskCount
@@ -32,7 +32,7 @@ import { hashPassword } from 'better-auth/crypto';
  *   POST /api/work/tasks/[id]/move     { status }                        → { ok, taskId, fromStatus, toStatus }
  *   GET  /api/work/tasks/mine                                            → my tasks
  * Task statuses: todo | in_progress | done. Priorities: low | medium | high | urgent.
- * UI (src/app/(app)/work/*):
+ * UI (apps/web/src/app/(app)/work/*):
  *   /work                       project list; empty state "No projects yet"
  *   /work/projects/new          create form (Name → "Create project")
  *   /work/projects/[id]         kanban; columns aria-label "Status column: To do|In progress|Done";

@@ -5,16 +5,16 @@ import { describe, expect, it } from 'vitest';
  * Redesign Step 5 — the worker's handler wiring after the queue/worker split.
  *
  * Handlers register themselves into the queue core's registry (src/lib/jobs/handler-registry.ts)
- * when their module is imported, and src/worker/runner.ts imports the three modules that hold
+ * when their module is imported, and apps/worker/src/runner.ts imports the three modules that hold
  * them. If the runner stopped importing one, its job types would silently have no handler. This
  * pins both halves: the runner's registering imports, and the set of job types they register.
  *
  * 'retry' is a member of JOB_TYPES with no handler on main either: retries are the retry
- * sweeper's job (src/worker/retry-sweeper.ts), not a handler's. It is pinned as unhandled so a
+ * sweeper's job (apps/worker/src/retry-sweeper.ts), not a handler's. It is pinned as unhandled so a
  * change to that fact is a reviewed one.
  */
 
-const RUNNER = readFileSync('src/worker/runner.ts', 'utf8');
+const RUNNER = readFileSync('apps/worker/src/runner.ts', 'utf8');
 
 /** The modules that register handlers, exactly as the runner imports them at start-up. */
 const REGISTERING_IMPORTS = [
@@ -34,7 +34,7 @@ const HANDLED = [
   'crm_import',
 ] as const;
 
-describe('worker handler wiring (queue core registry + src/worker)', () => {
+describe('worker handler wiring (queue core registry + apps/worker/src)', () => {
   it('the runner imports every module that registers a handler', () => {
     for (const imp of REGISTERING_IMPORTS) {
       expect(RUNNER, `runner.ts no longer contains ${imp}`).toContain(imp);

@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
  * to withPermission(), which answers with the section 24 envelope.
  *
  * Why a REST surface alongside the server actions (A4): the actions in
- * src/app/(app)/crm/actions.ts are React-bound — they cannot serve external
+ * apps/web/src/app/(app)/crm/actions.ts are React-bound — they cannot serve external
  * integrations, mobile clients, or machine-to-machine callers. These routes are
  * the stable HTTP API for those consumers. The two surfaces stay in lockstep by
  * sharing the service layer (src/lib/crm/*): identical zod validation,

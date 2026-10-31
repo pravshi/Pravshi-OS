@@ -69,6 +69,9 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   invitations: 'L4',
   // control plane
   platform: 'control',
+  // (Paths below are LOGICAL: since Step 7 `src/app`, `src/components`, `src/hooks`,
+  // `src/middleware.ts` and `src/instrumentation.ts` are files under apps/web/src, and `src/worker`
+  // is apps/worker/src — see PHYSICAL_ROOTS.)
   // entry points and the frontend they compose. ADR-010 names src/app; src/components,
   // src/hooks and src/middleware.ts are mapped to the same tier — frontend and middleware
   // consumed only by src/app, imported by no src/lib module.
@@ -300,6 +303,31 @@ const EXTENSIONS = [
   '/index.js',
 ];
 
+/**
+ * Workspace layout (redesign Step 7). The rules and the module map speak in LOGICAL paths — the
+ * `src/…` names ADR-010 uses — while the files live in three physical roots:
+ *
+ *   src/…                 shared server code (src/lib, src/env.ts) until Step 8
+ *   apps/web/src/…        the Next.js application (app, components, hooks, middleware, …)
+ *   apps/worker/src/…     the worker, logically `src/worker/…`
+ *
+ * The three roots must not define the same logical path (tested below), so the mapping is total
+ * and reversible.
+ */
+const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
+  { dir: 'src', logical: 'src' },
+  { dir: 'apps/web/src', logical: 'src' },
+  { dir: 'apps/worker/src', logical: 'src/worker' },
+];
+
+/** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
+export function logicalOf(physical: string): string | null {
+  for (const { dir, logical } of PHYSICAL_ROOTS) {
+    if (physical.startsWith(`${dir}/`)) return `${logical}/${physical.slice(dir.length + 1)}`;
+  }
+  return null;
+}
+
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
@@ -310,18 +338,37 @@ function walk(dir: string): string[] {
   return out;
 }
 
-function resolveSpecifier(from: string, spec: string): string | null {
-  let base: string;
-  if (spec.startsWith('@/')) base = join('src', spec.slice(2));
-  else if (spec.startsWith('.')) base = join(dirname(from), spec);
-  else return null; // a package import: outside the graph
+/** The existing physical file for a candidate physical path, trying the usual extensions. */
+function existingFile(base: string): string | null {
   for (const ext of EXTENSIONS) {
     const candidate = normalize(base + ext);
     if (existsSync(join(ROOT, candidate)) && statSync(join(ROOT, candidate)).isFile()) {
       return candidate.split('\\').join('/');
     }
   }
-  throw new Error(`${from}: cannot resolve '${spec}'`);
+  return null;
+}
+
+/** Resolves a specifier to the LOGICAL path of the file it names; `from` is physical. */
+function resolveSpecifier(from: string, spec: string): string | null {
+  let found: string | null = null;
+  if (spec.startsWith('@/')) {
+    // tsconfig.json paths: @/worker/* -> apps/worker/src/*, @/* -> apps/web/src/*, then src/*.
+    const rest = spec.slice(2);
+    const candidates = rest.startsWith('worker/')
+      ? [join('apps', 'worker', 'src', rest.slice('worker/'.length))]
+      : [join('apps', 'web', 'src', rest), join('src', rest)];
+    for (const base of candidates) {
+      found = existingFile(base);
+      if (found !== null) break;
+    }
+  } else if (spec.startsWith('.')) {
+    found = existingFile(join(dirname(from), spec));
+  } else return null; // a package import: outside the graph
+  if (found === null) throw new Error(`${from}: cannot resolve '${spec}'`);
+  const logical = logicalOf(found);
+  if (logical === null) throw new Error(`${from}: '${spec}' leaves the source roots (${found})`);
+  return logical;
 }
 
 /**
@@ -371,17 +418,24 @@ function specifiersOf(file: string, text: string): { specs: string[]; nonLiteral
 }
 
 function readGraph(): { files: string[]; imports: FileImport[]; problems: string[] } {
-  const files = walk(join(ROOT, 'src'));
+  const physicalFiles = PHYSICAL_ROOTS.flatMap(({ dir }) => walk(join(ROOT, dir)));
   const imports: FileImport[] = [];
   const problems: string[] = [];
-  for (const file of files) {
-    if (moduleOf(file) === null) problems.push(`unmapped: ${file}`);
-    if (!SOURCE.test(file)) continue;
-    const { specs, nonLiteral } = specifiersOf(file, readFileSync(join(ROOT, file), 'utf8'));
+  const logicalSeen = new Map<string, string>();
+  const files: string[] = [];
+  for (const physical of physicalFiles) {
+    const file = logicalOf(physical)!;
+    const clash = logicalSeen.get(file);
+    if (clash !== undefined) problems.push(`two files claim ${file}: ${clash} and ${physical}`);
+    logicalSeen.set(file, physical);
+    files.push(file);
+    if (moduleOf(file) === null) problems.push(`unmapped: ${physical}`);
+    if (!SOURCE.test(physical)) continue;
+    const { specs, nonLiteral } = specifiersOf(file, readFileSync(join(ROOT, physical), 'utf8'));
     for (const n of nonLiteral) problems.push(`dynamic import with a non-literal argument: ${n}`);
     for (const spec of specs) {
       try {
-        const toFile = resolveSpecifier(file, spec);
+        const toFile = resolveSpecifier(physical, spec);
         if (toFile !== null) imports.push({ from: file, toFile });
       } catch (e) {
         problems.push((e as Error).message);
@@ -430,6 +484,18 @@ describe('module boundaries (ADR-010)', () => {
 // ── the checker itself, on synthetic graphs ───────────────────────────────────────────────
 
 describe('module-boundary checker', () => {
+  it('maps the workspace roots to the logical src paths ADR-010 speaks in (Step 7)', () => {
+    expect(logicalOf('src/lib/crm/deals.ts')).toBe('src/lib/crm/deals.ts');
+    expect(logicalOf('src/env.ts')).toBe('src/env.ts');
+    expect(logicalOf('apps/web/src/app/(app)/crm/page.tsx')).toBe('src/app/(app)/crm/page.tsx');
+    expect(logicalOf('apps/web/src/middleware.ts')).toBe('src/middleware.ts');
+    expect(logicalOf('apps/worker/src/runner.ts')).toBe('src/worker/runner.ts');
+    expect(logicalOf('apps/web/next.config.ts')).toBeNull(); // outside every source root
+    expect(logicalOf('tests/guards/x.test.ts')).toBeNull();
+    expect(moduleOf(logicalOf('apps/worker/src/runner.ts')!)).toBe('worker');
+    expect(moduleOf(logicalOf('apps/web/src/instrumentation.ts')!)).toBe('instrumentation');
+  });
+
   const edge = (from: string, toFile: string): FileImport => ({ from, toFile });
 
   it('maps files to modules and refuses unknown ones', () => {

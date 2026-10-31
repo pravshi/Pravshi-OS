@@ -27,7 +27,8 @@ const stripComments = (s: string) =>
 
 describe('server-side session lookups', () => {
   it('call the library only inside getSessionSafely', () => {
-    const offenders = walk('src')
+    const offenders = ['src', 'apps/web/src', 'apps/worker/src']
+      .flatMap((dir) => walk(dir))
       .filter((f) => f !== 'src/lib/auth/safe-session.ts')
       .filter((f) => /\.api\s*\.\s*getSession\b/.test(stripComments(readFileSync(f, 'utf8'))));
     expect(

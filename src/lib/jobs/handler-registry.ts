@@ -7,7 +7,7 @@ import { JOB_TYPE_SET, type Job, type JobType } from './types';
  * A handler registers itself for one job type (registerHandler); the worker loop looks it up when
  * it claims a job (getRegisteredHandler). It lives in the queue core, below both sides, so that a
  * domain module that owns a job type (the Sales Sheet import) can register its handler without
- * importing the worker, and the worker (src/worker) imports it downward (ADR-010 rule 5). The
+ * importing the worker, and the worker (apps/worker/src) imports it downward (ADR-010 rule 5). The
  * code below is unchanged from its former home in the worker loop; only getRegisteredHandler is
  * new, replacing the loop's direct read of the map.
  */

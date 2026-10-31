@@ -13,6 +13,9 @@ cd Pravshi-OS
 corepack enable
 pnpm install
 cp .env.example .env
+# Next runs from apps/web and reads its .env files there, while the worker, the migration runner
+# and the tests read the repository root: link one file rather than keeping two copies
+ln -s ../../.env apps/web/.env
 ```
 
 `pnpm install` may prompt about build scripts. `pnpm-workspace.yaml` already approves the
