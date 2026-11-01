@@ -23,7 +23,10 @@ const MIGRATION = readFileSync(
   join(process.cwd(), 'packages/database/drizzle/0030_credential_reset_protected_target.sql'),
   'utf8',
 );
-const SERVICE = readFileSync(join(process.cwd(), 'src/lib/admin/credential-reset.ts'), 'utf8');
+const SERVICE = readFileSync(
+  join(process.cwd(), 'packages/admin/src/admin/credential-reset.ts'),
+  'utf8',
+);
 // Since 0072 the decision is made in the database, by the definer that proves the administrator
 // from their own session token: the ADR-001 rule, its DENIED audit and the target errors live
 // there; the service maps the outcome and writes the success entry.

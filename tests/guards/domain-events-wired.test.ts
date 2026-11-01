@@ -55,6 +55,7 @@ const SOURCE_ROOTS = [
   'packages/search/src',
   'packages/analytics/src',
   'packages/ai/src',
+  'packages/admin/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 

@@ -208,6 +208,7 @@ const sources = [
   'packages/search/src',
   'packages/analytics/src',
   'packages/ai/src',
+  'packages/admin/src',
 ]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));

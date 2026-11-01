@@ -17,7 +17,9 @@ const root = (p: string) =>
     ? `apps/web/src/${p}`
     : /^lib\/(auth|authz|identity|audit)\//.test(p)
       ? `packages/security/src/${p.slice('lib/'.length)}`
-      : `src/${p}`;
+      : /^lib\/admin\//.test(p)
+        ? `packages/admin/src/${p.slice('lib/'.length)}`
+        : `src/${p}`;
 const read = (p: string) => readFileSync(root(p), 'utf8');
 
 describe('admin page authorization', () => {

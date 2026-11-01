@@ -13,10 +13,9 @@ import { describe, expect, it } from 'vitest';
  */
 
 const resolvePath = (p: string) => {
-  const candidate = p.replace(
-    /^src\/lib\/(auth|authz|identity|audit)\//,
-    'packages/security/src/$1/',
-  );
+  const candidate = p
+    .replace(/^src\/lib\/(auth|authz|identity|audit)\//, 'packages/security/src/$1/')
+    .replace(/^src\/lib\/admin\//, 'packages/admin/src/admin/');
   return existsSync(candidate) ? candidate : p;
 };
 const root = (...p: string[]) => join(process.cwd(), resolvePath(p.join('/')));

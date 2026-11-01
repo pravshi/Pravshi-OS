@@ -37,6 +37,7 @@ const IMPORTS_DIR = path.join(REPO_ROOT, 'packages', 'imports', 'src');
 const SEARCH_DIR = path.join(REPO_ROOT, 'packages', 'search', 'src');
 const ANALYTICS_DIR = path.join(REPO_ROOT, 'packages', 'analytics', 'src');
 const AI_DIR = path.join(REPO_ROOT, 'packages', 'ai', 'src');
+const ADMIN_DIR = path.join(REPO_ROOT, 'packages', 'admin', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -108,6 +109,10 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(ANALYTICS_DIR, relative.slice('lib/analytics/'.length));
     } else if (relative.startsWith('lib/ai/')) {
       targetBase = path.join(AI_DIR, relative.slice('lib/ai/'.length));
+    } else if (relative.startsWith('lib/admin/')) {
+      targetBase = path.join(ADMIN_DIR, 'admin', relative.slice('lib/admin/'.length));
+    } else if (relative.startsWith('lib/invitations/')) {
+      targetBase = path.join(ADMIN_DIR, 'invitations', relative.slice('lib/invitations/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -255,6 +260,15 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@pravshi/ai' || specifier.startsWith('@pravshi/ai/')) {
     const sub = specifier === '@pravshi/ai' ? 'index.ts' : specifier.slice('@pravshi/ai/'.length);
     const url = probe(path.join(AI_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1p. The `@pravshi/admin` package alias.
+  if (specifier === '@pravshi/admin' || specifier.startsWith('@pravshi/admin/')) {
+    const sub =
+      specifier === '@pravshi/admin' ? 'index.ts' : specifier.slice('@pravshi/admin/'.length);
+    const url = probe(path.join(ADMIN_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

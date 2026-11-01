@@ -1,0 +1,23 @@
+{
+  "name": "@pravshi/admin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./admin/*": "./src/admin/*.ts",
+    "./invitations/*": "./src/invitations/*.ts"
+  },
+  "devDependencies": {
+    "@pravshi/shared-config": "workspace:*",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@pravshi/database": "workspace:*",
+    "@pravshi/security": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "resend": "^6.30.0",
+    "zod": "^4.6.6"
+  }
+}
