@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaskPrioritySchema, TaskStatusSchema } from '../work/schema';
+import { TaskPrioritySchema, TaskStatusSchema } from '@/lib/work/schema';
 // Phase 6 §3.7: cron/timezone validation for ScheduledTriggerConfigSchema.
 // jobs/cron.ts is a pure module (no imports), so this cannot create an
 // import cycle with the workflow engine graph.

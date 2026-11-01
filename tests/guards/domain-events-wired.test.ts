@@ -48,6 +48,7 @@ const SOURCE_ROOTS = [
   'packages/shared-services/src',
   'packages/contracts/src',
   'packages/crm-core/src',
+  'packages/work/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
@@ -127,8 +128,12 @@ describe('domain events are wired in every emitting process', () => {
       existsSync('packages/crm-core/src/pipelines.ts')
         ? 'packages/crm-core/src/pipelines.ts'
         : 'src/lib/crm/pipelines.ts',
-      'src/lib/work/projects.ts',
-      'src/lib/work/tasks.ts',
+      existsSync('packages/work/src/projects.ts')
+        ? 'packages/work/src/projects.ts'
+        : 'src/lib/work/projects.ts',
+      existsSync('packages/work/src/tasks.ts')
+        ? 'packages/work/src/tasks.ts'
+        : 'src/lib/work/tasks.ts',
       'src/lib/integrations/inbound.ts',
     ]) {
       const source = code(read(file));

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -33,7 +33,9 @@ const WRITERS: Array<{ file: string; fn: string; what: string }> = [
     what: 'a manual retry',
   },
   {
-    file: 'src/lib/work/reminders.ts',
+    file: existsSync('packages/work/src/reminders.ts')
+      ? 'packages/work/src/reminders.ts'
+      : 'src/lib/work/reminders.ts',
     fn: 'export async function createReminder(',
     what: 'a new reminder',
   },

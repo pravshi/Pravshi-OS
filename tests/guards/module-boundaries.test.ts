@@ -331,6 +331,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/shared-services/src/events', logical: 'src/lib/events' },
   { dir: 'packages/contracts/src', logical: 'src/lib/contracts' },
   { dir: 'packages/crm-core/src', logical: 'src/lib/crm' },
+  { dir: 'packages/work/src', logical: 'src/lib/work' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -435,7 +436,9 @@ function resolveSpecifier(from: string, spec: string): string | null {
                               ]
                             : rest.startsWith('lib/crm/')
                               ? [join('packages', 'crm-core', 'src', rest.slice('lib/crm/'.length))]
-                              : [join('apps', 'web', 'src', rest), join('src', rest)];
+                              : rest.startsWith('lib/work/')
+                                ? [join('packages', 'work', 'src', rest.slice('lib/work/'.length))]
+                                : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -482,6 +485,10 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(
       join('packages', 'crm-core', 'src', spec.slice('@pravshi/crm-core/'.length)),
     );
+  } else if (spec === '@pravshi/work') {
+    found = existingFile(join('packages', 'work', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/work/')) {
+    found = existingFile(join('packages', 'work', 'src', spec.slice('@pravshi/work/'.length)));
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph

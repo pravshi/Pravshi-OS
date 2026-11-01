@@ -38,6 +38,7 @@ describe('server-side session lookups', () => {
       'packages/shared-services/src',
       'packages/contracts/src',
       'packages/crm-core/src',
+      'packages/work/src',
     ]
       .flatMap((dir) => walk(dir))
       .filter(
