@@ -333,6 +333,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/crm-core/src', logical: 'src/lib/crm' },
   { dir: 'packages/work/src', logical: 'src/lib/work' },
   { dir: 'packages/integrations/src', logical: 'src/lib/integrations' },
+  { dir: 'packages/automation/src', logical: 'src/lib/workflows' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -448,7 +449,16 @@ function resolveSpecifier(from: string, spec: string): string | null {
                                         rest.slice('lib/integrations/'.length),
                                       ),
                                     ]
-                                  : [join('apps', 'web', 'src', rest), join('src', rest)];
+                                  : rest.startsWith('lib/workflows/')
+                                    ? [
+                                        join(
+                                          'packages',
+                                          'automation',
+                                          'src',
+                                          rest.slice('lib/workflows/'.length),
+                                        ),
+                                      ]
+                                    : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -504,6 +514,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/integrations/')) {
     found = existingFile(
       join('packages', 'integrations', 'src', spec.slice('@pravshi/integrations/'.length)),
+    );
+  } else if (spec === '@pravshi/automation') {
+    found = existingFile(join('packages', 'automation', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/automation/')) {
+    found = existingFile(
+      join('packages', 'automation', 'src', spec.slice('@pravshi/automation/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));

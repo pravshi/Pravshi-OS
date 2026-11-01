@@ -50,6 +50,7 @@ const SOURCE_ROOTS = [
   'packages/crm-core/src',
   'packages/work/src',
   'packages/integrations/src',
+  'packages/automation/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 

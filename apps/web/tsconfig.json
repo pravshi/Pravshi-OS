@@ -21,6 +21,7 @@
       "@/lib/crm/*": ["../../packages/crm-core/src/*"],
       "@/lib/work/*": ["../../packages/work/src/*"],
       "@/lib/integrations/*": ["../../packages/integrations/src/*"],
+      "@/lib/workflows/*": ["../../packages/automation/src/*"],
       "@pravshi/database": ["../../packages/database/src/index.ts"],
       "@pravshi/database/*": ["../../packages/database/src/*"],
       "@pravshi/observability": ["../../packages/observability/src/index.ts"],
@@ -39,6 +40,8 @@
       "@pravshi/work/*": ["../../packages/work/src/*"],
       "@pravshi/integrations": ["../../packages/integrations/src/index.ts"],
       "@pravshi/integrations/*": ["../../packages/integrations/src/*"],
+      "@pravshi/automation": ["../../packages/automation/src/index.ts"],
+      "@pravshi/automation/*": ["../../packages/automation/src/*"],
       "@/*": ["./src/*", "../../src/*"]
     }
   },

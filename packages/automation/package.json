@@ -1,0 +1,22 @@
+{
+  "name": "@pravshi/automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@pravshi/contracts": "workspace:*",
+    "@pravshi/crm-core": "workspace:*",
+    "@pravshi/database": "workspace:*",
+    "@pravshi/integrations": "workspace:*",
+    "@pravshi/observability": "workspace:*",
+    "@pravshi/security": "workspace:*",
+    "@pravshi/shared-services": "workspace:*",
+    "@pravshi/work": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.6.6"
+  }
+}

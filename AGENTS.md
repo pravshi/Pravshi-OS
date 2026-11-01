@@ -62,8 +62,9 @@ then `src/*`. Shared tool configuration (the TypeScript, Prettier, ESLint and Vi
 `packages/shared-services` since Step 8 (package 6), the contracts live in
 `packages/contracts` since Step 8 (package 7), the core CRM services live in
 `packages/crm-core` since Step 8 (package 8), the work management services live in
-`packages/work` since Step 8 (package 9), and the integrations services live in
-`packages/integrations` since Step 8 (package 10) — shared packages the founder decides; the root
+`packages/work` since Step 8 (package 9), the integrations services live in
+`packages/integrations` since Step 8 (package 10), and the workflow automation engine lives in
+`packages/automation` since Step 8 (package 11) — shared packages the founder decides; the root
 `tsconfig.json`, `eslint.config.mjs`, `vitest.config.mts` and `.prettierrc` extend it. Ownership is
 unchanged; only the paths are.
 

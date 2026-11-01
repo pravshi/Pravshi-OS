@@ -250,6 +250,39 @@ importers:
 
   apps/worker: {}
 
+  packages/automation:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@pravshi/crm-core':
+        specifier: workspace:*
+        version: link:../crm-core
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../database
+      '@pravshi/integrations':
+        specifier: workspace:*
+        version: link:../integrations
+      '@pravshi/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../security
+      '@pravshi/shared-services':
+        specifier: workspace:*
+        version: link:../shared-services
+      '@pravshi/work':
+        specifier: workspace:*
+        version: link:../work
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
   packages/contracts:
     dependencies:
       zod:

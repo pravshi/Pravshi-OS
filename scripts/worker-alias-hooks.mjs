@@ -32,6 +32,7 @@ const CONTRACTS_DIR = path.join(REPO_ROOT, 'packages', 'contracts', 'src');
 const CRM_CORE_DIR = path.join(REPO_ROOT, 'packages', 'crm-core', 'src');
 const WORK_DIR = path.join(REPO_ROOT, 'packages', 'work', 'src');
 const INTEGRATIONS_DIR = path.join(REPO_ROOT, 'packages', 'integrations', 'src');
+const AUTOMATION_DIR = path.join(REPO_ROOT, 'packages', 'automation', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -93,6 +94,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(WORK_DIR, relative.slice('lib/work/'.length));
     } else if (relative.startsWith('lib/integrations/')) {
       targetBase = path.join(INTEGRATIONS_DIR, relative.slice('lib/integrations/'.length));
+    } else if (relative.startsWith('lib/workflows/')) {
+      targetBase = path.join(AUTOMATION_DIR, relative.slice('lib/workflows/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -192,6 +195,17 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/integrations/'.length);
     const url = probe(path.join(INTEGRATIONS_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1k. The `@pravshi/automation` package alias.
+  if (specifier === '@pravshi/automation' || specifier.startsWith('@pravshi/automation/')) {
+    const sub =
+      specifier === '@pravshi/automation'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/automation/'.length);
+    const url = probe(path.join(AUTOMATION_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }
