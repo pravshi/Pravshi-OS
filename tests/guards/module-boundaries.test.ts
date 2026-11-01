@@ -319,6 +319,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'apps/web/src', logical: 'src' },
   { dir: 'apps/worker/src', logical: 'src/worker' },
   { dir: 'packages/database/src', logical: 'src/lib/db' },
+  { dir: 'packages/observability/src', logical: 'src/lib/observability' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -354,13 +355,15 @@ function existingFile(base: string): string | null {
 function resolveSpecifier(from: string, spec: string): string | null {
   let found: string | null = null;
   if (spec.startsWith('@/')) {
-    // tsconfig.json paths: @/worker/* -> apps/worker/src/*, @/lib/db/* -> packages/database/src/*, @/* -> apps/web/src/*, then src/*.
+    // tsconfig.json paths: @/worker/* -> apps/worker/src/*, @/lib/db/* -> packages/database/src/*, @/lib/observability/* -> packages/observability/src/*, @/* -> apps/web/src/*, then src/*.
     const rest = spec.slice(2);
     const candidates = rest.startsWith('worker/')
       ? [join('apps', 'worker', 'src', rest.slice('worker/'.length))]
       : rest.startsWith('lib/db/')
         ? [join('packages', 'database', 'src', rest.slice('lib/db/'.length))]
-        : [join('apps', 'web', 'src', rest), join('src', rest)];
+        : rest.startsWith('lib/observability/')
+          ? [join('packages', 'observability', 'src', rest.slice('lib/observability/'.length))]
+          : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -370,6 +373,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/database/')) {
     found = existingFile(
       join('packages', 'database', 'src', spec.slice('@pravshi/database/'.length)),
+    );
+  } else if (spec === '@pravshi/observability') {
+    found = existingFile(join('packages', 'observability', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/observability/')) {
+    found = existingFile(
+      join('packages', 'observability', 'src', spec.slice('@pravshi/observability/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
@@ -500,11 +509,15 @@ describe('module-boundary checker', () => {
     expect(logicalOf('apps/web/src/middleware.ts')).toBe('src/middleware.ts');
     expect(logicalOf('apps/worker/src/runner.ts')).toBe('src/worker/runner.ts');
     expect(logicalOf('packages/database/src/pool.ts')).toBe('src/lib/db/pool.ts');
+    expect(logicalOf('packages/observability/src/report.ts')).toBe(
+      'src/lib/observability/report.ts',
+    );
     expect(logicalOf('apps/web/next.config.ts')).toBeNull(); // outside every source root
     expect(logicalOf('tests/guards/x.test.ts')).toBeNull();
     expect(moduleOf(logicalOf('apps/worker/src/runner.ts')!)).toBe('worker');
     expect(moduleOf(logicalOf('apps/web/src/instrumentation.ts')!)).toBe('instrumentation');
     expect(moduleOf(logicalOf('packages/database/src/pool.ts')!)).toBe('db');
+    expect(moduleOf(logicalOf('packages/observability/src/report.ts')!)).toBe('observability');
   });
 
   const edge = (from: string, toFile: string): FileImport => ({ from, toFile });

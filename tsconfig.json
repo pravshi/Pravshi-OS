@@ -4,6 +4,11 @@
     "paths": {
       "@/worker/*": ["./apps/worker/src/*"],
       "@/lib/db/*": ["./packages/database/src/*"],
+      "@/lib/observability/*": ["./packages/observability/src/*"],
+      "@pravshi/database": ["./packages/database/src/index.ts"],
+      "@pravshi/database/*": ["./packages/database/src/*"],
+      "@pravshi/observability": ["./packages/observability/src/index.ts"],
+      "@pravshi/observability/*": ["./packages/observability/src/*"],
       "@/*": ["./apps/web/src/*", "./src/*"]
     }
   },

@@ -54,8 +54,9 @@ Next.js application, which keeps its own `src/` folder: `apps/web/src/{app,compo
 extracts packages, the shared server code at the repository root: `src/lib/**` and `src/env.ts`.
 The `@/` import alias resolves `@/worker/*` to `apps/worker/src/*` and `@/*` to `apps/web/src/*`,
 then `src/*`. Shared tool configuration (the TypeScript, Prettier, ESLint and Vitest bases) lives in
-`packages/shared-config` since Step 8 (package 1), and the database plane lives in
-`packages/database` since Step 8 (package 2) — shared packages the founder decides; the root
+`packages/shared-config` since Step 8 (package 1), the database plane lives in
+`packages/database` since Step 8 (package 2), and the observability plane lives in
+`packages/observability` since Step 8 (package 3) — shared packages the founder decides; the root
 `tsconfig.json`, `eslint.config.mjs`, `vitest.config.mts` and `.prettierrc` extend it. Ownership is
 unchanged; only the paths are.
 

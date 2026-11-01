@@ -205,4 +205,17 @@ Every migration file is byte-identical (proven by pre- and post-move SHA-256 cal
 `packages/database/src/*`. The package is declared as `@pravshi/database`. The source roots that
 guards walk are extended with `packages/database/src`, and all runbook and test paths are updated.
 
+## Amendment — Step 8, package 3: `observability`
+
+`packages/observability` extracts the L1 observability plane: `src/lib/observability/**`
+(`client-address.ts`, `process-context.ts`, `redact.ts`, `report.ts`) moved to
+`packages/observability/src/`. The package is declared as `@pravshi/observability` with its own
+`package.json`, `tsconfig.json` and barrel `src/index.ts`. Subpath exports provide access to each
+module. Path aliases `@/lib/observability/*` and `@pravshi/observability/*` in root, `apps/web` and
+`apps/worker` tsconfigs resolve to `packages/observability/src/*`. The worker alias hooks
+(`scripts/worker-alias-hooks.mjs`) resolve `@/lib/observability/*` and `@pravshi/observability/*`
+for `pnpm worker`. Source roots in guards, ESLint and workspace root tests are extended with
+`packages/observability/src`.
+
+
 
