@@ -15,7 +15,7 @@ vi.mock('../../src/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
-vi.mock('../../src/lib/db/authorized', () => ({
+vi.mock('@/lib/db/authorized', () => ({
   withAuthorizedDb: vi.fn(),
 }));
 

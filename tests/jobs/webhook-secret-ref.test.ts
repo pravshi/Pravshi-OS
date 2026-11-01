@@ -63,7 +63,7 @@ vi.mock('node:http', () => ({ request: fakeRequest, default: { request: fakeRequ
 vi.mock('node:https', () => ({ request: fakeRequest, default: { request: fakeRequest } }));
 
 // The subscription's secret: the worker-plane read (0059 definer) and the vault decryption.
-vi.mock('../../src/lib/db/worker-pool', () => ({
+vi.mock('@/lib/db/worker-pool', () => ({
   withWorkerContext: (_ctx: unknown, _item: unknown, fn: (tx: unknown) => unknown) =>
     fn({ execute: resolveDelivery }),
 }));
