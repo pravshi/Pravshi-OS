@@ -24,16 +24,17 @@ describe('workspace source roots', () => {
     expect(existsSync('apps/worker/src')).toBe(true);
   });
 
-  it('packages/ holds database, observability and shared-config; database and observability have a src folder', () => {
+  it('packages/ holds database, observability, security and shared-config; database, observability and security have a src folder', () => {
     // Step 8 extracts one package per pull request. A package with source code must extend the
-    // source roots every guard walks (see the header); shared-config has none, database and observability have src.
+    // source roots every guard walks (see the header); shared-config has none, database, observability and security have src.
     expect(
       dirs('packages')
         .filter((d) => d !== 'node_modules')
         .sort(),
-    ).toEqual(['database', 'observability', 'shared-config']);
+    ).toEqual(['database', 'observability', 'security', 'shared-config']);
     expect(existsSync('packages/database/src')).toBe(true);
     expect(existsSync('packages/observability/src')).toBe(true);
+    expect(existsSync('packages/security/src')).toBe(true);
     expect(existsSync('packages/shared-config/src')).toBe(false);
   });
 });

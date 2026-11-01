@@ -21,7 +21,7 @@
  * occurrence (new assignee, new updatedAt) derives a fresh one.
  */
 import { createHash } from 'node:crypto';
-import type { Authorization } from '../authz/require-permission';
+import type { Authorization } from '@/lib/authz/require-permission';
 import {
   createNotification,
   type CreateNotificationInput,

@@ -25,6 +25,7 @@ const SRC_DIR = path.join(REPO_ROOT, 'src');
 const WORKER_DIR = path.join(REPO_ROOT, 'apps', 'worker', 'src');
 const DATABASE_DIR = path.join(REPO_ROOT, 'packages', 'database', 'src');
 const OBSERVABILITY_DIR = path.join(REPO_ROOT, 'packages', 'observability', 'src');
+const SECURITY_DIR = path.join(REPO_ROOT, 'packages', 'security', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -57,6 +58,14 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(DATABASE_DIR, relative.slice('lib/db/'.length));
     } else if (relative.startsWith('lib/observability/')) {
       targetBase = path.join(OBSERVABILITY_DIR, relative.slice('lib/observability/'.length));
+    } else if (relative.startsWith('lib/audit/')) {
+      targetBase = path.join(SECURITY_DIR, 'audit', relative.slice('lib/audit/'.length));
+    } else if (relative.startsWith('lib/auth/')) {
+      targetBase = path.join(SECURITY_DIR, 'auth', relative.slice('lib/auth/'.length));
+    } else if (relative.startsWith('lib/authz/')) {
+      targetBase = path.join(SECURITY_DIR, 'authz', relative.slice('lib/authz/'.length));
+    } else if (relative.startsWith('lib/identity/')) {
+      targetBase = path.join(SECURITY_DIR, 'identity', relative.slice('lib/identity/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -82,6 +91,15 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/observability/'.length);
     const url = probe(path.join(OBSERVABILITY_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1d. The `@pravshi/security` package alias.
+  if (specifier === '@pravshi/security' || specifier.startsWith('@pravshi/security/')) {
+    const sub =
+      specifier === '@pravshi/security' ? 'index.ts' : specifier.slice('@pravshi/security/'.length);
+    const url = probe(path.join(SECURITY_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

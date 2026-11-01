@@ -9,10 +9,16 @@
     "paths": {
       "@/lib/db/*": ["../../packages/database/src/*"],
       "@/lib/observability/*": ["../../packages/observability/src/*"],
+      "@/lib/audit/*": ["../../packages/security/src/audit/*"],
+      "@/lib/auth/*": ["../../packages/security/src/auth/*"],
+      "@/lib/authz/*": ["../../packages/security/src/authz/*"],
+      "@/lib/identity/*": ["../../packages/security/src/identity/*"],
       "@pravshi/database": ["../../packages/database/src/index.ts"],
       "@pravshi/database/*": ["../../packages/database/src/*"],
       "@pravshi/observability": ["../../packages/observability/src/index.ts"],
       "@pravshi/observability/*": ["../../packages/observability/src/*"],
+      "@pravshi/security": ["../../packages/security/src/index.ts"],
+      "@pravshi/security/*": ["../../packages/security/src/*"],
       "@/*": ["./src/*", "../../src/*"]
     }
   },

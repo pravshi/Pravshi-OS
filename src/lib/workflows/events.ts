@@ -60,7 +60,7 @@ import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as Sentry from '@/lib/observability/report';
 import { env } from '@/env';
-import type { Authorization } from '../authz/require-permission';
+import type { Authorization } from '@/lib/authz/require-permission';
 // Implemented by A8 (Execution Orchestrator): the real pipeline
 // (match → evaluate → execute) per §13 of the architecture audit.
 import { runWorkflowsForEvent } from './engine';

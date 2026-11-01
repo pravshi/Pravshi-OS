@@ -26,7 +26,7 @@ import * as Sentry from '@/lib/observability/report';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAuthorizedDb } from '@/lib/db/authorized';
-import type { Authorization } from '../authz/require-permission';
+import type { Authorization } from '@/lib/authz/require-permission';
 import { ActionConfigSchema, ConditionNodeSchema, TriggerConfigSchema } from './schema';
 import type { ActionConfig, ConditionNode, TriggerConfig } from './schema';
 import type { WorkflowEvent } from './events';

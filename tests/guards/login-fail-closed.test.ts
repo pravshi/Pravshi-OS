@@ -9,7 +9,14 @@ import { describe, expect, it } from 'vitest';
  */
 // Redesign Step 7: the app's folders live in apps/web/src; everything else is shared src/.
 const read = (p: string) =>
-  readFileSync(/^(app|components|hooks)\//.test(p) ? `apps/web/src/${p}` : `src/${p}`, 'utf8');
+  readFileSync(
+    /^(app|components|hooks)\//.test(p)
+      ? `apps/web/src/${p}`
+      : /^lib\/auth\//.test(p)
+        ? `packages/security/src/${p.slice('lib/'.length)}`
+        : `src/${p}`,
+    'utf8',
+  );
 const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
@@ -55,6 +62,7 @@ describe('A1 review: every client address the auth plane uses is validated', () 
       'apps/worker/src',
       'packages/database/src',
       'packages/observability/src',
+      'packages/security/src',
     ]
       .flatMap((dir) =>
         (readdirSync(dir, { recursive: true }) as string[]).map(

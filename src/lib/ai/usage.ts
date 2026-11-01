@@ -38,7 +38,7 @@ import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
-import type { Authorization } from '../authz/require-permission';
+import type { Authorization } from '@/lib/authz/require-permission';
 import {
   AI_LIMIT_DEFAULTS,
   checkLimits,

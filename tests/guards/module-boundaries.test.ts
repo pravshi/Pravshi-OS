@@ -320,6 +320,10 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'apps/worker/src', logical: 'src/worker' },
   { dir: 'packages/database/src', logical: 'src/lib/db' },
   { dir: 'packages/observability/src', logical: 'src/lib/observability' },
+  { dir: 'packages/security/src/audit', logical: 'src/lib/audit' },
+  { dir: 'packages/security/src/auth', logical: 'src/lib/auth' },
+  { dir: 'packages/security/src/authz', logical: 'src/lib/authz' },
+  { dir: 'packages/security/src/identity', logical: 'src/lib/identity' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -363,7 +367,23 @@ function resolveSpecifier(from: string, spec: string): string | null {
         ? [join('packages', 'database', 'src', rest.slice('lib/db/'.length))]
         : rest.startsWith('lib/observability/')
           ? [join('packages', 'observability', 'src', rest.slice('lib/observability/'.length))]
-          : [join('apps', 'web', 'src', rest), join('src', rest)];
+          : rest.startsWith('lib/audit/')
+            ? [join('packages', 'security', 'src', 'audit', rest.slice('lib/audit/'.length))]
+            : rest.startsWith('lib/auth/')
+              ? [join('packages', 'security', 'src', 'auth', rest.slice('lib/auth/'.length))]
+              : rest.startsWith('lib/authz/')
+                ? [join('packages', 'security', 'src', 'authz', rest.slice('lib/authz/'.length))]
+                : rest.startsWith('lib/identity/')
+                  ? [
+                      join(
+                        'packages',
+                        'security',
+                        'src',
+                        'identity',
+                        rest.slice('lib/identity/'.length),
+                      ),
+                    ]
+                  : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -379,6 +399,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/observability/')) {
     found = existingFile(
       join('packages', 'observability', 'src', spec.slice('@pravshi/observability/'.length)),
+    );
+  } else if (spec === '@pravshi/security') {
+    found = existingFile(join('packages', 'security', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/security/')) {
+    found = existingFile(
+      join('packages', 'security', 'src', spec.slice('@pravshi/security/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
@@ -512,12 +538,20 @@ describe('module-boundary checker', () => {
     expect(logicalOf('packages/observability/src/report.ts')).toBe(
       'src/lib/observability/report.ts',
     );
+    expect(logicalOf('packages/security/src/audit/log.ts')).toBe('src/lib/audit/log.ts');
+    expect(logicalOf('packages/security/src/auth/session.ts')).toBe('src/lib/auth/session.ts');
+    expect(logicalOf('packages/security/src/authz/page.ts')).toBe('src/lib/authz/page.ts');
+    expect(logicalOf('packages/security/src/identity/code.ts')).toBe('src/lib/identity/code.ts');
     expect(logicalOf('apps/web/next.config.ts')).toBeNull(); // outside every source root
     expect(logicalOf('tests/guards/x.test.ts')).toBeNull();
     expect(moduleOf(logicalOf('apps/worker/src/runner.ts')!)).toBe('worker');
     expect(moduleOf(logicalOf('apps/web/src/instrumentation.ts')!)).toBe('instrumentation');
     expect(moduleOf(logicalOf('packages/database/src/pool.ts')!)).toBe('db');
     expect(moduleOf(logicalOf('packages/observability/src/report.ts')!)).toBe('observability');
+    expect(moduleOf(logicalOf('packages/security/src/audit/log.ts')!)).toBe('audit');
+    expect(moduleOf(logicalOf('packages/security/src/auth/session.ts')!)).toBe('auth');
+    expect(moduleOf(logicalOf('packages/security/src/authz/page.ts')!)).toBe('authz');
+    expect(moduleOf(logicalOf('packages/security/src/identity/code.ts')!)).toBe('identity');
   });
 
   const edge = (from: string, toFile: string): FileImport => ({ from, toFile });

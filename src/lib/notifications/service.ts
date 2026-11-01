@@ -26,8 +26,8 @@ import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { env } from '@/env';
 import { withAuthorizedDb } from '@/lib/db/authorized';
-import { AuthorizationError } from '../authz/errors';
-import type { Authorization } from '../authz/require-permission';
+import { AuthorizationError } from '@/lib/authz/errors';
+import type { Authorization } from '@/lib/authz/require-permission';
 import { enqueueJob } from '../jobs/queue';
 import {
   mapNotificationRow,

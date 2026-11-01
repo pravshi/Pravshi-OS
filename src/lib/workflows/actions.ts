@@ -62,8 +62,8 @@
  * rejected, so template resolution can never reach Object.prototype.
  */
 import { z } from 'zod';
-import type { Authorization } from '../authz/require-permission';
-import { AuthorizationError } from '../authz/errors';
+import type { Authorization } from '@/lib/authz/require-permission';
+import { AuthorizationError } from '@/lib/authz/errors';
 import { assignTask, createTask, updateTask } from '../work/tasks';
 import { createProject, linkProjectToDeal } from '../work/projects';
 import { updateDeal } from '../crm/deals';

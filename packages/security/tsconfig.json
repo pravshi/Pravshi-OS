@@ -1,0 +1,22 @@
+{
+  "extends": "../shared-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/worker/*": ["../../apps/worker/src/*"],
+      "@/lib/db/*": ["../database/src/*"],
+      "@/lib/observability/*": ["../observability/src/*"],
+      "@/lib/audit/*": ["./src/audit/*"],
+      "@/lib/auth/*": ["./src/auth/*"],
+      "@/lib/authz/*": ["./src/authz/*"],
+      "@/lib/identity/*": ["./src/identity/*"],
+      "@pravshi/database": ["../database/src/index.ts"],
+      "@pravshi/database/*": ["../database/src/*"],
+      "@pravshi/observability": ["../observability/src/index.ts"],
+      "@pravshi/observability/*": ["../observability/src/*"],
+      "@pravshi/security": ["./src/index.ts"],
+      "@pravshi/security/*": ["./src/*"],
+      "@/*": ["../../apps/web/src/*", "../../src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
