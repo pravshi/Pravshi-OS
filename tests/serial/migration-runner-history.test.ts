@@ -106,8 +106,14 @@ describe.skipIf(!ISOLATED)(
       const dir = join(ROOT, 'node_modules', '.cache', `pravshi-migration-runner-${randomUUID()}`);
       trees.push(dir);
       mkdirSync(join(dir, 'scripts', 'ci'), { recursive: true });
+      mkdirSync(join(dir, 'packages', 'database', 'scripts'), { recursive: true });
+      mkdirSync(join(dir, 'packages', 'database', 'drizzle', 'meta'), { recursive: true });
       mkdirSync(join(dir, 'drizzle', 'meta'), { recursive: true });
       copyFileSync(join(ROOT, 'scripts', 'migrate-ws.mjs'), join(dir, 'scripts', 'migrate-ws.mjs'));
+      copyFileSync(
+        join(ROOT, 'packages', 'database', 'scripts', 'migrate-ws.mjs'),
+        join(dir, 'packages', 'database', 'scripts', 'migrate-ws.mjs'),
+      );
       copyFileSync(
         join(ROOT, 'scripts', 'ci', 'neon-local.mjs'),
         join(dir, 'scripts', 'ci', 'neon-local.mjs'),
@@ -115,6 +121,10 @@ describe.skipIf(!ISOLATED)(
       for (const f of readdirSync(join(ROOT, 'packages', 'database', 'drizzle')).filter((f) =>
         f.endsWith('.sql'),
       )) {
+        copyFileSync(
+          join(ROOT, 'packages', 'database', 'drizzle', f),
+          join(dir, 'packages', 'database', 'drizzle', f),
+        );
         copyFileSync(join(ROOT, 'packages', 'database', 'drizzle', f), join(dir, 'drizzle', f));
       }
       const journal = JSON.parse(
@@ -124,13 +134,18 @@ describe.skipIf(!ISOLATED)(
         ),
       );
       journal.entries = journal.entries.slice(0, k);
+      const journalText = JSON.stringify(journal, null, 2);
       writeFileSync(
-        join(dir, 'drizzle', 'meta', '_journal.json'),
-        JSON.stringify(journal, null, 2),
+        join(dir, 'packages', 'database', 'drizzle', 'meta', '_journal.json'),
+        journalText,
       );
+      writeFileSync(join(dir, 'drizzle', 'meta', '_journal.json'), journalText);
       const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
       expect(sha(join(dir, 'scripts', 'migrate-ws.mjs'))).toBe(
         sha(join(ROOT, 'scripts', 'migrate-ws.mjs')),
+      );
+      expect(sha(join(dir, 'packages', 'database', 'scripts', 'migrate-ws.mjs'))).toBe(
+        sha(join(ROOT, 'packages', 'database', 'scripts', 'migrate-ws.mjs')),
       );
       return dir;
     };
