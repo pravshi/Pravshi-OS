@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -33,9 +33,27 @@ describe('server-side session lookups', () => {
       'apps/worker/src',
       'packages/database/src',
       'packages/observability/src',
+      'packages/security/src',
+      'packages/platform-core/src',
+      'packages/shared-services/src',
+      'packages/contracts/src',
+      'packages/crm-core/src',
+      'packages/work/src',
+      'packages/integrations/src',
+      'packages/automation/src',
+      'packages/imports/src',
+      'packages/search/src',
+      'packages/analytics/src',
+      'packages/ai/src',
+      'packages/admin/src',
+      'packages/shared-ui/src',
     ]
       .flatMap((dir) => walk(dir))
-      .filter((f) => f !== 'src/lib/auth/safe-session.ts')
+      .filter(
+        (f) =>
+          f !== 'src/lib/auth/safe-session.ts' &&
+          f !== 'packages/security/src/auth/safe-session.ts',
+      )
       .filter((f) => /\.api\s*\.\s*getSession\b/.test(stripComments(readFileSync(f, 'utf8'))));
     expect(
       offenders,
@@ -44,7 +62,10 @@ describe('server-side session lookups', () => {
   });
 
   it('the wrapper itself still calls the library, and drops the cause', () => {
-    const src = stripComments(readFileSync('src/lib/auth/safe-session.ts', 'utf8'));
+    const filePath = existsSync('packages/security/src/auth/safe-session.ts')
+      ? 'packages/security/src/auth/safe-session.ts'
+      : 'src/lib/auth/safe-session.ts';
+    const src = stripComments(readFileSync(filePath, 'utf8'));
     expect(src).toMatch(/auth\.api\.getSession\(\{ headers \}\)/);
     expect(src).toMatch(/catch \{\s*throw new SessionUnavailableError\(\);\s*\}/);
     expect(src).not.toMatch(/cause/);

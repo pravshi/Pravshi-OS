@@ -196,6 +196,20 @@ const sources = [
   'apps/worker/src',
   'packages/database/src',
   'packages/observability/src',
+  'packages/security/src',
+  'packages/platform-core/src',
+  'packages/shared-services/src',
+  'packages/contracts/src',
+  'packages/crm-core/src',
+  'packages/work/src',
+  'packages/integrations/src',
+  'packages/automation/src',
+  'packages/imports/src',
+  'packages/search/src',
+  'packages/analytics/src',
+  'packages/ai/src',
+  'packages/admin/src',
+  'packages/shared-ui/src',
 ]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));
@@ -366,7 +380,9 @@ describe('every protected entry point authorizes first', () => {
 
   it('lets nothing outside the engine call the decision function directly', () => {
     for (const { file, source } of sources) {
-      if (file.startsWith('src/lib/authz/')) continue;
+      if (file.startsWith('src/lib/authz/') || file.startsWith('packages/security/src/authz/')) {
+        continue;
+      }
       expect(source, file).not.toMatch(/\bdecideAuthorization\b/);
     }
   });

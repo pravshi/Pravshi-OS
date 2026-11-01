@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -12,7 +12,13 @@ import { describe, expect, it } from 'vitest';
  * leaking the lockout to the client.
  */
 
-const root = (...p: string[]) => join(process.cwd(), ...p);
+const resolvePath = (p: string) => {
+  const candidate = p
+    .replace(/^src\/lib\/(auth|authz|identity|audit)\//, 'packages/security/src/$1/')
+    .replace(/^src\/lib\/admin\//, 'packages/admin/src/admin/');
+  return existsSync(candidate) ? candidate : p;
+};
+const root = (...p: string[]) => join(process.cwd(), resolvePath(p.join('/')));
 const MIGRATION = readFileSync(
   root('packages/database/drizzle/0027_mfa_enforcement_lockout.sql'),
   'utf8',

@@ -20,7 +20,7 @@
  * for the opt-in worker end-to-end suite.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -123,13 +123,25 @@ export async function load(url, context, nextLoad) {
       'apps/worker/src/maintenance.ts',
       'apps/worker/src/scheduler.ts',
       // The queue core the worker imports downward, including the handler registry (ADR-010 rule 5).
-      'src/lib/jobs/queue.ts',
-      'src/lib/jobs/handler-registry.ts',
-      'src/lib/authz/require-permission.ts',
+      existsSync('packages/shared-services/src/jobs/queue.ts')
+        ? 'packages/shared-services/src/jobs/queue.ts'
+        : 'src/lib/jobs/queue.ts',
+      existsSync('packages/shared-services/src/jobs/handler-registry.ts')
+        ? 'packages/shared-services/src/jobs/handler-registry.ts'
+        : 'src/lib/jobs/handler-registry.ts',
+      existsSync('packages/security/src/authz/require-permission.ts')
+        ? 'packages/security/src/authz/require-permission.ts'
+        : 'src/lib/authz/require-permission.ts',
       // The modules that used to import Sentry directly, and what they report through now.
-      'src/lib/workflows/engine.ts',
-      'src/lib/workflows/events.ts',
-      'src/lib/workflows/triggers.ts',
+      existsSync('packages/automation/src/engine.ts')
+        ? 'packages/automation/src/engine.ts'
+        : 'src/lib/workflows/engine.ts',
+      existsSync('packages/automation/src/events.ts')
+        ? 'packages/automation/src/events.ts'
+        : 'src/lib/workflows/events.ts',
+      existsSync('packages/automation/src/triggers.ts')
+        ? 'packages/automation/src/triggers.ts'
+        : 'src/lib/workflows/triggers.ts',
       'packages/observability/src/report.ts',
     ]) {
       expect(
@@ -143,7 +155,7 @@ export async function load(url, context, nextLoad) {
 
   it('never loads the authentication server or the Better Auth package graph', () => {
     const forbidden = loaded.filter((u) =>
-      /src\/lib\/auth\/(server|session)\.ts$|\/node_modules\/(\.pnpm\/)?(better-auth|@better-auth|better-call|kysely)/.test(
+      /(src\/lib|packages\/security\/src)\/auth\/(server|session)\.ts$|\/node_modules\/(\.pnpm\/)?(better-auth|@better-auth|better-call|kysely)/.test(
         u,
       ),
     );

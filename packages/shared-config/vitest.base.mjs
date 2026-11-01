@@ -9,6 +9,7 @@ export const baseVitestConfig = {
   plugins: [react()],
   resolve: {
     tsconfigPaths: true,
+    dedupe: ['@sentry/nextjs'],
   },
   test: {
     environment: 'node',

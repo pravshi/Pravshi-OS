@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -6,7 +6,12 @@ import { describe, expect, it } from 'vitest';
  * factor. Behaviour is tested in tests/auth/mfa-single-signin-path.test.ts; this pins the
  * source facts that behaviour rests on.
  */
-const SERVER = readFileSync('src/lib/auth/server.ts', 'utf8');
+const SERVER = readFileSync(
+  existsSync('packages/security/src/auth/server.ts')
+    ? 'packages/security/src/auth/server.ts'
+    : 'src/lib/auth/server.ts',
+  'utf8',
+);
 const ROUTE = readFileSync('apps/web/src/app/api/auth/mfa/verify/route.ts', 'utf8');
 
 describe('FU-2: one HTTP path for the sign-in second factor', () => {

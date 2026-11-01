@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { analyseServerActions } from './require-permission-first.test';
 import {
@@ -36,7 +36,10 @@ const ACTION_FILE = 'apps/web/src/app/(app)/crm/actions.ts';
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-const read = (file: string) => readFileSync(file, 'utf8');
+const read = (file: string) => {
+  const p = file.replace(/^src\/lib\/crm\//, 'packages/crm-core/src/');
+  return readFileSync(existsSync(p) ? p : file, 'utf8');
+};
 
 /** The source of one exported server action, cut out of the actions file. */
 function actionBody(code: string, name: string): string {

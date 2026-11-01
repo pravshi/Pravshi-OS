@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const ROOTS = [
-  'src/lib/workflows',
+  existsSync('packages/automation/src') ? 'packages/automation/src' : 'src/lib/workflows',
   'apps/web/src/app/api/workflows',
   'apps/web/src/app/api/workflow-executions',
   'apps/web/src/app/(app)/workflows',

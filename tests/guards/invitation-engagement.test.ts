@@ -25,7 +25,10 @@ const MIGRATION_19 = readFileSync(
   join(process.cwd(), 'packages/database/drizzle/0019_invitation_accept_functions.sql'),
   'utf8',
 );
-const SERVICE = readFileSync(join(process.cwd(), 'src/lib/invitations/service.ts'), 'utf8');
+const SERVICE = readFileSync(
+  join(process.cwd(), 'packages/admin/src/invitations/service.ts'),
+  'utf8',
+);
 
 describe('invitation carries the engagement the acceptance creates', () => {
   it('0018: invitations has engagement_type, department_id, start_date', () => {

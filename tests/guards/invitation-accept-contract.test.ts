@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -22,7 +22,15 @@ const MIGRATION_19 = readFileSync(
   join(process.cwd(), 'packages/database/drizzle/0019_invitation_accept_functions.sql'),
   'utf8',
 );
-const CALLER = readFileSync(join(process.cwd(), 'src/lib/auth/invitations.ts'), 'utf8');
+const CALLER = readFileSync(
+  join(
+    process.cwd(),
+    existsSync('packages/security/src/auth/invitations.ts')
+      ? 'packages/security/src/auth/invitations.ts'
+      : 'src/lib/auth/invitations.ts',
+  ),
+  'utf8',
+);
 
 describe('accept_invitation call contract', () => {
   it('0019: function takes (p_token_hash, p_full_name, p_password_hash) in that order', () => {

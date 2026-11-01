@@ -43,6 +43,20 @@ const SOURCE_ROOTS = [
   'apps/worker/src',
   'packages/database/src',
   'packages/observability/src',
+  'packages/security/src',
+  'packages/platform-core/src',
+  'packages/shared-services/src',
+  'packages/contracts/src',
+  'packages/crm-core/src',
+  'packages/work/src',
+  'packages/integrations/src',
+  'packages/automation/src',
+  'packages/imports/src',
+  'packages/search/src',
+  'packages/analytics/src',
+  'packages/ai/src',
+  'packages/admin/src',
+  'packages/shared-ui/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
@@ -98,7 +112,12 @@ describe('domain events are wired in every emitting process', () => {
       if (importsComposition.test(source)) importers.push(file);
       // events/index.ts defines the register functions; every other file may only use them via
       // the composition root.
-      if (file !== 'src/lib/events/index.ts' && registers.test(source)) registrars.push(file);
+      if (
+        file !== 'src/lib/events/index.ts' &&
+        file !== 'packages/shared-services/src/events/index.ts' &&
+        registers.test(source)
+      )
+        registrars.push(file);
     }
     expect(importers, 'only the entry points may load the composition root').toEqual([
       'apps/web/src/instrumentation.ts',
@@ -111,11 +130,21 @@ describe('domain events are wired in every emitting process', () => {
     // The five emitting files import the port; the boundary guard (module-boundaries) is what
     // forbids crm, work and integrations from importing workflows or the fan-out directly.
     for (const file of [
-      'src/lib/crm/deals.ts',
-      'src/lib/crm/pipelines.ts',
-      'src/lib/work/projects.ts',
-      'src/lib/work/tasks.ts',
-      'src/lib/integrations/inbound.ts',
+      existsSync('packages/crm-core/src/deals.ts')
+        ? 'packages/crm-core/src/deals.ts'
+        : 'src/lib/crm/deals.ts',
+      existsSync('packages/crm-core/src/pipelines.ts')
+        ? 'packages/crm-core/src/pipelines.ts'
+        : 'src/lib/crm/pipelines.ts',
+      existsSync('packages/work/src/projects.ts')
+        ? 'packages/work/src/projects.ts'
+        : 'src/lib/work/projects.ts',
+      existsSync('packages/work/src/tasks.ts')
+        ? 'packages/work/src/tasks.ts'
+        : 'src/lib/work/tasks.ts',
+      existsSync('packages/integrations/src/inbound.ts')
+        ? 'packages/integrations/src/inbound.ts'
+        : 'src/lib/integrations/inbound.ts',
     ]) {
       const source = code(read(file));
       expect(source, `${file} must emit through @/lib/events`).toMatch(/from '@\/lib\/events'/);

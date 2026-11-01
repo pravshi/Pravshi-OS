@@ -1,0 +1,36 @@
+{
+  "extends": "../shared-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/worker/*": ["../../apps/worker/src/*"],
+      "@/lib/db/*": ["../database/src/*"],
+      "@/lib/observability/*": ["../observability/src/*"],
+      "@/lib/audit/*": ["./src/audit/*"],
+      "@/lib/auth/*": ["./src/auth/*"],
+      "@/lib/authz/*": ["./src/authz/*"],
+      "@/lib/identity/*": ["./src/identity/*"],
+      "@/lib/jobs/*": ["../shared-services/src/jobs/*"],
+      "@/lib/notifications/*": ["../shared-services/src/notifications/*"],
+      "@/lib/events": ["../shared-services/src/events/index.ts"],
+      "@/lib/events/*": ["../shared-services/src/events/*"],
+      "@pravshi/database": ["../database/src/index.ts"],
+      "@pravshi/database/*": ["../database/src/*"],
+      "@pravshi/observability": ["../observability/src/index.ts"],
+      "@pravshi/observability/*": ["../observability/src/*"],
+      "@pravshi/security": ["./src/index.ts"],
+      "@pravshi/security/*": ["./src/*"],
+      "@pravshi/platform-core": ["../platform-core/src/index.ts"],
+      "@pravshi/platform-core/*": ["../platform-core/src/*"],
+      "@pravshi/shared-services": ["../shared-services/src/index.ts"],
+      "@pravshi/shared-services/*": ["../shared-services/src/*"],
+      "@pravshi/contracts": ["../contracts/src/index.ts"],
+      "@pravshi/contracts/*": ["../contracts/src/*"],
+      "@pravshi/crm-core": ["../crm-core/src/index.ts"],
+      "@pravshi/crm-core/*": ["../crm-core/src/*"],
+      "@pravshi/work": ["../work/src/index.ts"],
+      "@pravshi/work/*": ["../work/src/*"],
+      "@/*": ["../../apps/web/src/*", "../../src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

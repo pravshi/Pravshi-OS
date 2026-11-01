@@ -11,7 +11,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/handler-registry', () => ({
+vi.mock('@/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 

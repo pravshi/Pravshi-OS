@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -23,13 +23,19 @@ function body(src: string, signature: string): string {
 
 const WRITERS: Array<{ file: string; fn: string; what: string }> = [
   {
-    file: 'src/lib/jobs/queue.ts',
+    file: 'packages/shared-services/src/jobs/queue.ts',
     fn: 'export async function enqueueJob(',
     what: 'every enqueued job',
   },
-  { file: 'src/lib/jobs/queue.ts', fn: 'export async function retryJob(', what: 'a manual retry' },
   {
-    file: 'src/lib/work/reminders.ts',
+    file: 'packages/shared-services/src/jobs/queue.ts',
+    fn: 'export async function retryJob(',
+    what: 'a manual retry',
+  },
+  {
+    file: existsSync('packages/work/src/reminders.ts')
+      ? 'packages/work/src/reminders.ts'
+      : 'src/lib/work/reminders.ts',
     fn: 'export async function createReminder(',
     what: 'a new reminder',
   },

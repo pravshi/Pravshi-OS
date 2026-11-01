@@ -137,7 +137,11 @@ describe('the authentication plane logger (Better Auth `logger.log`)', () => {
   });
 
   it('is the logger Better Auth is configured with', async () => {
-    const src = (await import('node:fs')).readFileSync('src/lib/auth/server.ts', 'utf8');
+    const fs = await import('node:fs');
+    const path = fs.existsSync('packages/security/src/auth/server.ts')
+      ? 'packages/security/src/auth/server.ts'
+      : 'src/lib/auth/server.ts';
+    const src = fs.readFileSync(path, 'utf8');
     expect(src).toMatch(/logger:\s*authLoggerOptions/);
     expect(src).toMatch(/onAPIError:\s*\{\s*throw:\s*true\s*\}/);
   });

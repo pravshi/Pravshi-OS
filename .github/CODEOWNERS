@@ -18,6 +18,7 @@
 /e2e/                   @pravshi/developers
 /apps/web/postcss.config.mjs @pravshi/developers
 /apps/web/components.json @pravshi/developers
+/packages/shared-ui/    @pravshi/developers
 
 # ── Backend / security ──────────────────────────────────────────────────────
 # Database, authorization, migrations, DB tests and the security guards.
@@ -28,6 +29,19 @@
 /src/lib/db/            @pravshi/maintainers
 /packages/database/     @pravshi/maintainers
 /packages/observability/ @pravshi/maintainers
+/packages/security/     @pravshi/maintainers
+/packages/platform-core/ @pravshi/maintainers
+/packages/shared-services/ @pravshi/maintainers
+/packages/contracts/    @pravshi/maintainers
+/packages/crm-core/     @pravshi/maintainers
+/packages/work/         @pravshi/maintainers
+/packages/integrations/ @pravshi/maintainers
+/packages/automation/   @pravshi/maintainers
+/packages/imports/      @pravshi/maintainers
+/packages/search/       @pravshi/maintainers
+/packages/analytics/    @pravshi/maintainers
+/packages/ai/           @pravshi/maintainers
+/packages/admin/        @pravshi/maintainers
 /src/lib/authz/         @pravshi/maintainers
 /src/env.ts             @pravshi/maintainers
 /tests/db/              @pravshi/maintainers

@@ -11,8 +11,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * Static/source-level like the other guards — no database needed.
  */
 
-const root = (...p: string[]) => join(process.cwd(), ...p);
-const read = (p: string) => readFileSync(root(...p.split('/')), 'utf8');
+const resolvePath = (p: string) => {
+  const candidate = p.replace(
+    /^src\/lib\/(auth|authz|identity|audit)\//,
+    'packages/security/src/$1/',
+  );
+  return existsSync(candidate) ? candidate : p;
+};
+const root = (...p: string[]) => join(process.cwd(), resolvePath(p.join('/')));
+const read = (p: string) => readFileSync(root(p), 'utf8');
 
 const CONFIG = read('apps/web/next.config.ts');
 const HELPER = read('src/lib/auth/rate-limit.ts');

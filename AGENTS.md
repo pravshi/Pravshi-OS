@@ -55,8 +55,22 @@ extracts packages, the shared server code at the repository root: `src/lib/**` a
 The `@/` import alias resolves `@/worker/*` to `apps/worker/src/*` and `@/*` to `apps/web/src/*`,
 then `src/*`. Shared tool configuration (the TypeScript, Prettier, ESLint and Vitest bases) lives in
 `packages/shared-config` since Step 8 (package 1), the database plane lives in
-`packages/database` since Step 8 (package 2), and the observability plane lives in
-`packages/observability` since Step 8 (package 3) — shared packages the founder decides; the root
+`packages/database` since Step 8 (package 2), the observability plane lives in
+`packages/observability` since Step 8 (package 3), the security plane lives in
+`packages/security` since Step 8 (package 4), the platform core lives in
+`packages/platform-core` since Step 8 (package 5), the shared services live in
+`packages/shared-services` since Step 8 (package 6), the contracts live in
+`packages/contracts` since Step 8 (package 7), the core CRM services live in
+`packages/crm-core` since Step 8 (package 8), the work management services live in
+`packages/work` since Step 8 (package 9), the integrations services live in
+`packages/integrations` since Step 8 (package 10), the workflow automation engine lives in
+`packages/automation` since Step 8 (package 11), the import services live in
+`packages/imports` since Step 8 (package 12), the global search service lives in
+`packages/search` since Step 8 (package 13), the analytics services live in
+`packages/analytics` since Step 8 (package 14), the permission-aware AI services live in
+`packages/ai` since Step 8 (package 15), the administration and invitation services live in
+`packages/admin` since Step 8 (package 16), and the shared UI component library lives in
+`packages/shared-ui` since Step 8 (package 17) — shared packages the founder decides; the root
 `tsconfig.json`, `eslint.config.mjs`, `vitest.config.mts` and `.prettierrc` extend it. Ownership is
 unchanged; only the paths are.
 
@@ -73,7 +87,7 @@ unchanged; only the paths are.
   - `.github/` (CI), `scripts/guards/`, `scripts/ci/`, and the tests of backend, security and
     database behaviour.
 - **Antigravity** (under its frontend rule): the rest of `apps/web/src/app/` (pages, layouts, client
-  components, styles), `apps/web/src/components/`, `src/modules/`, frontend assets and frontend-specific
+  components, styles), `apps/web/src/components/`, `packages/shared-ui/`, `src/modules/`, frontend assets and frontend-specific
   tests.
 - **Shared — the founder decides:** `package.json`, `pnpm-lock.yaml`, `apps/web/src/middleware.ts`,
   `src/env.ts`, `src/lib/utils.ts`, root configuration files, shared contracts and validation

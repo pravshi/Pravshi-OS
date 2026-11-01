@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
  * is the dynamic half — it executes the queries against a real database.
  */
 
-const read = (p: string) => readFileSync(join(process.cwd(), 'src/lib/admin', p), 'utf8');
+const read = (p: string) =>
+  readFileSync(join(process.cwd(), 'packages/admin/src/admin', p), 'utf8');
 const stripComments = (s: string) =>
   s
     .replace(/\/\*[\s\S]*?\*\//g, '')

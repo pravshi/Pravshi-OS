@@ -1,0 +1,11 @@
+{
+  "extends": "../shared-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/components/ui/*": ["./src/*"],
+      "@pravshi/shared-ui": ["./src/index.ts"],
+      "@pravshi/shared-ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

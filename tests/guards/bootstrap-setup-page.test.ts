@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -17,7 +17,14 @@ import { describe, expect, it } from 'vitest';
  * - the migration function the guard calls is narrow (one bit, app_user only).
  */
 
-const root = (...p: string[]) => join(process.cwd(), ...p);
+const resolvePath = (p: string) => {
+  const candidate = p.replace(
+    /^src\/lib\/(auth|authz|identity|audit)\//,
+    'packages/security/src/$1/',
+  );
+  return existsSync(candidate) ? candidate : p;
+};
+const root = (...p: string[]) => join(process.cwd(), resolvePath(p.join('/')));
 const PAGE = readFileSync(root('apps/web/src/app/setup/page.tsx'), 'utf8');
 const FORM = readFileSync(root('apps/web/src/app/setup/setup-form.tsx'), 'utf8');
 const SERVICE = readFileSync(root('src/lib/auth/bootstrap-setup.ts'), 'utf8');

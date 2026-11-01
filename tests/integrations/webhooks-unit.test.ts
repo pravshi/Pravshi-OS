@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // handlers.ts registers its handlers at module load; stub the registry
 // (the handlers-ssrf.test.ts pattern) so importing it stays DB-free.
-vi.mock('../../src/lib/jobs/handler-registry', () => ({
+vi.mock('@/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 

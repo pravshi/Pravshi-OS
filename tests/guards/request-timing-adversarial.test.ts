@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -162,11 +162,21 @@ describe('withPermission request timing — adversarial (Wave J)', () => {
     // ever grows its own logging of this line, routes using it would
     // double-emit — this guard fails first.
     for (const path of [
-      'src/lib/crm/http.ts',
-      'src/lib/work/http.ts',
-      'src/lib/workflows/http.ts',
-      'src/lib/search/http.ts',
-      'src/lib/integrations/http.ts',
+      existsSync('packages/crm-core/src/http.ts')
+        ? 'packages/crm-core/src/http.ts'
+        : 'src/lib/crm/http.ts',
+      existsSync('packages/work/src/http.ts')
+        ? 'packages/work/src/http.ts'
+        : 'src/lib/work/http.ts',
+      existsSync('packages/automation/src/http.ts')
+        ? 'packages/automation/src/http.ts'
+        : 'src/lib/workflows/http.ts',
+      existsSync('packages/search/src/http.ts')
+        ? 'packages/search/src/http.ts'
+        : 'src/lib/search/http.ts',
+      existsSync('packages/integrations/src/http.ts')
+        ? 'packages/integrations/src/http.ts'
+        : 'src/lib/integrations/http.ts',
       'apps/web/src/app/api/analytics/http.ts',
     ]) {
       const src = readFileSync(path, 'utf8');

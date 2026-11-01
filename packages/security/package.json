@@ -1,0 +1,36 @@
+{
+  "name": "@pravshi/security",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./audit/*": {
+      "types": "./src/audit/*.ts",
+      "default": "./src/audit/*.ts"
+    },
+    "./auth/*": {
+      "types": "./src/auth/*.ts",
+      "default": "./src/auth/*.ts"
+    },
+    "./authz/*": {
+      "types": "./src/authz/*.ts",
+      "default": "./src/authz/*.ts"
+    },
+    "./identity/*": {
+      "types": "./src/identity/*.ts",
+      "default": "./src/identity/*.ts"
+    }
+  },
+  "dependencies": {
+    "@pravshi/database": "workspace:*",
+    "@pravshi/observability": "workspace:*",
+    "better-auth": "^1.7.14",
+    "drizzle-orm": "^0.45.2",
+    "resend": "^6.30.0",
+    "zod": "^4.6.6"
+  }
+}
