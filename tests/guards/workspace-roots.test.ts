@@ -24,9 +24,9 @@ describe('workspace source roots', () => {
     expect(existsSync('apps/worker/src')).toBe(true);
   });
 
-  it('packages/ holds admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-config, shared-services and work; admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services and work have a src folder', () => {
+  it('packages/ holds admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-config, shared-services, shared-ui and work; admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services, shared-ui and work have a src folder', () => {
     // Step 8 extracts one package per pull request. A package with source code must extend the
-    // source roots every guard walks (see the header); shared-config has none, admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services and work have src.
+    // source roots every guard walks (see the header); shared-config has none, admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services, shared-ui and work have src.
     expect(
       dirs('packages')
         .filter((d) => d !== 'node_modules')
@@ -47,6 +47,7 @@ describe('workspace source roots', () => {
       'security',
       'shared-config',
       'shared-services',
+      'shared-ui',
       'work',
     ]);
     expect(existsSync('packages/admin/src')).toBe(true);
@@ -63,6 +64,7 @@ describe('workspace source roots', () => {
     expect(existsSync('packages/search/src')).toBe(true);
     expect(existsSync('packages/security/src')).toBe(true);
     expect(existsSync('packages/shared-services/src')).toBe(true);
+    expect(existsSync('packages/shared-ui/src')).toBe(true);
     expect(existsSync('packages/work/src')).toBe(true);
     expect(existsSync('packages/shared-config/src')).toBe(false);
   });

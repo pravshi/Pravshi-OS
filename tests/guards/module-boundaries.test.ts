@@ -340,6 +340,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/ai/src', logical: 'src/lib/ai' },
   { dir: 'packages/admin/src/admin', logical: 'src/lib/admin' },
   { dir: 'packages/admin/src/invitations', logical: 'src/lib/invitations' },
+  { dir: 'packages/shared-ui/src', logical: 'src/components/ui' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -520,10 +521,19 @@ function resolveSpecifier(from: string, spec: string): string | null {
                                                       rest.slice('lib/invitations/'.length),
                                                     ),
                                                   ]
-                                                : [
-                                                    join('apps', 'web', 'src', rest),
-                                                    join('src', rest),
-                                                  ];
+                                                : rest.startsWith('components/ui/')
+                                                  ? [
+                                                      join(
+                                                        'packages',
+                                                        'shared-ui',
+                                                        'src',
+                                                        rest.slice('components/ui/'.length),
+                                                      ),
+                                                    ]
+                                                  : [
+                                                      join('apps', 'web', 'src', rest),
+                                                      join('src', rest),
+                                                    ];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -610,6 +620,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(join('packages', 'admin', 'src', 'index'));
   } else if (spec.startsWith('@pravshi/admin/')) {
     found = existingFile(join('packages', 'admin', 'src', spec.slice('@pravshi/admin/'.length)));
+  } else if (spec === '@pravshi/shared-ui') {
+    found = existingFile(join('packages', 'shared-ui', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/shared-ui/')) {
+    found = existingFile(
+      join('packages', 'shared-ui', 'src', spec.slice('@pravshi/shared-ui/'.length)),
+    );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph

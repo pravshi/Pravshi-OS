@@ -38,6 +38,7 @@ const SEARCH_DIR = path.join(REPO_ROOT, 'packages', 'search', 'src');
 const ANALYTICS_DIR = path.join(REPO_ROOT, 'packages', 'analytics', 'src');
 const AI_DIR = path.join(REPO_ROOT, 'packages', 'ai', 'src');
 const ADMIN_DIR = path.join(REPO_ROOT, 'packages', 'admin', 'src');
+const SHARED_UI_DIR = path.join(REPO_ROOT, 'packages', 'shared-ui', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -113,6 +114,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(ADMIN_DIR, 'admin', relative.slice('lib/admin/'.length));
     } else if (relative.startsWith('lib/invitations/')) {
       targetBase = path.join(ADMIN_DIR, 'invitations', relative.slice('lib/invitations/'.length));
+    } else if (relative.startsWith('components/ui/')) {
+      targetBase = path.join(SHARED_UI_DIR, relative.slice('components/ui/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -269,6 +272,17 @@ export async function resolve(specifier, context, nextResolve) {
     const sub =
       specifier === '@pravshi/admin' ? 'index.ts' : specifier.slice('@pravshi/admin/'.length);
     const url = probe(path.join(ADMIN_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1q. The `@pravshi/shared-ui` package alias.
+  if (specifier === '@pravshi/shared-ui' || specifier.startsWith('@pravshi/shared-ui/')) {
+    const sub =
+      specifier === '@pravshi/shared-ui'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/shared-ui/'.length);
+    const url = probe(path.join(SHARED_UI_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

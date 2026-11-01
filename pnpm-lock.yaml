@@ -537,6 +537,46 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
 
+  packages/shared-ui:
+    dependencies:
+      '@base-ui/react':
+        specifier: ^1.8.0
+        version: 1.8.0(@types/react@19.2.18)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      cn:
+        specifier: ^0.2.5
+        version: 0.2.5
+      lucide-react:
+        specifier: ^1.41.0
+        version: 1.41.0(react@19.1.0)
+      next-themes:
+        specifier: ^0.4.6
+        version: 0.4.6(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      react-dom:
+        specifier: 19.1.0
+        version: 19.1.0(react@19.1.0)
+      sonner:
+        specifier: ^2.0.8
+        version: 2.0.8(@types/react@19.2.18)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+    devDependencies:
+      '@pravshi/shared-config':
+        specifier: workspace:*
+        version: link:../shared-config
+      '@types/react':
+        specifier: ^19
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.7(@types/react@19.2.18)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/work:
     dependencies:
       '@pravshi/contracts':

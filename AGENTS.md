@@ -68,8 +68,9 @@ then `src/*`. Shared tool configuration (the TypeScript, Prettier, ESLint and Vi
 `packages/imports` since Step 8 (package 12), the global search service lives in
 `packages/search` since Step 8 (package 13), the analytics services live in
 `packages/analytics` since Step 8 (package 14), the permission-aware AI services live in
-`packages/ai` since Step 8 (package 15), and the administration and invitation services live in
-`packages/admin` since Step 8 (package 16) — shared packages the founder decides; the root
+`packages/ai` since Step 8 (package 15), the administration and invitation services live in
+`packages/admin` since Step 8 (package 16), and the shared UI component library lives in
+`packages/shared-ui` since Step 8 (package 17) — shared packages the founder decides; the root
 `tsconfig.json`, `eslint.config.mjs`, `vitest.config.mts` and `.prettierrc` extend it. Ownership is
 unchanged; only the paths are.
 
@@ -86,7 +87,7 @@ unchanged; only the paths are.
   - `.github/` (CI), `scripts/guards/`, `scripts/ci/`, and the tests of backend, security and
     database behaviour.
 - **Antigravity** (under its frontend rule): the rest of `apps/web/src/app/` (pages, layouts, client
-  components, styles), `apps/web/src/components/`, `src/modules/`, frontend assets and frontend-specific
+  components, styles), `apps/web/src/components/`, `packages/shared-ui/`, `src/modules/`, frontend assets and frontend-specific
   tests.
 - **Shared — the founder decides:** `package.json`, `pnpm-lock.yaml`, `apps/web/src/middleware.ts`,
   `src/env.ts`, `src/lib/utils.ts`, root configuration files, shared contracts and validation

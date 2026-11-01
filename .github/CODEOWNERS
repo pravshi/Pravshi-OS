@@ -18,6 +18,7 @@
 /e2e/                   @pravshi/developers
 /apps/web/postcss.config.mjs @pravshi/developers
 /apps/web/components.json @pravshi/developers
+/packages/shared-ui/    @pravshi/developers
 
 # ── Backend / security ──────────────────────────────────────────────────────
 # Database, authorization, migrations, DB tests and the security guards.

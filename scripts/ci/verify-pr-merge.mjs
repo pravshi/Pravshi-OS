@@ -148,6 +148,8 @@ export const PROTECTED_PATHS = [
   'packages/ai/tsconfig.json',
   'packages/admin/package.json',
   'packages/admin/tsconfig.json',
+  'packages/shared-ui/package.json',
+  'packages/shared-ui/tsconfig.json',
   'apps/web/src/middleware.ts',
   'src/env.ts',
   // the agent rules (AGENTS.md §3: the founder decides)

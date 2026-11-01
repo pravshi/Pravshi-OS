@@ -54,6 +54,8 @@
       "@pravshi/ai/*": ["../../packages/ai/src/*"],
       "@pravshi/admin": ["../../packages/admin/src/index.ts"],
       "@pravshi/admin/*": ["../../packages/admin/src/*"],
+      "@pravshi/shared-ui": ["../../packages/shared-ui/src/index.ts"],
+      "@pravshi/shared-ui/*": ["../../packages/shared-ui/src/*"],
       "@/*": ["../../src/*"]
     }
   },
