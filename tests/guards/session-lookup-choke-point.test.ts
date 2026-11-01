@@ -42,6 +42,7 @@ describe('server-side session lookups', () => {
       'packages/integrations/src',
       'packages/automation/src',
       'packages/imports/src',
+      'packages/search/src',
     ]
       .flatMap((dir) => walk(dir))
       .filter(
