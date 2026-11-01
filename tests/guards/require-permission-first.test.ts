@@ -190,7 +190,13 @@ export function analyseServerActions(source: string, file?: string): string[] {
   return problems;
 }
 
-const sources = ['src', 'apps/web/src', 'apps/worker/src', 'packages/database/src']
+const sources = [
+  'src',
+  'apps/web/src',
+  'apps/worker/src',
+  'packages/database/src',
+  'packages/observability/src',
+]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));
 

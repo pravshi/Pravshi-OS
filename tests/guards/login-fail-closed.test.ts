@@ -14,7 +14,7 @@ const LOCKOUT = read('lib/auth/login-lockout.ts');
 const ROUTE = read('app/api/auth/login/route.ts');
 const SERVER = read('lib/auth/server.ts');
 const EVENTS = read('lib/auth/login-events.ts');
-const ADDRESS = read('lib/observability/client-address.ts');
+const ADDRESS = readFileSync('packages/observability/src/client-address.ts', 'utf8');
 const BETTER_AUTH_IP = read('lib/auth/better-auth-ip.ts');
 
 describe('A1 review: every client address the auth plane uses is validated', () => {
@@ -49,14 +49,23 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     // Every file under src/, however it spells the name: a route or helper that read one of
     // these directly would bypass the deployment's trusted-header choice.
     const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
-    const files = ['src', 'apps/web/src', 'apps/worker/src', 'packages/database/src']
+    const files = [
+      'src',
+      'apps/web/src',
+      'apps/worker/src',
+      'packages/database/src',
+      'packages/observability/src',
+    ]
       .flatMap((dir) =>
         (readdirSync(dir, { recursive: true }) as string[]).map(
           (f) => `${dir}/${f.replace(/\\/g, '/')}`,
         ),
       )
       .filter(
-        (f) => /\.(ts|tsx|js|mjs)$/.test(f) && f !== 'src/lib/observability/client-address.ts',
+        (f) =>
+          /\.(ts|tsx|js|mjs)$/.test(f) &&
+          f !== 'packages/observability/src/client-address.ts' &&
+          f !== 'src/lib/observability/client-address.ts',
       );
     expect(files.length).toBeGreaterThan(100);
     const offenders = files.filter((f) =>

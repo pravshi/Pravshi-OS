@@ -1,0 +1,31 @@
+{
+  "name": "@pravshi/observability",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client-address": {
+      "types": "./src/client-address.ts",
+      "default": "./src/client-address.ts"
+    },
+    "./process-context": {
+      "types": "./src/process-context.ts",
+      "default": "./src/process-context.ts"
+    },
+    "./redact": {
+      "types": "./src/redact.ts",
+      "default": "./src/redact.ts"
+    },
+    "./report": {
+      "types": "./src/report.ts",
+      "default": "./src/report.ts"
+    }
+  },
+  "dependencies": {
+    "@sentry/nextjs": "10.75.2"
+  }
+}

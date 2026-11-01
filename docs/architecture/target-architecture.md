@@ -350,7 +350,7 @@ approval.
 | ----- | ----------------- | ---------------------------------------------------------------------------------------------------------- |
 | 1     | `shared-config`   | TypeScript, ESLint, Prettier and Vitest base configuration                                                 |
 | 2     | `database`        | `src/lib/db`, `drizzle/`, `scripts/db/`, `scripts/migrate-ws.mjs` — every migration file byte-identical, SHA-256 checked before and after; runbook paths updated in the same PR |
-| 3     | `observability`   | `src/lib/observability`                                                                                    |
+| 3     | `observability`   | `src/lib/observability`: `client-address.ts`, `process-context.ts`, `redact.ts`, `report.ts` — extracted to `packages/observability` |
 | 4     | `security`        | `src/lib/{audit,auth,authz,identity}`                                                                      |
 | 5     | `platform-core`   | `src/lib/platform` (control plane)                                                                         |
 | 6     | `shared-services` | L3: `jobs` queue core, `notifications`, `events` (not in the blueprint sketch; an implemented responsibility, which the blueprint allows) |

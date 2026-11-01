@@ -120,6 +120,8 @@ export const PROTECTED_PATHS = [
   'packages/database/drizzle/',
   'packages/database/package.json',
   'packages/database/tsconfig.json',
+  'packages/observability/package.json',
+  'packages/observability/tsconfig.json',
   'apps/web/src/middleware.ts',
   'src/env.ts',
   // the agent rules (AGENTS.md §3: the founder decides)

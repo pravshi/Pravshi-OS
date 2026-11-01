@@ -130,7 +130,7 @@ export async function load(url, context, nextLoad) {
       'src/lib/workflows/engine.ts',
       'src/lib/workflows/events.ts',
       'src/lib/workflows/triggers.ts',
-      'src/lib/observability/report.ts',
+      'packages/observability/src/report.ts',
     ]) {
       expect(
         loaded.some((u) => u.endsWith(file)),

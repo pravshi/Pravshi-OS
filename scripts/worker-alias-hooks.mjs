@@ -24,6 +24,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const SRC_DIR = path.join(REPO_ROOT, 'src');
 const WORKER_DIR = path.join(REPO_ROOT, 'apps', 'worker', 'src');
 const DATABASE_DIR = path.join(REPO_ROOT, 'packages', 'database', 'src');
+const OBSERVABILITY_DIR = path.join(REPO_ROOT, 'packages', 'observability', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -54,6 +55,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(WORKER_DIR, relative.slice('worker/'.length));
     } else if (relative.startsWith('lib/db/')) {
       targetBase = path.join(DATABASE_DIR, relative.slice('lib/db/'.length));
+    } else if (relative.startsWith('lib/observability/')) {
+      targetBase = path.join(OBSERVABILITY_DIR, relative.slice('lib/observability/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -68,6 +71,17 @@ export async function resolve(specifier, context, nextResolve) {
     const sub =
       specifier === '@pravshi/database' ? 'index.ts' : specifier.slice('@pravshi/database/'.length);
     const url = probe(path.join(DATABASE_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1c. The `@pravshi/observability` package alias.
+  if (specifier === '@pravshi/observability' || specifier.startsWith('@pravshi/observability/')) {
+    const sub =
+      specifier === '@pravshi/observability'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/observability/'.length);
+    const url = probe(path.join(OBSERVABILITY_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

@@ -252,6 +252,12 @@ importers:
 
   packages/database: {}
 
+  packages/observability:
+    dependencies:
+      '@sentry/nextjs':
+        specifier: 10.75.2
+        version: 10.75.2
+
   packages/shared-config: {}
 
 packages:
