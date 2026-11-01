@@ -32,6 +32,7 @@
 /packages/platform-core/ @pravshi/maintainers
 /packages/shared-services/ @pravshi/maintainers
 /packages/contracts/    @pravshi/maintainers
+/packages/crm-core/     @pravshi/maintainers
 /src/lib/authz/         @pravshi/maintainers
 /src/env.ts             @pravshi/maintainers
 /tests/db/              @pravshi/maintainers

@@ -66,7 +66,7 @@ import type { Authorization } from '@/lib/authz/require-permission';
 import { AuthorizationError } from '@/lib/authz/errors';
 import { assignTask, createTask, updateTask } from '../work/tasks';
 import { createProject, linkProjectToDeal } from '../work/projects';
-import { updateDeal } from '../crm/deals';
+import { updateDeal } from '@/lib/crm/deals';
 import { enqueueJob } from '@/lib/jobs/queue';
 import {
   deliverToSubscription,

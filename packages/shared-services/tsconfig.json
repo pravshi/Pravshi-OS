@@ -26,6 +26,8 @@
       "@pravshi/shared-services/*": ["./src/*"],
       "@pravshi/contracts": ["../contracts/src/index.ts"],
       "@pravshi/contracts/*": ["../contracts/src/*"],
+      "@pravshi/crm-core": ["../crm-core/src/index.ts"],
+      "@pravshi/crm-core/*": ["../crm-core/src/*"],
       "@/*": ["../../apps/web/src/*", "../../src/*"]
     }
   },

@@ -68,7 +68,9 @@ const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const read = (file: string) => {
-  const p = file.replace(/^src\/lib\/(auth|authz|identity|audit)\//, 'packages/security/src/$1/');
+  const p = file
+    .replace(/^src\/lib\/(auth|authz|identity|audit)\//, 'packages/security/src/$1/')
+    .replace(/^src\/lib\/crm\//, 'packages/crm-core/src/');
   return readFileSync(existsSync(p) ? p : file, 'utf8');
 };
 

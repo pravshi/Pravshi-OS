@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { analyseRoute, analyseServerActions } from './require-permission-first.test';
 import {
@@ -39,7 +39,10 @@ const ROUTE_FILES = [
 const stripComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-const read = (file: string) => readFileSync(file, 'utf8');
+const read = (file: string) => {
+  const p = file.replace(/^src\/lib\/crm\//, 'packages/crm-core/src/');
+  return readFileSync(existsSync(p) ? p : file, 'utf8');
+};
 
 describe('activities service reaches Postgres only through withAuthorizedDb()', () => {
   it('imports withAuthorizedDb and nothing that bypasses it', () => {
