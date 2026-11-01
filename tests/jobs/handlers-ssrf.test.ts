@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/handler-registry', () => ({
+vi.mock('@/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 

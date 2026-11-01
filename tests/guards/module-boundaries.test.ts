@@ -325,6 +325,9 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/security/src/authz', logical: 'src/lib/authz' },
   { dir: 'packages/security/src/identity', logical: 'src/lib/identity' },
   { dir: 'packages/platform-core/src', logical: 'src/lib/platform' },
+  { dir: 'packages/shared-services/src/jobs', logical: 'src/lib/jobs' },
+  { dir: 'packages/shared-services/src/notifications', logical: 'src/lib/notifications' },
+  { dir: 'packages/shared-services/src/events', logical: 'src/lib/events' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -386,7 +389,39 @@ function resolveSpecifier(from: string, spec: string): string | null {
                     ]
                   : rest.startsWith('lib/platform/')
                     ? [join('packages', 'platform-core', 'src', rest.slice('lib/platform/'.length))]
-                    : [join('apps', 'web', 'src', rest), join('src', rest)];
+                    : rest.startsWith('lib/jobs/')
+                      ? [
+                          join(
+                            'packages',
+                            'shared-services',
+                            'src',
+                            'jobs',
+                            rest.slice('lib/jobs/'.length),
+                          ),
+                        ]
+                      : rest.startsWith('lib/notifications/')
+                        ? [
+                            join(
+                              'packages',
+                              'shared-services',
+                              'src',
+                              'notifications',
+                              rest.slice('lib/notifications/'.length),
+                            ),
+                          ]
+                        : rest === 'lib/events' || rest.startsWith('lib/events/')
+                          ? [
+                              rest === 'lib/events'
+                                ? join('packages', 'shared-services', 'src', 'events', 'index')
+                                : join(
+                                    'packages',
+                                    'shared-services',
+                                    'src',
+                                    'events',
+                                    rest.slice('lib/events/'.length),
+                                  ),
+                            ]
+                          : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -414,6 +449,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/platform-core/')) {
     found = existingFile(
       join('packages', 'platform-core', 'src', spec.slice('@pravshi/platform-core/'.length)),
+    );
+  } else if (spec === '@pravshi/shared-services') {
+    found = existingFile(join('packages', 'shared-services', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/shared-services/')) {
+    found = existingFile(
+      join('packages', 'shared-services', 'src', spec.slice('@pravshi/shared-services/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));

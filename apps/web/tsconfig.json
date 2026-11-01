@@ -14,6 +14,10 @@
       "@/lib/authz/*": ["../../packages/security/src/authz/*"],
       "@/lib/identity/*": ["../../packages/security/src/identity/*"],
       "@/lib/platform/*": ["../../packages/platform-core/src/*"],
+      "@/lib/jobs/*": ["../../packages/shared-services/src/jobs/*"],
+      "@/lib/notifications/*": ["../../packages/shared-services/src/notifications/*"],
+      "@/lib/events": ["../../packages/shared-services/src/events/index.ts"],
+      "@/lib/events/*": ["../../packages/shared-services/src/events/*"],
       "@pravshi/database": ["../../packages/database/src/index.ts"],
       "@pravshi/database/*": ["../../packages/database/src/*"],
       "@pravshi/observability": ["../../packages/observability/src/index.ts"],
@@ -22,6 +26,8 @@
       "@pravshi/security/*": ["../../packages/security/src/*"],
       "@pravshi/platform-core": ["../../packages/platform-core/src/index.ts"],
       "@pravshi/platform-core/*": ["../../packages/platform-core/src/*"],
+      "@pravshi/shared-services": ["../../packages/shared-services/src/index.ts"],
+      "@pravshi/shared-services/*": ["../../packages/shared-services/src/*"],
       "@/*": ["./src/*", "../../src/*"]
     }
   },

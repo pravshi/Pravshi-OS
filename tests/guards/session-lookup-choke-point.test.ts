@@ -35,6 +35,7 @@ describe('server-side session lookups', () => {
       'packages/observability/src',
       'packages/security/src',
       'packages/platform-core/src',
+      'packages/shared-services/src',
     ]
       .flatMap((dir) => walk(dir))
       .filter(

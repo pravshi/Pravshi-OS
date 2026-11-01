@@ -12,7 +12,14 @@ import { describe, expect, it } from 'vitest';
  * Static/source-level like the other guards — no database needed.
  */
 
-const root = (...p: string[]) => join(process.cwd(), ...p);
+const resolvePath = (p: string) => {
+  const candidate = p.replace(
+    /^src\/lib\/(auth|authz|identity|audit)\//,
+    'packages/security/src/$1/',
+  );
+  return existsSync(candidate) ? candidate : p;
+};
+const root = (...p: string[]) => join(process.cwd(), resolvePath(p.join('/')));
 const SERVICE = readFileSync(root('src/lib/auth/password-reset.ts'), 'utf8');
 const FORGOT_ROUTE = readFileSync(
   root('apps/web/src/app/api/auth/forgot-password/route.ts'),

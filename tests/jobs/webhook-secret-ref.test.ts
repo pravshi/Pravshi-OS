@@ -16,7 +16,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/handler-registry', () => ({
+vi.mock('@/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -72,14 +72,14 @@ vi.mock('../../src/lib/integrations/secrets', async (importOriginal) => ({
   decryptSecret: (ciphertext: string) => `plain-of-${ciphertext}`,
 }));
 
-import { classifyError } from '../../src/lib/jobs/retry';
+import { classifyError } from '@/lib/jobs/retry';
 import {
   handleWebhook,
   normalizeWebhookPayload,
   signWebhookBody,
 } from '../../apps/worker/src/handlers';
-import { WebhookPayloadSchema } from '../../src/lib/jobs/types';
-import type { JobExecutionContext } from '../../src/lib/jobs/handler-registry';
+import { WebhookPayloadSchema } from '@/lib/jobs/types';
+import type { JobExecutionContext } from '@/lib/jobs/handler-registry';
 
 const SUB_ID = '0b5c8f5e-7a8f-4c1e-9d3e-2f6a1b9c4d70';
 const DEPLOYMENT_SECRET = 'test-only-deployment-signing-value';

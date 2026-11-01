@@ -10,6 +10,10 @@
       "@/lib/authz/*": ["../security/src/authz/*"],
       "@/lib/identity/*": ["../security/src/identity/*"],
       "@/lib/platform/*": ["./src/*"],
+      "@/lib/jobs/*": ["../shared-services/src/jobs/*"],
+      "@/lib/notifications/*": ["../shared-services/src/notifications/*"],
+      "@/lib/events": ["../shared-services/src/events/index.ts"],
+      "@/lib/events/*": ["../shared-services/src/events/*"],
       "@pravshi/database": ["../database/src/index.ts"],
       "@pravshi/database/*": ["../database/src/*"],
       "@pravshi/observability": ["../observability/src/index.ts"],
@@ -18,6 +22,8 @@
       "@pravshi/security/*": ["../security/src/*"],
       "@pravshi/platform-core": ["./src/index.ts"],
       "@pravshi/platform-core/*": ["./src/*"],
+      "@pravshi/shared-services": ["../shared-services/src/index.ts"],
+      "@pravshi/shared-services/*": ["../shared-services/src/*"],
       "@/*": ["../../apps/web/src/*", "../../src/*"]
     }
   },

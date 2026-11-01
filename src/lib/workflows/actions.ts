@@ -67,13 +67,13 @@ import { AuthorizationError } from '@/lib/authz/errors';
 import { assignTask, createTask, updateTask } from '../work/tasks';
 import { createProject, linkProjectToDeal } from '../work/projects';
 import { updateDeal } from '../crm/deals';
-import { enqueueJob } from '../jobs/queue';
+import { enqueueJob } from '@/lib/jobs/queue';
 import {
   deliverToSubscription,
   getSubscriptionTarget,
   WORKFLOW_ACTION_EVENT_KEY,
 } from '../integrations/fanout';
-import { NOTIFICATION_EVENT_TYPES } from '../notifications/types';
+import { NOTIFICATION_EVENT_TYPES } from '@/lib/notifications/types';
 import {
   AssignTaskParamsSchema,
   CreateProjectParamsSchema,

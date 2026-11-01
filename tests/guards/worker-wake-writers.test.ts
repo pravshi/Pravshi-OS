@@ -23,11 +23,15 @@ function body(src: string, signature: string): string {
 
 const WRITERS: Array<{ file: string; fn: string; what: string }> = [
   {
-    file: 'src/lib/jobs/queue.ts',
+    file: 'packages/shared-services/src/jobs/queue.ts',
     fn: 'export async function enqueueJob(',
     what: 'every enqueued job',
   },
-  { file: 'src/lib/jobs/queue.ts', fn: 'export async function retryJob(', what: 'a manual retry' },
+  {
+    file: 'packages/shared-services/src/jobs/queue.ts',
+    fn: 'export async function retryJob(',
+    what: 'a manual retry',
+  },
   {
     file: 'src/lib/work/reminders.ts',
     fn: 'export async function createReminder(',

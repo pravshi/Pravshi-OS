@@ -45,6 +45,7 @@ const SOURCE_ROOTS = [
   'packages/observability/src',
   'packages/security/src',
   'packages/platform-core/src',
+  'packages/shared-services/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
@@ -100,7 +101,12 @@ describe('domain events are wired in every emitting process', () => {
       if (importsComposition.test(source)) importers.push(file);
       // events/index.ts defines the register functions; every other file may only use them via
       // the composition root.
-      if (file !== 'src/lib/events/index.ts' && registers.test(source)) registrars.push(file);
+      if (
+        file !== 'src/lib/events/index.ts' &&
+        file !== 'packages/shared-services/src/events/index.ts' &&
+        registers.test(source)
+      )
+        registrars.push(file);
     }
     expect(importers, 'only the entry points may load the composition root').toEqual([
       'apps/web/src/instrumentation.ts',

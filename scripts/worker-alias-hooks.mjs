@@ -27,6 +27,7 @@ const DATABASE_DIR = path.join(REPO_ROOT, 'packages', 'database', 'src');
 const OBSERVABILITY_DIR = path.join(REPO_ROOT, 'packages', 'observability', 'src');
 const SECURITY_DIR = path.join(REPO_ROOT, 'packages', 'security', 'src');
 const PLATFORM_CORE_DIR = path.join(REPO_ROOT, 'packages', 'platform-core', 'src');
+const SHARED_SERVICES_DIR = path.join(REPO_ROOT, 'packages', 'shared-services', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -69,6 +70,19 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(SECURITY_DIR, 'identity', relative.slice('lib/identity/'.length));
     } else if (relative.startsWith('lib/platform/')) {
       targetBase = path.join(PLATFORM_CORE_DIR, relative.slice('lib/platform/'.length));
+    } else if (relative.startsWith('lib/jobs/')) {
+      targetBase = path.join(SHARED_SERVICES_DIR, 'jobs', relative.slice('lib/jobs/'.length));
+    } else if (relative.startsWith('lib/notifications/')) {
+      targetBase = path.join(
+        SHARED_SERVICES_DIR,
+        'notifications',
+        relative.slice('lib/notifications/'.length),
+      );
+    } else if (relative === 'lib/events' || relative.startsWith('lib/events/')) {
+      targetBase =
+        relative === 'lib/events'
+          ? path.join(SHARED_SERVICES_DIR, 'events', 'index')
+          : path.join(SHARED_SERVICES_DIR, 'events', relative.slice('lib/events/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -114,6 +128,20 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/platform-core/'.length);
     const url = probe(path.join(PLATFORM_CORE_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1f. The `@pravshi/shared-services` package alias.
+  if (
+    specifier === '@pravshi/shared-services' ||
+    specifier.startsWith('@pravshi/shared-services/')
+  ) {
+    const sub =
+      specifier === '@pravshi/shared-services'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/shared-services/'.length);
+    const url = probe(path.join(SHARED_SERVICES_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

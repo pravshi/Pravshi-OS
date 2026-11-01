@@ -3,11 +3,11 @@ import { TaskPrioritySchema, TaskStatusSchema } from '../work/schema';
 // Phase 6 §3.7: cron/timezone validation for ScheduledTriggerConfigSchema.
 // jobs/cron.ts is a pure module (no imports), so this cannot create an
 // import cycle with the workflow engine graph.
-import { CRON_REGEX, isValidCron, isValidTimezone } from '../jobs/cron';
+import { CRON_REGEX, isValidCron, isValidTimezone } from '@/lib/jobs/cron';
 // Phase 8: NOTIFICATION_EVENT_TYPES for the send_notification action params.
 // notifications/types.ts imports only zod, so this cannot create an import
 // cycle with the workflow engine graph.
-import { NOTIFICATION_EVENT_TYPES } from '../notifications/types';
+import { NOTIFICATION_EVENT_TYPES } from '@/lib/notifications/types';
 
 /**
  * Workflow definition input validation (Phase 5). Every untrusted value — REST

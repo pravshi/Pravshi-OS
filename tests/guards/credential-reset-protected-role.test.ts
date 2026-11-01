@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -35,7 +35,15 @@ const DEFINER = (() => {
   const start = sql.indexOf('create function authz.admin_issue_credential_reset(');
   return sql.slice(start, sql.indexOf('$$;', start));
 })();
-const AUTH_LAYER = readFileSync(join(process.cwd(), 'src/lib/auth/admin-credentials.ts'), 'utf8');
+const AUTH_LAYER = readFileSync(
+  join(
+    process.cwd(),
+    existsSync('packages/security/src/auth/admin-credentials.ts')
+      ? 'packages/security/src/auth/admin-credentials.ts'
+      : 'src/lib/auth/admin-credentials.ts',
+  ),
+  'utf8',
+);
 
 describe('0030: person_holds_protected_role is an app-callable definer function', () => {
   it('is SECURITY DEFINER with a pinned search_path', () => {

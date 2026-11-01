@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../src/lib/jobs/handler-registry', () => ({
+vi.mock('@/lib/jobs/handler-registry', () => ({
   registerHandler: vi.fn(),
 }));
 
@@ -30,8 +30,8 @@ import {
   type ResendSendOutcome,
 } from '../../src/lib/integrations/providers/email/send';
 import { sendEmailViaProvider, type EmailProviderInput } from '../../apps/worker/src/handlers';
-import { classifyError } from '../../src/lib/jobs/retry';
-import type { Job } from '../../src/lib/jobs/types';
+import { classifyError } from '@/lib/jobs/retry';
+import type { Job } from '@/lib/jobs/types';
 
 const SENTINEL_KEY = 're_SENTINEL_SECRET_KEY';
 const REQUEST: EmailSendRequest = {

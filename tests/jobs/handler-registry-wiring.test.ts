@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -59,11 +59,14 @@ describe('worker handler wiring (queue core registry + apps/worker/src)', () => 
   });
 
   it('the queue core never imports the worker (the registry is the only seam)', () => {
-    // Every file in src/lib/jobs, not a hand-picked list: a new queue-core file is covered too.
-    const files = readdirSync('src/lib/jobs').filter((f) => f.endsWith('.ts'));
+    // Every file in packages/shared-services/src/jobs (or src/lib/jobs), not a hand-picked list: a new queue-core file is covered too.
+    const dir = existsSync('packages/shared-services/src/jobs')
+      ? 'packages/shared-services/src/jobs'
+      : 'src/lib/jobs';
+    const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
     expect(files.length).toBeGreaterThanOrEqual(9);
     for (const file of files) {
-      const source = readFileSync(`src/lib/jobs/${file}`, 'utf8');
+      const source = readFileSync(`${dir}/${file}`, 'utf8');
       expect(source, `${file} imports the worker`).not.toMatch(
         /(from\s+|import\s*\(\s*)'(@\/worker|(\.\.\/)+worker|(\.\.\/)+src\/worker)/,
       );

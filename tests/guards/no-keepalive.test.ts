@@ -16,6 +16,8 @@ const JOB_HEARTBEAT_ALLOWLIST = new Set([
   'apps/web/src/app/api/jobs/store.ts',
   'src/lib/jobs/queue.ts',
   'src/lib/jobs/types.ts',
+  'packages/shared-services/src/jobs/queue.ts',
+  'packages/shared-services/src/jobs/types.ts',
   'apps/worker/src/handlers.ts',
   'apps/worker/src/worker.ts',
 ]);
@@ -33,7 +35,7 @@ describe('nothing defeats Neon autosuspend', () => {
     const hits = (() => {
       try {
         return execSync(
-          `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts packages/database/src packages/observability/src packages/security/src packages/platform-core/src`,
+          `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src`,
           { encoding: 'utf8' },
         );
       } catch {
@@ -74,7 +76,9 @@ describe('nothing defeats Neon autosuspend', () => {
       'node:http',
     ],
     // The wake-token constant is on that path too (imported by wake-server): no imports at all.
-    'src/lib/jobs/wake-token.ts': [],
+    [existsSync('packages/shared-services/src/jobs/wake-token.ts')
+      ? 'packages/shared-services/src/jobs/wake-token.ts'
+      : 'src/lib/jobs/wake-token.ts']: [],
   };
   /** Every module specifier in `code`: static, side-effect, dynamic, re-export and require. */
   const specifiersOf = (code: string): string[] => {

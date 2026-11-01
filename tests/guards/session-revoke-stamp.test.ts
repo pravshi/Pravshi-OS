@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -14,7 +14,15 @@ const MIGRATION_23 = readFileSync(
   join(process.cwd(), 'packages/database/drizzle/0023_stamp_sessions_revoked.sql'),
   'utf8',
 );
-const SESSION = readFileSync(join(process.cwd(), 'src/lib/auth/session.ts'), 'utf8');
+const SESSION = readFileSync(
+  join(
+    process.cwd(),
+    existsSync('packages/security/src/auth/session.ts')
+      ? 'packages/security/src/auth/session.ts'
+      : 'src/lib/auth/session.ts',
+  ),
+  'utf8',
+);
 
 describe('session revocation stamps sessions_revoked_at', () => {
   it('0023: authz.stamp_sessions_revoked is SECURITY DEFINER with a pinned search_path', () => {
