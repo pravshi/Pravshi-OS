@@ -35,6 +35,7 @@ const INTEGRATIONS_DIR = path.join(REPO_ROOT, 'packages', 'integrations', 'src')
 const AUTOMATION_DIR = path.join(REPO_ROOT, 'packages', 'automation', 'src');
 const IMPORTS_DIR = path.join(REPO_ROOT, 'packages', 'imports', 'src');
 const SEARCH_DIR = path.join(REPO_ROOT, 'packages', 'search', 'src');
+const ANALYTICS_DIR = path.join(REPO_ROOT, 'packages', 'analytics', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -102,6 +103,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(IMPORTS_DIR, relative.slice('lib/import/'.length));
     } else if (relative.startsWith('lib/search/')) {
       targetBase = path.join(SEARCH_DIR, relative.slice('lib/search/'.length));
+    } else if (relative.startsWith('lib/analytics/')) {
+      targetBase = path.join(ANALYTICS_DIR, relative.slice('lib/analytics/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -230,6 +233,17 @@ export async function resolve(specifier, context, nextResolve) {
     const sub =
       specifier === '@pravshi/search' ? 'index.ts' : specifier.slice('@pravshi/search/'.length);
     const url = probe(path.join(SEARCH_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1n. The `@pravshi/analytics` package alias.
+  if (specifier === '@pravshi/analytics' || specifier.startsWith('@pravshi/analytics/')) {
+    const sub =
+      specifier === '@pravshi/analytics'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/analytics/'.length);
+    const url = probe(path.join(ANALYTICS_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

@@ -142,6 +142,8 @@ export const PROTECTED_PATHS = [
   'packages/imports/tsconfig.json',
   'packages/search/package.json',
   'packages/search/tsconfig.json',
+  'packages/analytics/package.json',
+  'packages/analytics/tsconfig.json',
   'apps/web/src/middleware.ts',
   'src/env.ts',
   // the agent rules (AGENTS.md §3: the founder decides)

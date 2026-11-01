@@ -336,6 +336,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/automation/src', logical: 'src/lib/workflows' },
   { dir: 'packages/imports/src', logical: 'src/lib/import' },
   { dir: 'packages/search/src', logical: 'src/lib/search' },
+  { dir: 'packages/analytics/src', logical: 'src/lib/analytics' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -478,7 +479,16 @@ function resolveSpecifier(from: string, spec: string): string | null {
                                               rest.slice('lib/search/'.length),
                                             ),
                                           ]
-                                        : [join('apps', 'web', 'src', rest), join('src', rest)];
+                                        : rest.startsWith('lib/analytics/')
+                                          ? [
+                                              join(
+                                                'packages',
+                                                'analytics',
+                                                'src',
+                                                rest.slice('lib/analytics/'.length),
+                                              ),
+                                            ]
+                                          : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -551,6 +561,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(join('packages', 'search', 'src', 'index'));
   } else if (spec.startsWith('@pravshi/search/')) {
     found = existingFile(join('packages', 'search', 'src', spec.slice('@pravshi/search/'.length)));
+  } else if (spec === '@pravshi/analytics') {
+    found = existingFile(join('packages', 'analytics', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/analytics/')) {
+    found = existingFile(
+      join('packages', 'analytics', 'src', spec.slice('@pravshi/analytics/'.length)),
+    );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph
