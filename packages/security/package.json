@@ -30,7 +30,7 @@
     "@pravshi/observability": "workspace:*",
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.2",
-    "resend": "^6.30.0",
+    "resend": "^6.35.0",
     "zod": "^4.6.6"
   }
 }
