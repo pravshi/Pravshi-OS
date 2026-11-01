@@ -56,6 +56,7 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   jobs: 'L3',
   notifications: 'L3',
   events: 'L3', // the domain-event ports (Step 6): what crm, work and integrations emit through
+  contracts: 'L3', // shared public request/response contracts (Step 8, package 7)
   // L4 tenant domain modules
   crm: 'L4',
   work: 'L4',
@@ -328,6 +329,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/shared-services/src/jobs', logical: 'src/lib/jobs' },
   { dir: 'packages/shared-services/src/notifications', logical: 'src/lib/notifications' },
   { dir: 'packages/shared-services/src/events', logical: 'src/lib/events' },
+  { dir: 'packages/contracts/src', logical: 'src/lib/contracts' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -421,7 +423,16 @@ function resolveSpecifier(from: string, spec: string): string | null {
                                     rest.slice('lib/events/'.length),
                                   ),
                             ]
-                          : [join('apps', 'web', 'src', rest), join('src', rest)];
+                          : rest.startsWith('lib/contracts/')
+                            ? [
+                                join(
+                                  'packages',
+                                  'contracts',
+                                  'src',
+                                  rest.slice('lib/contracts/'.length),
+                                ),
+                              ]
+                            : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -455,6 +466,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/shared-services/')) {
     found = existingFile(
       join('packages', 'shared-services', 'src', spec.slice('@pravshi/shared-services/'.length)),
+    );
+  } else if (spec === '@pravshi/contracts') {
+    found = existingFile(join('packages', 'contracts', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/contracts/')) {
+    found = existingFile(
+      join('packages', 'contracts', 'src', spec.slice('@pravshi/contracts/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));

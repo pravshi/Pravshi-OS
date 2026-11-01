@@ -19,6 +19,7 @@ export default createEslintConfig({
     'packages/security/src/**/*.{ts,tsx}',
     'packages/platform-core/src/**/*.{ts,tsx}',
     'packages/shared-services/src/**/*.{ts,tsx}',
+    'packages/contracts/src/**/*.{ts,tsx}',
   ],
   envRuleIgnores: ['src/env.ts'],
 });

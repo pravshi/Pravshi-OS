@@ -28,6 +28,7 @@ const OBSERVABILITY_DIR = path.join(REPO_ROOT, 'packages', 'observability', 'src
 const SECURITY_DIR = path.join(REPO_ROOT, 'packages', 'security', 'src');
 const PLATFORM_CORE_DIR = path.join(REPO_ROOT, 'packages', 'platform-core', 'src');
 const SHARED_SERVICES_DIR = path.join(REPO_ROOT, 'packages', 'shared-services', 'src');
+const CONTRACTS_DIR = path.join(REPO_ROOT, 'packages', 'contracts', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -142,6 +143,17 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/shared-services/'.length);
     const url = probe(path.join(SHARED_SERVICES_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1g. The `@pravshi/contracts` package alias.
+  if (specifier === '@pravshi/contracts' || specifier.startsWith('@pravshi/contracts/')) {
+    const sub =
+      specifier === '@pravshi/contracts'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/contracts/'.length);
+    const url = probe(path.join(CONTRACTS_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

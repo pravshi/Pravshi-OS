@@ -24,6 +24,8 @@
       "@pravshi/platform-core/*": ["../../packages/platform-core/src/*"],
       "@pravshi/shared-services": ["../../packages/shared-services/src/index.ts"],
       "@pravshi/shared-services/*": ["../../packages/shared-services/src/*"],
+      "@pravshi/contracts": ["../../packages/contracts/src/index.ts"],
+      "@pravshi/contracts/*": ["../../packages/contracts/src/*"],
       "@/*": ["../../src/*"]
     }
   },
