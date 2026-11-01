@@ -24,6 +24,7 @@ export default createEslintConfig({
     'packages/work/src/**/*.{ts,tsx}',
     'packages/integrations/src/**/*.{ts,tsx}',
     'packages/automation/src/**/*.{ts,tsx}',
+    'packages/imports/src/**/*.{ts,tsx}',
   ],
   envRuleIgnores: ['src/env.ts'],
 });

@@ -22,6 +22,7 @@
       "@/lib/work/*": ["../../packages/work/src/*"],
       "@/lib/integrations/*": ["../../packages/integrations/src/*"],
       "@/lib/workflows/*": ["../../packages/automation/src/*"],
+      "@/lib/import/*": ["../../packages/imports/src/*"],
       "@pravshi/database": ["../../packages/database/src/index.ts"],
       "@pravshi/database/*": ["../../packages/database/src/*"],
       "@pravshi/observability": ["../../packages/observability/src/index.ts"],
@@ -42,6 +43,8 @@
       "@pravshi/integrations/*": ["../../packages/integrations/src/*"],
       "@pravshi/automation": ["../../packages/automation/src/index.ts"],
       "@pravshi/automation/*": ["../../packages/automation/src/*"],
+      "@pravshi/imports": ["../../packages/imports/src/index.ts"],
+      "@pravshi/imports/*": ["../../packages/imports/src/*"],
       "@/*": ["./src/*", "../../src/*"]
     }
   },
