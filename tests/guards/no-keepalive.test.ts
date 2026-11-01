@@ -35,7 +35,7 @@ describe('nothing defeats Neon autosuspend', () => {
     const hits = (() => {
       try {
         return execSync(
-          `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src`,
+          `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src`,
           { encoding: 'utf8' },
         );
       } catch {

@@ -39,6 +39,7 @@
 /packages/imports/      @pravshi/maintainers
 /packages/search/       @pravshi/maintainers
 /packages/analytics/    @pravshi/maintainers
+/packages/ai/           @pravshi/maintainers
 /src/lib/authz/         @pravshi/maintainers
 /src/env.ts             @pravshi/maintainers
 /tests/db/              @pravshi/maintainers

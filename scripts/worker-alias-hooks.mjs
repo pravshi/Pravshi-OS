@@ -36,6 +36,7 @@ const AUTOMATION_DIR = path.join(REPO_ROOT, 'packages', 'automation', 'src');
 const IMPORTS_DIR = path.join(REPO_ROOT, 'packages', 'imports', 'src');
 const SEARCH_DIR = path.join(REPO_ROOT, 'packages', 'search', 'src');
 const ANALYTICS_DIR = path.join(REPO_ROOT, 'packages', 'analytics', 'src');
+const AI_DIR = path.join(REPO_ROOT, 'packages', 'ai', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -105,6 +106,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(SEARCH_DIR, relative.slice('lib/search/'.length));
     } else if (relative.startsWith('lib/analytics/')) {
       targetBase = path.join(ANALYTICS_DIR, relative.slice('lib/analytics/'.length));
+    } else if (relative.startsWith('lib/ai/')) {
+      targetBase = path.join(AI_DIR, relative.slice('lib/ai/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -244,6 +247,14 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/analytics/'.length);
     const url = probe(path.join(ANALYTICS_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1o. The `@pravshi/ai` package alias.
+  if (specifier === '@pravshi/ai' || specifier.startsWith('@pravshi/ai/')) {
+    const sub = specifier === '@pravshi/ai' ? 'index.ts' : specifier.slice('@pravshi/ai/'.length);
+    const url = probe(path.join(AI_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

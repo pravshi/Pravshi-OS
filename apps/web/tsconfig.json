@@ -25,6 +25,7 @@
       "@/lib/import/*": ["../../packages/imports/src/*"],
       "@/lib/search/*": ["../../packages/search/src/*"],
       "@/lib/analytics/*": ["../../packages/analytics/src/*"],
+      "@/lib/ai/*": ["../../packages/ai/src/*"],
       "@pravshi/database": ["../../packages/database/src/index.ts"],
       "@pravshi/database/*": ["../../packages/database/src/*"],
       "@pravshi/observability": ["../../packages/observability/src/index.ts"],
@@ -51,6 +52,8 @@
       "@pravshi/search/*": ["../../packages/search/src/*"],
       "@pravshi/analytics": ["../../packages/analytics/src/index.ts"],
       "@pravshi/analytics/*": ["../../packages/analytics/src/*"],
+      "@pravshi/ai": ["../../packages/ai/src/index.ts"],
+      "@pravshi/ai/*": ["../../packages/ai/src/*"],
       "@/*": ["./src/*", "../../src/*"]
     }
   },

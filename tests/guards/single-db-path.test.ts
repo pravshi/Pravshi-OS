@@ -14,14 +14,14 @@ const grep = (args: string) => {
 describe('there is exactly one path to Postgres', () => {
   it('nothing calls pool.connect() outside packages/database/src/pool.ts', () => {
     const hits = grep(
-      `-l "pool.connect(" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!packages/database/src/pool.ts"`,
+      `-l "pool.connect(" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!packages/database/src/pool.ts"`,
     );
     expect(hits, `Direct pool.connect() bypasses cold-start retry, in:\n${hits}`).toBe('');
   });
 
   it('nothing outside the db module imports the pool', () => {
     const hits = grep(
-      `-lE "from '(@/lib/db/pool|@pravshi/database/pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!packages/database/src/*" ":!apps/web/src/app/health/db/route.ts"`,
+      `-lE "from '(@/lib/db/pool|@pravshi/database/pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!packages/database/src/*" ":!apps/web/src/app/health/db/route.ts"`,
     );
     expect(hits, `Unexpected pool import — use withAuthorizedDb(), in:\n${hits}`).toBe('');
   });
@@ -32,7 +32,7 @@ describe('there is exactly one path to Postgres', () => {
     // for authentication and nothing else: business data still goes through
     // withAuthorizedDb(), where RLS meets it.
     const hits = grep(
-      `-lE "from '(@/lib/db/auth-client|@pravshi/database/auth-client)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!src/lib/auth/*" ":!packages/security/src/auth/*" ":!packages/database/src/*"`,
+      `-lE "from '(@/lib/db/auth-client|@pravshi/database/auth-client)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!src/lib/auth/*" ":!packages/security/src/auth/*" ":!packages/database/src/*"`,
     );
     expect(
       hits,
@@ -45,7 +45,7 @@ describe('there is exactly one path to Postgres', () => {
     // organization's jobs. Only the job runtime may reach it — never a route, a page or
     // feature code — and the web app does not even hold its credential (src/env.ts).
     const hits = grep(
-      `-lE "(db/worker-pool|database/worker-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!src/lib/jobs/*" ":!packages/shared-services/src/jobs/*" ":!apps/worker/src/*" ":!packages/database/src/*"`,
+      `-lE "(db/worker-pool|database/worker-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!src/lib/jobs/*" ":!packages/shared-services/src/jobs/*" ":!apps/worker/src/*" ":!packages/database/src/*"`,
     );
     expect(hits, `app_worker pool imported outside the worker plane, in:\n${hits}`).toBe('');
   });
@@ -54,7 +54,7 @@ describe('there is exactly one path to Postgres', () => {
     // packages/database/src/auth-schema.ts describes the credential tables. Only the auth module and
     // the auth client that binds it to the app_auth login may import it. Relative imports count.
     const hits = grep(
-      `-lE "(db/auth-schema|database/auth-schema|[.]/auth-schema)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!src/lib/auth/*" ":!packages/security/src/auth/*" ":!packages/database/src/auth-client.ts"`,
+      `-lE "(db/auth-schema|database/auth-schema|[.]/auth-schema)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!src/lib/auth/*" ":!packages/security/src/auth/*" ":!packages/database/src/auth-client.ts"`,
     );
     expect(
       hits,
@@ -64,7 +64,7 @@ describe('there is exactly one path to Postgres', () => {
 
   it('no feature code queries the credential tables by hand', () => {
     const hits = grep(
-      `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!src/lib/auth/*" ":!packages/security/src/auth/*"`,
+      `-lE "auth[.]auth_(users|sessions|accounts|verifications|two_factors|rate_limits)" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!src/lib/auth/*" ":!packages/security/src/auth/*"`,
     );
     expect(hits, `Direct auth-table access outside the auth layer, in:\n${hits}`).toBe('');
   });
@@ -73,7 +73,7 @@ describe('there is exactly one path to Postgres', () => {
 
   it('only the auth client (and the health check of its login) imports the app_auth pool', () => {
     const hits = grep(
-      `-lE "(db/auth-pool|database/auth-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!packages/database/src/auth-client.ts" ":!apps/web/src/app/health/db/route.ts"`,
+      `-lE "(db/auth-pool|database/auth-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!packages/database/src/auth-client.ts" ":!apps/web/src/app/health/db/route.ts"`,
     );
     expect(hits, `app_auth pool imported outside the auth client, in:\n${hits}`).toBe('');
   });
@@ -113,7 +113,7 @@ describe('there is exactly one path to Postgres', () => {
     // platform-pool.ts connects as app_platform: the login that provisions, suspends and
     // reactivates organizations. Only the platform module, behind its gate, may reach it.
     const hits = grep(
-      `-lE "(db/platform-pool|database/platform-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src ":!src/lib/platform/*" ":!packages/platform-core/src/*" ":!packages/database/src/platform-pool.ts"`,
+      `-lE "(db/platform-pool|database/platform-pool)'" -- src apps/web/src apps/worker/src packages/database/src packages/observability/src packages/security/src packages/platform-core/src packages/shared-services/src packages/crm-core/src packages/work/src packages/integrations/src packages/automation/src packages/imports/src packages/search/src packages/analytics/src packages/ai/src ":!src/lib/platform/*" ":!packages/platform-core/src/*" ":!packages/database/src/platform-pool.ts"`,
     );
     expect(hits, `app_platform pool imported outside src/lib/platform, in:\n${hits}`).toBe('');
   });

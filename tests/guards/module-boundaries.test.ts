@@ -337,6 +337,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/imports/src', logical: 'src/lib/import' },
   { dir: 'packages/search/src', logical: 'src/lib/search' },
   { dir: 'packages/analytics/src', logical: 'src/lib/analytics' },
+  { dir: 'packages/ai/src', logical: 'src/lib/ai' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -488,7 +489,16 @@ function resolveSpecifier(from: string, spec: string): string | null {
                                                 rest.slice('lib/analytics/'.length),
                                               ),
                                             ]
-                                          : [join('apps', 'web', 'src', rest), join('src', rest)];
+                                          : rest.startsWith('lib/ai/')
+                                            ? [
+                                                join(
+                                                  'packages',
+                                                  'ai',
+                                                  'src',
+                                                  rest.slice('lib/ai/'.length),
+                                                ),
+                                              ]
+                                            : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -567,6 +577,10 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(
       join('packages', 'analytics', 'src', spec.slice('@pravshi/analytics/'.length)),
     );
+  } else if (spec === '@pravshi/ai') {
+    found = existingFile(join('packages', 'ai', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/ai/')) {
+    found = existingFile(join('packages', 'ai', 'src', spec.slice('@pravshi/ai/'.length)));
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph

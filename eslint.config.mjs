@@ -27,6 +27,7 @@ export default createEslintConfig({
     'packages/imports/src/**/*.{ts,tsx}',
     'packages/search/src/**/*.{ts,tsx}',
     'packages/analytics/src/**/*.{ts,tsx}',
+    'packages/ai/src/**/*.{ts,tsx}',
   ],
   envRuleIgnores: ['src/env.ts'],
 });
