@@ -67,7 +67,7 @@ vi.mock('@/lib/db/worker-pool', () => ({
   withWorkerContext: (_ctx: unknown, _item: unknown, fn: (tx: unknown) => unknown) =>
     fn({ execute: resolveDelivery }),
 }));
-vi.mock('../../src/lib/integrations/secrets', async (importOriginal) => ({
+vi.mock('@/lib/integrations/secrets', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   decryptSecret: (ciphertext: string) => `plain-of-${ciphertext}`,
 }));

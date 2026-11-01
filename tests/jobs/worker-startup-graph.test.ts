@@ -133,9 +133,15 @@ export async function load(url, context, nextLoad) {
         ? 'packages/security/src/authz/require-permission.ts'
         : 'src/lib/authz/require-permission.ts',
       // The modules that used to import Sentry directly, and what they report through now.
-      'src/lib/workflows/engine.ts',
-      'src/lib/workflows/events.ts',
-      'src/lib/workflows/triggers.ts',
+      existsSync('packages/automation/src/engine.ts')
+        ? 'packages/automation/src/engine.ts'
+        : 'src/lib/workflows/engine.ts',
+      existsSync('packages/automation/src/events.ts')
+        ? 'packages/automation/src/events.ts'
+        : 'src/lib/workflows/events.ts',
+      existsSync('packages/automation/src/triggers.ts')
+        ? 'packages/automation/src/triggers.ts'
+        : 'src/lib/workflows/triggers.ts',
       'packages/observability/src/report.ts',
     ]) {
       expect(
