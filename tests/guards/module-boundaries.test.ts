@@ -332,6 +332,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/contracts/src', logical: 'src/lib/contracts' },
   { dir: 'packages/crm-core/src', logical: 'src/lib/crm' },
   { dir: 'packages/work/src', logical: 'src/lib/work' },
+  { dir: 'packages/integrations/src', logical: 'src/lib/integrations' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -438,7 +439,16 @@ function resolveSpecifier(from: string, spec: string): string | null {
                               ? [join('packages', 'crm-core', 'src', rest.slice('lib/crm/'.length))]
                               : rest.startsWith('lib/work/')
                                 ? [join('packages', 'work', 'src', rest.slice('lib/work/'.length))]
-                                : [join('apps', 'web', 'src', rest), join('src', rest)];
+                                : rest.startsWith('lib/integrations/')
+                                  ? [
+                                      join(
+                                        'packages',
+                                        'integrations',
+                                        'src',
+                                        rest.slice('lib/integrations/'.length),
+                                      ),
+                                    ]
+                                  : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -489,6 +499,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(join('packages', 'work', 'src', 'index'));
   } else if (spec.startsWith('@pravshi/work/')) {
     found = existingFile(join('packages', 'work', 'src', spec.slice('@pravshi/work/'.length)));
+  } else if (spec === '@pravshi/integrations') {
+    found = existingFile(join('packages', 'integrations', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/integrations/')) {
+    found = existingFile(
+      join('packages', 'integrations', 'src', spec.slice('@pravshi/integrations/'.length)),
+    );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph

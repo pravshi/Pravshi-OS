@@ -28,7 +28,7 @@ import {
   type EmailSendRequest,
   type ResendSendFn,
   type ResendSendOutcome,
-} from '../../src/lib/integrations/providers/email/send';
+} from '@/lib/integrations/providers/email/send';
 import { sendEmailViaProvider, type EmailProviderInput } from '../../apps/worker/src/handlers';
 import { classifyError } from '@/lib/jobs/retry';
 import type { Job } from '@/lib/jobs/types';

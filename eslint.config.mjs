@@ -22,6 +22,7 @@ export default createEslintConfig({
     'packages/contracts/src/**/*.{ts,tsx}',
     'packages/crm-core/src/**/*.{ts,tsx}',
     'packages/work/src/**/*.{ts,tsx}',
+    'packages/integrations/src/**/*.{ts,tsx}',
   ],
   envRuleIgnores: ['src/env.ts'],
 });

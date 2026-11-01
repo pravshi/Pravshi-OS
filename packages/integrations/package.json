@@ -1,0 +1,22 @@
+{
+  "name": "@pravshi/integrations",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./providers": "./src/providers/index.ts",
+    "./providers/*": "./src/providers/*.ts",
+    "./providers/email/*": "./src/providers/email/*.ts"
+  },
+  "dependencies": {
+    "@pravshi/contracts": "workspace:*",
+    "@pravshi/database": "workspace:*",
+    "@pravshi/security": "workspace:*",
+    "@pravshi/shared-services": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "resend": "^6.30.0",
+    "zod": "^4.6.6"
+  }
+}

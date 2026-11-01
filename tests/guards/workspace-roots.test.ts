@@ -24,9 +24,9 @@ describe('workspace source roots', () => {
     expect(existsSync('apps/worker/src')).toBe(true);
   });
 
-  it('packages/ holds contracts, crm-core, database, observability, platform-core, security, shared-config, shared-services and work; contracts, crm-core, database, observability, platform-core, security, shared-services and work have a src folder', () => {
+  it('packages/ holds contracts, crm-core, database, integrations, observability, platform-core, security, shared-config, shared-services and work; contracts, crm-core, database, integrations, observability, platform-core, security, shared-services and work have a src folder', () => {
     // Step 8 extracts one package per pull request. A package with source code must extend the
-    // source roots every guard walks (see the header); shared-config has none, contracts, crm-core, database, observability, platform-core, security, shared-services and work have src.
+    // source roots every guard walks (see the header); shared-config has none, contracts, crm-core, database, integrations, observability, platform-core, security, shared-services and work have src.
     expect(
       dirs('packages')
         .filter((d) => d !== 'node_modules')
@@ -35,6 +35,7 @@ describe('workspace source roots', () => {
       'contracts',
       'crm-core',
       'database',
+      'integrations',
       'observability',
       'platform-core',
       'security',
@@ -45,6 +46,7 @@ describe('workspace source roots', () => {
     expect(existsSync('packages/contracts/src')).toBe(true);
     expect(existsSync('packages/crm-core/src')).toBe(true);
     expect(existsSync('packages/database/src')).toBe(true);
+    expect(existsSync('packages/integrations/src')).toBe(true);
     expect(existsSync('packages/observability/src')).toBe(true);
     expect(existsSync('packages/platform-core/src')).toBe(true);
     expect(existsSync('packages/security/src')).toBe(true);

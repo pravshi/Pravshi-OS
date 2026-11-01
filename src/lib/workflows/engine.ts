@@ -56,7 +56,7 @@ import { sql } from 'drizzle-orm';
 import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Authorization } from '@/lib/authz/require-permission';
 import { AuthorizationError } from '@/lib/authz/errors';
-import { emitIntegrationEvent } from '../integrations/fanout';
+import { emitIntegrationEvent } from '@/lib/integrations/fanout';
 import { getDeal } from '@/lib/crm/deals';
 import type { Deal } from '@/lib/crm/schema';
 import { getTask } from '@/lib/work/tasks';

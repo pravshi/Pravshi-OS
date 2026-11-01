@@ -31,6 +31,7 @@ const SHARED_SERVICES_DIR = path.join(REPO_ROOT, 'packages', 'shared-services', 
 const CONTRACTS_DIR = path.join(REPO_ROOT, 'packages', 'contracts', 'src');
 const CRM_CORE_DIR = path.join(REPO_ROOT, 'packages', 'crm-core', 'src');
 const WORK_DIR = path.join(REPO_ROOT, 'packages', 'work', 'src');
+const INTEGRATIONS_DIR = path.join(REPO_ROOT, 'packages', 'integrations', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -90,6 +91,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(CRM_CORE_DIR, relative.slice('lib/crm/'.length));
     } else if (relative.startsWith('lib/work/')) {
       targetBase = path.join(WORK_DIR, relative.slice('lib/work/'.length));
+    } else if (relative.startsWith('lib/integrations/')) {
+      targetBase = path.join(INTEGRATIONS_DIR, relative.slice('lib/integrations/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -178,6 +181,17 @@ export async function resolve(specifier, context, nextResolve) {
     const sub =
       specifier === '@pravshi/work' ? 'index.ts' : specifier.slice('@pravshi/work/'.length);
     const url = probe(path.join(WORK_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1j. The `@pravshi/integrations` package alias.
+  if (specifier === '@pravshi/integrations' || specifier.startsWith('@pravshi/integrations/')) {
+    const sub =
+      specifier === '@pravshi/integrations'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/integrations/'.length);
+    const url = probe(path.join(INTEGRATIONS_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

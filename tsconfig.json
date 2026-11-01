@@ -16,6 +16,7 @@
       "@/lib/events/*": ["./packages/shared-services/src/events/*"],
       "@/lib/crm/*": ["./packages/crm-core/src/*"],
       "@/lib/work/*": ["./packages/work/src/*"],
+      "@/lib/integrations/*": ["./packages/integrations/src/*"],
       "@pravshi/database": ["./packages/database/src/index.ts"],
       "@pravshi/database/*": ["./packages/database/src/*"],
       "@pravshi/observability": ["./packages/observability/src/index.ts"],
@@ -32,6 +33,8 @@
       "@pravshi/crm-core/*": ["./packages/crm-core/src/*"],
       "@pravshi/work": ["./packages/work/src/index.ts"],
       "@pravshi/work/*": ["./packages/work/src/*"],
+      "@pravshi/integrations": ["./packages/integrations/src/index.ts"],
+      "@pravshi/integrations/*": ["./packages/integrations/src/*"],
       "@/*": ["./apps/web/src/*", "./src/*"]
     }
   },

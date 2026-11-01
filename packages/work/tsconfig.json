@@ -32,6 +32,8 @@
       "@pravshi/crm-core/*": ["../crm-core/src/*"],
       "@pravshi/work": ["./src/index.ts"],
       "@pravshi/work/*": ["./src/*"],
+      "@pravshi/integrations": ["../integrations/src/index.ts"],
+      "@pravshi/integrations/*": ["../integrations/src/*"],
       "@/*": ["../../apps/web/src/*", "../../src/*"]
     }
   },

@@ -72,7 +72,7 @@ import {
   deliverToSubscription,
   getSubscriptionTarget,
   WORKFLOW_ACTION_EVENT_KEY,
-} from '../integrations/fanout';
+} from '@/lib/integrations/fanout';
 import { NOTIFICATION_EVENT_TYPES } from '@/lib/notifications/types';
 import {
   AssignTaskParamsSchema,

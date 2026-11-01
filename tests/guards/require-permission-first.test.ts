@@ -202,6 +202,7 @@ const sources = [
   'packages/contracts/src',
   'packages/crm-core/src',
   'packages/work/src',
+  'packages/integrations/src',
 ]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));

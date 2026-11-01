@@ -49,6 +49,7 @@ const SOURCE_ROOTS = [
   'packages/contracts/src',
   'packages/crm-core/src',
   'packages/work/src',
+  'packages/integrations/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
@@ -134,7 +135,9 @@ describe('domain events are wired in every emitting process', () => {
       existsSync('packages/work/src/tasks.ts')
         ? 'packages/work/src/tasks.ts'
         : 'src/lib/work/tasks.ts',
-      'src/lib/integrations/inbound.ts',
+      existsSync('packages/integrations/src/inbound.ts')
+        ? 'packages/integrations/src/inbound.ts'
+        : 'src/lib/integrations/inbound.ts',
     ]) {
       const source = code(read(file));
       expect(source, `${file} must emit through @/lib/events`).toMatch(/from '@\/lib\/events'/);

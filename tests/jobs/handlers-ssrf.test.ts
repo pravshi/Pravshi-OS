@@ -19,7 +19,7 @@ import {
   looksLikeIpv4Literal,
   parseIpv4Aton,
   parseIpv6Bytes,
-} from '../../src/lib/integrations/webhook-url-guard';
+} from '@/lib/integrations/webhook-url-guard';
 
 describe('SSRF guard — blocked URLs (static check, no DNS)', () => {
   const blocked: Array<[string, string]> = [
