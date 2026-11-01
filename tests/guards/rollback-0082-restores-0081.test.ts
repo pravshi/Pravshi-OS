@@ -10,7 +10,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * against a disposable database too: a rolled-back 0082 database matched a fresh 0081 database
  * on the privilege fingerprint.)
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0082 = read('drizzle', '0082_least_privilege_cleanup.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0082_least_privilege_cleanup.down.sql');
 

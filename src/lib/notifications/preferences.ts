@@ -13,7 +13,7 @@
  */
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { withAuthorizedDb } from '../db/authorized';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import {
   NOTIFICATION_CHANNELS,

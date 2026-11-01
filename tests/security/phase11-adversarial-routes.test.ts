@@ -132,8 +132,8 @@ describe('F-11-09: the audit-log export throttles per user before counting or st
 const ROOT = process.cwd();
 const RETIRED_WORKFLOW = '.github/workflows/test-project-scope.yml';
 const RETIRED_MIGRATIONS = [
-  'drizzle/0051_reports_view_permission.sql',
-  'drizzle/0040_invitation_role_lookup.sql',
+  'packages/database/drizzle/0051_reports_view_permission.sql',
+  'packages/database/drizzle/0040_invitation_role_lookup.sql',
 ];
 const RETIRED_NAMES = [
   'test-project-scope',
@@ -169,7 +169,7 @@ describe('F-11-11 / F-11-14: retired files are absent and unreferenced', () => {
     }
     // The journaled neighbours survive: exactly one 0040 (the pipeline
     // stage membership guard) and no 0051 at all.
-    const drizzleFiles = readdirSync(join(ROOT, 'drizzle'));
+    const drizzleFiles = readdirSync(join(ROOT, 'packages/database/drizzle'));
     expect(drizzleFiles.filter((f) => f.startsWith('0040_'))).toEqual([
       '0040_pipeline_stage_membership_guard.sql',
     ]);
@@ -179,7 +179,9 @@ describe('F-11-11 / F-11-14: retired files are absent and unreferenced', () => {
   });
 
   it('the migration journal never referenced the dormant files', () => {
-    const journal = JSON.parse(readFileSync(join(ROOT, 'drizzle/meta/_journal.json'), 'utf8')) as {
+    const journal = JSON.parse(
+      readFileSync(join(ROOT, 'packages/database/drizzle/meta/_journal.json'), 'utf8'),
+    ) as {
       entries: { tag: string }[];
     };
     const tags = journal.entries.map((e) => e.tag);
@@ -194,11 +196,12 @@ describe('F-11-11 / F-11-14: retired files are absent and unreferenced', () => {
     // M's phase doc may narrate the retirement without reviving it.)
     const surfaces = [
       ...walk(join(ROOT, '.github')),
-      ...walk(join(ROOT, 'drizzle')),
+      ...walk(join(ROOT, 'packages/database/drizzle')),
       ...walk(join(ROOT, 'scripts')),
       ...walk(join(ROOT, 'src')),
       ...walk(join(ROOT, 'apps/web/src')),
       ...walk(join(ROOT, 'apps/worker/src')),
+      ...walk(join(ROOT, 'packages/database/src')),
       join(ROOT, 'package.json'),
       join(ROOT, 'pnpm-workspace.yaml'),
     ];

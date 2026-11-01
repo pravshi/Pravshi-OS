@@ -318,6 +318,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'src', logical: 'src' },
   { dir: 'apps/web/src', logical: 'src' },
   { dir: 'apps/worker/src', logical: 'src/worker' },
+  { dir: 'packages/database/src', logical: 'src/lib/db' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -353,15 +354,23 @@ function existingFile(base: string): string | null {
 function resolveSpecifier(from: string, spec: string): string | null {
   let found: string | null = null;
   if (spec.startsWith('@/')) {
-    // tsconfig.json paths: @/worker/* -> apps/worker/src/*, @/* -> apps/web/src/*, then src/*.
+    // tsconfig.json paths: @/worker/* -> apps/worker/src/*, @/lib/db/* -> packages/database/src/*, @/* -> apps/web/src/*, then src/*.
     const rest = spec.slice(2);
     const candidates = rest.startsWith('worker/')
       ? [join('apps', 'worker', 'src', rest.slice('worker/'.length))]
-      : [join('apps', 'web', 'src', rest), join('src', rest)];
+      : rest.startsWith('lib/db/')
+        ? [join('packages', 'database', 'src', rest.slice('lib/db/'.length))]
+        : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
     }
+  } else if (spec === '@pravshi/database') {
+    found = existingFile(join('packages', 'database', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/database/')) {
+    found = existingFile(
+      join('packages', 'database', 'src', spec.slice('@pravshi/database/'.length)),
+    );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph
@@ -490,10 +499,12 @@ describe('module-boundary checker', () => {
     expect(logicalOf('apps/web/src/app/(app)/crm/page.tsx')).toBe('src/app/(app)/crm/page.tsx');
     expect(logicalOf('apps/web/src/middleware.ts')).toBe('src/middleware.ts');
     expect(logicalOf('apps/worker/src/runner.ts')).toBe('src/worker/runner.ts');
+    expect(logicalOf('packages/database/src/pool.ts')).toBe('src/lib/db/pool.ts');
     expect(logicalOf('apps/web/next.config.ts')).toBeNull(); // outside every source root
     expect(logicalOf('tests/guards/x.test.ts')).toBeNull();
     expect(moduleOf(logicalOf('apps/worker/src/runner.ts')!)).toBe('worker');
     expect(moduleOf(logicalOf('apps/web/src/instrumentation.ts')!)).toBe('instrumentation');
+    expect(moduleOf(logicalOf('packages/database/src/pool.ts')!)).toBe('db');
   });
 
   const edge = (from: string, toFile: string): FileImport => ({ from, toFile });

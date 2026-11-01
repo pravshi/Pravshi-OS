@@ -250,6 +250,8 @@ importers:
 
   apps/worker: {}
 
+  packages/database: {}
+
   packages/shared-config: {}
 
 packages:

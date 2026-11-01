@@ -13,7 +13,10 @@ import { describe, expect, it } from 'vitest';
  */
 
 const root = (...p: string[]) => join(process.cwd(), ...p);
-const MIGRATION = readFileSync(root('drizzle/0027_mfa_enforcement_lockout.sql'), 'utf8');
+const MIGRATION = readFileSync(
+  root('packages/database/drizzle/0027_mfa_enforcement_lockout.sql'),
+  'utf8',
+);
 const HELPER = readFileSync(root('src/lib/auth/mfa-enforcement.ts'), 'utf8');
 const LOGIN_ROUTE = readFileSync(root('apps/web/src/app/api/auth/login/route.ts'), 'utf8');
 const AUTH_SERVER = readFileSync(root('src/lib/auth/server.ts'), 'utf8');

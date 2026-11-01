@@ -69,7 +69,7 @@ describe('verifyAppUserLogin (the app_user pool proves its login)', () => {
 
   it('is wired into the pool', () => {
     expect(APP_ROLE).toBe('app_user');
-    const source = readFileSync('src/lib/db/pool.ts', 'utf8');
+    const source = readFileSync('packages/database/src/pool.ts', 'utf8');
     expect(source).toMatch(/verify: verifyAppUserLogin,/);
   });
 });

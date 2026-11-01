@@ -11,7 +11,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * may_manage_protected_roles and 0024's request_password_reset word for word, and removes
  * only what 0083 added. (Executed against disposable databases too: see the 0083 commit.)
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0008 = read('drizzle', '0008_roles_and_permissions.sql');
 const M0015 = read('drizzle', '0015_bootstrap.sql');
 const M0024 = read('drizzle', '0024_password_reset.sql');

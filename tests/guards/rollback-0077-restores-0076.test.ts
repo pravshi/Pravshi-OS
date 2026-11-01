@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
  * policy word for word — a rollback that recreated a different policy would be a
  * new migration nobody reviewed.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0037 = read('drizzle', '0037_sales_pipeline.sql');
 const M0077 = read('drizzle', '0077_deal_history_and_org_identity.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0077_deal_history_and_org_identity.down.sql');

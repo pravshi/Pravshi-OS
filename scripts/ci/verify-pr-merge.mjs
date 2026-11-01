@@ -117,6 +117,9 @@ export const PROTECTED_PATHS = [
   'apps/web/vercel.json',
   // migrations, roles and the shared security entry points the founder decides
   'drizzle/',
+  'packages/database/drizzle/',
+  'packages/database/package.json',
+  'packages/database/tsconfig.json',
   'apps/web/src/middleware.ts',
   'src/env.ts',
   // the agent rules (AGENTS.md §3: the founder decides)

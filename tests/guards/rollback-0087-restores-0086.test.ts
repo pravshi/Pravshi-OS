@@ -8,7 +8,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * 0087, drops exactly the two functions 0087 adds, and restores record_failure verbatim from
  * 0086.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0087 = read('drizzle', '0087_org_admin_setup_email.sql');
 const M0086 = read('drizzle', '0086_platform_console.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0087_org_admin_setup_email.down.sql');

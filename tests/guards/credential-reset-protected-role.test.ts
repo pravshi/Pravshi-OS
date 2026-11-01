@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const MIGRATION = readFileSync(
-  join(process.cwd(), 'drizzle/0030_credential_reset_protected_target.sql'),
+  join(process.cwd(), 'packages/database/drizzle/0030_credential_reset_protected_target.sql'),
   'utf8',
 );
 const SERVICE = readFileSync(join(process.cwd(), 'src/lib/admin/credential-reset.ts'), 'utf8');
@@ -28,7 +28,10 @@ const SERVICE = readFileSync(join(process.cwd(), 'src/lib/admin/credential-reset
 // from their own session token: the ADR-001 rule, its DENIED audit and the target errors live
 // there; the service maps the outcome and writes the success entry.
 const DEFINER = (() => {
-  const sql = readFileSync(join(process.cwd(), 'drizzle/0072_auth_role_expand.sql'), 'utf8');
+  const sql = readFileSync(
+    join(process.cwd(), 'packages/database/drizzle/0072_auth_role_expand.sql'),
+    'utf8',
+  );
   const start = sql.indexOf('create function authz.admin_issue_credential_reset(');
   return sql.slice(start, sql.indexOf('$$;', start));
 })();

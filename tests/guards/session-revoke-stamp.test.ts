@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const MIGRATION_23 = readFileSync(
-  join(process.cwd(), 'drizzle/0023_stamp_sessions_revoked.sql'),
+  join(process.cwd(), 'packages/database/drizzle/0023_stamp_sessions_revoked.sql'),
   'utf8',
 );
 const SESSION = readFileSync(join(process.cwd(), 'src/lib/auth/session.ts'), 'utf8');

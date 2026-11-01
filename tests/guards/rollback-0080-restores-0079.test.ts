@@ -12,7 +12,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * (Executed against a disposable database too: a rolled-back 0080 database matched a fresh
  * 0079 database on every order-stable schema fingerprint.)
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0039 = read('drizzle', '0039_pipeline_assignment_recovery.sql');
 const M0080 = read('drizzle', '0080_organization_types.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0080_organization_types.down.sql');

@@ -21,7 +21,10 @@ const root = (...p: string[]) => join(process.cwd(), ...p);
 const PAGE = readFileSync(root('apps/web/src/app/setup/page.tsx'), 'utf8');
 const FORM = readFileSync(root('apps/web/src/app/setup/setup-form.tsx'), 'utf8');
 const SERVICE = readFileSync(root('src/lib/auth/bootstrap-setup.ts'), 'utf8');
-const MIGRATION = readFileSync(root('drizzle/0026_bootstrap_setup_pending.sql'), 'utf8');
+const MIGRATION = readFileSync(
+  root('packages/database/drizzle/0026_bootstrap_setup_pending.sql'),
+  'utf8',
+);
 
 describe('/setup server guard', () => {
   it('page checks setup-pending on the server and redirects to /login when false', () => {

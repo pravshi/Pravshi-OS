@@ -37,7 +37,7 @@ function walk(dir: string): string[] {
   return out;
 }
 
-const SOURCE_ROOTS = ['src', 'apps/web/src', 'apps/worker/src'] as const;
+const SOURCE_ROOTS = ['src', 'apps/web/src', 'apps/worker/src', 'packages/database/src'] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 
 /** Code only: comments dropped, so a path named in prose never counts as an import. */

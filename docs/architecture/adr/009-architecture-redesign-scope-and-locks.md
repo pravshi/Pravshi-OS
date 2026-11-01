@@ -194,3 +194,15 @@ the project groups) and call or spread the package. Its files are protected path
 package has no `src/`, the source roots the guards walk do not change; `tests/guards/workspace-roots`
 fails when another package appears, so a package with source must extend those roots.
 
+## Amendment — Step 8, package 2: `database`
+
+`packages/database` extracts the database plane: `src/lib/db/**` moved to `packages/database/src/`,
+`drizzle/` to `packages/database/drizzle/`, `scripts/db/` to `packages/database/scripts/db/`, and
+`scripts/migrate-ws.mjs` to `packages/database/scripts/migrate-ws.mjs`. Root forwarding stubs in
+`scripts/migrate-ws.mjs` and `scripts/db/roles.sql` preserve developer and CI command compatibility.
+Every migration file is byte-identical (proven by pre- and post-move SHA-256 calculation across all
+88 migrations). Path aliases `@/lib/db/*` in the root, `apps/web` and `apps/worker` tsconfigs map to
+`packages/database/src/*`. The package is declared as `@pravshi/database`. The source roots that
+guards walk are extended with `packages/database/src`, and all runbook and test paths are updated.
+
+

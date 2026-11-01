@@ -23,6 +23,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 // own modules live in apps/worker/src, reached as `@/worker/...` (tsconfig.json paths).
 const SRC_DIR = path.join(REPO_ROOT, 'src');
 const WORKER_DIR = path.join(REPO_ROOT, 'apps', 'worker', 'src');
+const DATABASE_DIR = path.join(REPO_ROOT, 'packages', 'database', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -48,14 +49,26 @@ export async function resolve(specifier, context, nextResolve) {
   // 1. The `@/` tsconfig path alias.
   if (specifier === '@' || specifier.startsWith('@/')) {
     const relative = specifier === '@' ? '' : specifier.slice(2);
-    const workerRelative = relative.startsWith('worker/') ? relative.slice('worker/'.length) : null;
-    const url = probe(
-      workerRelative !== null
-        ? path.join(WORKER_DIR, workerRelative)
-        : path.join(SRC_DIR, relative),
-    );
+    let targetBase;
+    if (relative.startsWith('worker/')) {
+      targetBase = path.join(WORKER_DIR, relative.slice('worker/'.length));
+    } else if (relative.startsWith('lib/db/')) {
+      targetBase = path.join(DATABASE_DIR, relative.slice('lib/db/'.length));
+    } else {
+      targetBase = path.join(SRC_DIR, relative);
+    }
+    const url = probe(targetBase);
     if (url) return { url, shortCircuit: true };
     // Fall through so the error mentions the original `@/...` specifier.
+    return nextResolve(specifier, context);
+  }
+
+  // 1b. The `@pravshi/database` package alias.
+  if (specifier === '@pravshi/database' || specifier.startsWith('@pravshi/database/')) {
+    const sub =
+      specifier === '@pravshi/database' ? 'index.ts' : specifier.slice('@pravshi/database/'.length);
+    const url = probe(path.join(DATABASE_DIR, sub));
+    if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }
 

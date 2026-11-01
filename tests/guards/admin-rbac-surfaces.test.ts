@@ -95,7 +95,7 @@ describe('narrow SECURITY DEFINER write pattern', () => {
   });
 
   it('migration 0028 defines SECURITY DEFINER functions granted only to app_user', () => {
-    const mig = readFileSync('drizzle/0028_admin_write_functions.sql', 'utf8');
+    const mig = readFileSync('packages/database/drizzle/0028_admin_write_functions.sql', 'utf8');
     const functions = [
       'set_role_permissions(uuid, jsonb)',
       'create_department(text, text, uuid)',
@@ -114,8 +114,10 @@ describe('narrow SECURITY DEFINER write pattern', () => {
   });
 
   it('migration 0028 is registered in the drizzle journal', () => {
-    expect(existsSync('drizzle/0028_admin_write_functions.sql')).toBe(true);
-    const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as {
+    expect(existsSync('packages/database/drizzle/0028_admin_write_functions.sql')).toBe(true);
+    const journal = JSON.parse(
+      readFileSync('packages/database/drizzle/meta/_journal.json', 'utf8'),
+    ) as {
       entries: { idx: number; tag: string }[];
     };
     const entry = journal.entries.find((e) => e.tag === '0028_admin_write_functions');

@@ -10,7 +10,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * the functions, tables, constraints and columns 0084 adds. (Executed against disposable
  * databases too: see the commit.)
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0084 = read('drizzle', '0084_platform_provisioning.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0084_platform_provisioning.down.sql');
 

@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
  * twice: rolling 0081 back matched a fresh 0080 database on every order-stable schema
  * fingerprint, and rolling forward again matched a fresh 0081.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0045 = read('drizzle', '0045_automation_jobs.sql');
 const M0057 = read('drizzle', '0057_integrations_permissions.sql');
 const M0081 = read('drizzle', '0081_crm_imports.sql');

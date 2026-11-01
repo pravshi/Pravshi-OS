@@ -18,11 +18,11 @@ import { describe, expect, it } from 'vitest';
  */
 
 const MIGRATION_18 = readFileSync(
-  join(process.cwd(), 'drizzle/0018_invitations_and_login_events.sql'),
+  join(process.cwd(), 'packages/database/drizzle/0018_invitations_and_login_events.sql'),
   'utf8',
 );
 const MIGRATION_19 = readFileSync(
-  join(process.cwd(), 'drizzle/0019_invitation_accept_functions.sql'),
+  join(process.cwd(), 'packages/database/drizzle/0019_invitation_accept_functions.sql'),
   'utf8',
 );
 const SERVICE = readFileSync(join(process.cwd(), 'src/lib/invitations/service.ts'), 'utf8');

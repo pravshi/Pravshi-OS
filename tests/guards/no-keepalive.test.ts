@@ -30,10 +30,16 @@ describe('nothing defeats Neon autosuspend', () => {
   });
 
   it('has no keep-alive, heartbeat or warmup code', () => {
-    const hits = execSync(
-      `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts || true`,
-      { encoding: 'utf8' },
-    )
+    const hits = (() => {
+      try {
+        return execSync(
+          `git grep -lEi "keep-?alive|heartbeat|warm-?up|prevent.*(idle|suspend)|setInterval.*(query|pool)" -- src apps/web/src apps/worker/src scripts packages/database/src`,
+          { encoding: 'utf8' },
+        );
+      } catch {
+        return '';
+      }
+    })()
       .trim()
       .split('\n')
       .map((f) => f.trim())

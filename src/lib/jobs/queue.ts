@@ -32,8 +32,8 @@
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { withAuthorizedDb, type Tx } from '../db/authorized';
-import { connectWorkerWithWake } from '../db/worker-pool';
+import { withAuthorizedDb, type Tx } from '@/lib/db/authorized';
+import { connectWorkerWithWake } from '@/lib/db/worker-pool';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { auditJobsMutation } from './audit';

@@ -17,7 +17,8 @@ import { describe, expect, it } from 'vitest';
  * Static — no database needed.
  */
 
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 
 const M0062 = read('drizzle', '0062_audit_partition_maintenance.sql');
 const M0075 = read('drizzle', '0075_audit_partition_lock_order.sql');

@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const MIGRATION_19 = readFileSync(
-  join(process.cwd(), 'drizzle/0019_invitation_accept_functions.sql'),
+  join(process.cwd(), 'packages/database/drizzle/0019_invitation_accept_functions.sql'),
   'utf8',
 );
 const CALLER = readFileSync(join(process.cwd(), 'src/lib/auth/invitations.ts'), 'utf8');

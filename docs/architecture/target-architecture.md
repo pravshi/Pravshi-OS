@@ -180,6 +180,17 @@ completes.
 | `pnpm test` (tests)                                       | 4,239 passed, 0 failed, 10 skipped | 4,247 passed, 0 failed, 10 skipped (4,257)                                                          |
 | Source, migrations, dependency versions                   | —                                  | unchanged; the lockfile gains one empty importer                                                    |
 
+**After Step 8, package 2 — `database`** (base `f47d5ae`; package `@pravshi/database`):
+
+| Check                                                    | Package 1                          | Package 2 (`database`)                                                                               |
+| -------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check`        | pass                               | pass; `@pravshi/database` extracted, path aliases configured, zero lint/type errors                |
+| `pnpm guards`                                            | pass                               | pass; secret scan (1,071 files) and workflow secret flow clean                                      |
+| `pnpm build`                                              | pass (163 routes)                  | pass (163 routes identical to Package 1 and Step 7)                                                 |
+| 88 migration files SHA-256 byte-identity                 | identical                          | 100% byte-for-byte identical with `origin/main`, verified before and after move                      |
+| Rollback & runbook tests                                 | pass                               | 13 rollback tests and production runbook journal test pass against `packages/database/`              |
+| Source roots & module boundaries                         | 3 roots                            | 4 roots (`packages/database/src` added to guards and physical roots; 0 boundary violations)          |
+
 **V1 tag.** `v1.0.0` (annotated) marks `3a8c155` so V1 can be deployed from it while the redesign
 proceeds. It exists locally only; pushing it needs the founder's approval at the time.
 

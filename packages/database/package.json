@@ -1,0 +1,21 @@
+{
+  "name": "@pravshi/database",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pravshi OS database package: Drizzle schema, migrations, connection pools and the withAuthorizedDb() data path.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12 <23"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/authorized.ts",
+    "./pool": "./src/pool.ts",
+    "./context": "./src/context.ts",
+    "./auth-client": "./src/auth-client.ts",
+    "./auth-pool": "./src/auth-pool.ts",
+    "./auth-schema": "./src/auth-schema.ts",
+    "./worker-pool": "./src/worker-pool.ts",
+    "./schema": "./src/schema.ts"
+  }
+}

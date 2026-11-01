@@ -17,14 +17,14 @@ vi.mock('../../src/lib/jobs/handler-registry', () => ({
 
 // Phase 8 integration (Workstream G): pin the duplicate-redelivery contract.
 // withAuthorizedDb is mocked so no real database is touched.
-vi.mock('../../src/lib/db/authorized', () => ({
+vi.mock('@/lib/db/authorized', () => ({
   withAuthorizedDb: vi.fn(),
 }));
 // Since 0070 the worker's system-actor calls run on the app_worker connection
 // (withWorkerContext); route them to the same mock so these tests keep asserting
 // exactly what they did.
-vi.mock('../../src/lib/db/worker-pool', async () => {
-  const authorized = await import('../../src/lib/db/authorized');
+vi.mock('@/lib/db/worker-pool', async () => {
+  const authorized = await import('@/lib/db/authorized');
   return {
     // (ctx, workItem, fn): the work item binds the call in SQL (0070); the mock ignores it.
     withWorkerContext: (
@@ -65,7 +65,7 @@ import {
 import { classifyError } from '../../src/lib/jobs/retry';
 import { env } from '../../src/env';
 import type { Job } from '../../src/lib/jobs/types';
-import { withAuthorizedDb } from '../../src/lib/db/authorized';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 
 const ORG_ID = '11111111-1111-4111-8111-111111111111';
 const PERSON_ID = '22222222-2222-4222-8222-222222222222';

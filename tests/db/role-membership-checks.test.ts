@@ -50,7 +50,9 @@ const SITES = [
   ...MIGRATIONS.map(({ file, role }) => ({
     site: `drizzle/${file}`,
     role,
-    predicate: predicateFor(role).exec(withoutComments(read('drizzle', file)))?.[0],
+    predicate: predicateFor(role).exec(
+      withoutComments(read('packages', 'database', 'drizzle', file)),
+    )?.[0],
   })),
   ...RUNBOOK_QUERIES.map((q) => {
     const role = runbookRole(q) ?? '(unknown)';
@@ -71,7 +73,7 @@ describe('role-membership rule: the same predicate everywhere', () => {
 
   it('no migration, test or runbook keeps the two-direction form that rejects the Neon owner', () => {
     const texts = [
-      ...MIGRATIONS.map(({ file }) => read('drizzle', file)),
+      ...MIGRATIONS.map(({ file }) => read('packages', 'database', 'drizzle', file)),
       RUNBOOK,
       read('tests', 'db', 'app-worker-role.test.ts'),
       read('tests', 'db', 'app-auth-role.test.ts'),
