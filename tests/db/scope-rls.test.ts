@@ -27,10 +27,10 @@ const CODE = `R${RUN.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`;
  * adds a helper updates the expectation instead of going red.
  */
 const authzHelperCountFromSql = (): number => {
-  const sql = readdirSync(join(process.cwd(), 'drizzle'))
+  const sql = readdirSync(join(process.cwd(), 'packages/database/drizzle'))
     .filter((f) => f.endsWith('.sql'))
     .sort()
-    .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+    .map((f) => readFileSync(join(process.cwd(), 'packages/database/drizzle', f), 'utf8'))
     .join('\n');
   return new Set(
     [...sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+authz\.([a-z_][a-z0-9_]*)/gi)].map(

@@ -17,7 +17,9 @@ import { describe, expect, it } from 'vitest';
 const root = (...p: string[]) => join(process.cwd(), ...p);
 
 type JournalEntry = { idx: number; when: number; tag: string };
-const journal = JSON.parse(readFileSync(root('drizzle', 'meta', '_journal.json'), 'utf8')) as {
+const journal = JSON.parse(
+  readFileSync(root('packages', 'database', 'drizzle', 'meta', '_journal.json'), 'utf8'),
+) as {
   entries: JournalEntry[];
 };
 const entries = journal.entries;
@@ -27,7 +29,7 @@ const RUNBOOK = readFileSync(root('docs', 'runbooks', 'production-migration.md')
 /** sha256 of the file's bytes, exactly as scripts/migrate-ws.mjs records it. */
 const fileHash = (tag: string) =>
   createHash('sha256')
-    .update(readFileSync(root('drizzle', `${tag}.sql`), 'utf8'))
+    .update(readFileSync(root('packages', 'database', 'drizzle', `${tag}.sql`), 'utf8'))
     .digest('hex');
 
 /** Production's recorded boundary (0044_workflow_engine); the pending chain starts after it. */

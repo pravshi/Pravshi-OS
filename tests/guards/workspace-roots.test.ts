@@ -24,10 +24,15 @@ describe('workspace source roots', () => {
     expect(existsSync('apps/worker/src')).toBe(true);
   });
 
-  it('packages/ holds exactly shared-config, which is configuration only (no src folder)', () => {
+  it('packages/ holds database and shared-config; database has a src folder', () => {
     // Step 8 extracts one package per pull request. A package with source code must extend the
-    // source roots every guard walks (see the header); shared-config has none, so it adds no root.
-    expect(dirs('packages').filter((d) => d !== 'node_modules')).toEqual(['shared-config']);
+    // source roots every guard walks (see the header); shared-config has none, database has src.
+    expect(
+      dirs('packages')
+        .filter((d) => d !== 'node_modules')
+        .sort(),
+    ).toEqual(['database', 'shared-config']);
+    expect(existsSync('packages/database/src')).toBe(true);
     expect(existsSync('packages/shared-config/src')).toBe(false);
   });
 });

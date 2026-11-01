@@ -241,7 +241,10 @@ describe('structure', () => {
 
   it('keeps 0054/0055 journal timestamps strictly above 0053 and increasing (Phase 8 lesson)', () => {
     const journal = JSON.parse(
-      readFileSync(new URL('../../drizzle/meta/_journal.json', import.meta.url), 'utf8'),
+      readFileSync(
+        new URL('../../packages/database/drizzle/meta/_journal.json', import.meta.url),
+        'utf8',
+      ),
     ) as { entries: { idx: number; tag: string; when: number }[] };
     const e53 = journal.entries.find((e) => e.tag === '0053_search_indexes')!;
     const e54 = journal.entries.find((e) => e.tag === '0054_ai_foundation')!;

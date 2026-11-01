@@ -53,7 +53,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as Sentry from '@/lib/observability/report';
 import { sql } from 'drizzle-orm';
-import { withAuthorizedDb } from '../db/authorized';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import type { Authorization } from '../authz/require-permission';
 import { AuthorizationError } from '../authz/errors';
 import { emitIntegrationEvent } from '../integrations/fanout';

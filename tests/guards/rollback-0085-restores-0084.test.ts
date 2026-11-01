@@ -10,7 +10,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * the CHECK, trigger and function 0085 adds. (Executed against disposable databases too: see
  * the commit.)
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0015 = read('drizzle', '0015_bootstrap.sql');
 const M0020 = read('drizzle', '0020_resolve_login_org.sql');
 const M0083 = read('drizzle', '0083_platform_identity.sql');

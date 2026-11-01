@@ -8,7 +8,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * 0088 and while an import with a confirmed plan is queued or running, and drops exactly the two
  * tables and two guard functions 0088 creates (triggers and policies go with their tables).
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0088 = read('drizzle', '0088_crm_import_decisions.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0088_crm_import_decisions.down.sql');
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();

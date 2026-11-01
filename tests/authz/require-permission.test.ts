@@ -651,10 +651,10 @@ describe('the rest of the authorization model is unchanged', () => {
     // the two administrator definers it serves, admin_session_action and
     // admin_issue_credential_reset; 0074 added person_visible, people_select for one person,
     // which those definers apply to their target); if this fails the literal list is stale.
-    const migrationSql = readdirSync(join(process.cwd(), 'drizzle'))
+    const migrationSql = readdirSync(join(process.cwd(), 'packages/database/drizzle'))
       .filter((f) => f.endsWith('.sql'))
       .sort()
-      .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+      .map((f) => readFileSync(join(process.cwd(), 'packages/database/drizzle', f), 'utf8'))
       .join('\n');
     const sqlNames = [
       ...new Set(

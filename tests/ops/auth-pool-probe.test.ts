@@ -700,7 +700,9 @@ describe('membership rule: the probe and the migrations agree', () => {
     '0073_auth_role_contract.sql',
   ]) {
     it(`${file} states exactly the probe's exemption`, () => {
-      const migration = squash(readFileSync(join(process.cwd(), 'drizzle', file), 'utf8'));
+      const migration = squash(
+        readFileSync(join(process.cwd(), 'packages/database/drizzle', file), 'utf8'),
+      );
       expect(migrationExemption(migration)).toBe(asMigrationText(UNEXPECTED_MEMBER));
     });
   }

@@ -112,11 +112,16 @@ describe.skipIf(!ISOLATED)(
         join(ROOT, 'scripts', 'ci', 'neon-local.mjs'),
         join(dir, 'scripts', 'ci', 'neon-local.mjs'),
       );
-      for (const f of readdirSync(join(ROOT, 'drizzle')).filter((f) => f.endsWith('.sql'))) {
-        copyFileSync(join(ROOT, 'drizzle', f), join(dir, 'drizzle', f));
+      for (const f of readdirSync(join(ROOT, 'packages', 'database', 'drizzle')).filter((f) =>
+        f.endsWith('.sql'),
+      )) {
+        copyFileSync(join(ROOT, 'packages', 'database', 'drizzle', f), join(dir, 'drizzle', f));
       }
       const journal = JSON.parse(
-        readFileSync(join(ROOT, 'drizzle', 'meta', '_journal.json'), 'utf8'),
+        readFileSync(
+          join(ROOT, 'packages', 'database', 'drizzle', 'meta', '_journal.json'),
+          'utf8',
+        ),
       );
       journal.entries = journal.entries.slice(0, k);
       writeFileSync(

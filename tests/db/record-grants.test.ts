@@ -26,10 +26,10 @@ const RUN = Math.random().toString(36).slice(2, 8);
  * so a future migration that adds a helper fails here with the SQL-derived list
  * instead of silently drifting the count.
  */
-const MIGRATION_SQL = readdirSync(join(process.cwd(), 'drizzle'))
+const MIGRATION_SQL = readdirSync(join(process.cwd(), 'packages/database/drizzle'))
   .filter((f) => f.endsWith('.sql'))
   .sort()
-  .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+  .map((f) => readFileSync(join(process.cwd(), 'packages/database/drizzle', f), 'utf8'))
   .join('\n');
 
 const authzHelperNamesFromSql = (): string[] =>

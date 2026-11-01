@@ -28,10 +28,10 @@ const AUTH_TABLES = Object.keys(authDbSchema);
 // Auth tables they carry FORCE RLS with an owner-only policy. Derived from the
 // migration SQL so a future app-managed auth table does not drift the pin.
 const APP_AUTH_TABLES: readonly string[] = (() => {
-  const sql = readdirSync(join(process.cwd(), 'drizzle'))
+  const sql = readdirSync(join(process.cwd(), 'packages/database/drizzle'))
     .filter((f) => f.endsWith('.sql'))
     .sort()
-    .map((f) => readFileSync(join(process.cwd(), 'drizzle', f), 'utf8'))
+    .map((f) => readFileSync(join(process.cwd(), 'packages/database/drizzle', f), 'utf8'))
     .join('\n');
   return [
     ...new Set(

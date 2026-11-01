@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
  * as the 0075 and 0077 rollback guards do. Also executed on a disposable database, where rolling
  * 0078 back matched a fresh 0077 database on every order-stable schema fingerprint.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0075 = read('drizzle', '0075_audit_partition_lock_order.sql');
 const M0078 = read('drizzle', '0078_audit_history_truncate_guard.sql');
 const RB78 = read('scripts', 'db', 'rollback', '0078_audit_history_truncate_guard.down.sql');

@@ -14,6 +14,7 @@ export default createEslintConfig({
     'src/**/*.{ts,tsx}',
     'apps/web/src/**/*.{ts,tsx}',
     'apps/worker/src/**/*.{ts,tsx}',
+    'packages/database/src/**/*.{ts,tsx}',
   ],
   envRuleIgnores: ['src/env.ts'],
 });

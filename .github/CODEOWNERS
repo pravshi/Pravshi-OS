@@ -26,6 +26,7 @@
 /drizzle.config.ts      @pravshi/maintainers
 /scripts/db/            @pravshi/maintainers
 /src/lib/db/            @pravshi/maintainers
+/packages/database/     @pravshi/maintainers
 /src/lib/authz/         @pravshi/maintainers
 /src/env.ts             @pravshi/maintainers
 /tests/db/              @pravshi/maintainers

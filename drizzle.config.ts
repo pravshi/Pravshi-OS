@@ -1,8 +1,8 @@
 import type { Config } from 'drizzle-kit';
 
 export default {
-  schema: './src/lib/db/schema.ts',
-  out: './drizzle',
+  schema: './packages/database/src/schema.ts',
+  out: './packages/database/drizzle',
   dialect: 'postgresql',
   dbCredentials: { url: process.env.DATABASE_URL_MIGRATE! },
   // RLS policies, functions, grants and triggers are hand-written SQL appended

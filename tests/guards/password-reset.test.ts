@@ -23,7 +23,10 @@ const COMMON = readFileSync(root('src/lib/auth/common-passwords.ts'), 'utf8');
 const EMAIL = readFileSync(root('src/lib/auth/password-reset-email.ts'), 'utf8');
 const INVITATIONS = readFileSync(root('src/lib/auth/invitations.ts'), 'utf8');
 const BOOTSTRAP = readFileSync(root('src/lib/auth/bootstrap-setup.ts'), 'utf8');
-const MIGRATION_25 = readFileSync(root('drizzle/0025_password_reset_audit.sql'), 'utf8');
+const MIGRATION_25 = readFileSync(
+  root('packages/database/drizzle/0025_password_reset_audit.sql'),
+  'utf8',
+);
 
 describe('reset token handling: the plaintext never reaches the database', () => {
   it('service generates 32 random bytes, hex-encoded (64 chars) for the email link', () => {

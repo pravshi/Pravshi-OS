@@ -7,7 +7,8 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
  * scripts/db/rollback/0086_platform_console.down.sql: refuses unless the database is at 0086,
  * drops exactly the one function 0086 adds, and restores the two it replaces verbatim from 0083.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0086 = read('drizzle', '0086_platform_console.sql');
 const ROLLBACK = read('scripts', 'db', 'rollback', '0086_platform_console.down.sql');
 const M0083 = read('drizzle', '0083_platform_identity.sql');

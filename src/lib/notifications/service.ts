@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { env } from '@/env';
-import { withAuthorizedDb } from '../db/authorized';
+import { withAuthorizedDb } from '@/lib/db/authorized';
 import { AuthorizationError } from '../authz/errors';
 import type { Authorization } from '../authz/require-permission';
 import { enqueueJob } from '../jobs/queue';

@@ -3,6 +3,7 @@
   "compilerOptions": {
     "paths": {
       "@/worker/*": ["./src/*"],
+      "@/lib/db/*": ["../../packages/database/src/*"],
       "@/*": ["../../src/*"]
     }
   },

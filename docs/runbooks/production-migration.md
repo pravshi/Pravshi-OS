@@ -18,7 +18,7 @@ artefact, which is closed as superseded as part of HG-2 (Step 3 closeout).
 node scripts/migrate-ws.mjs
 ```
 
-It reads `drizzle/meta/_journal.json` and the recorded history in
+It reads `packages/database/drizzle/meta/_journal.json` and the recorded history in
 `drizzle.__drizzle_migrations` (in insertion order, `id`), verifies that the
 history is exactly the journal's prefix idx 0…K−1 — the same file-byte hash and
 the same `when`, row for row — and only then applies idx K…n−1 in journal
@@ -68,7 +68,7 @@ in particular not `drizzle-kit migrate`, which selects by `when` (below).
       Confirm the journal in your checkout:
 
       ```bash
-      node -e "const j=require('./drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
+      node -e "const j=require('./packages/database/drizzle/meta/_journal.json'); console.log(j.entries.length, j.entries.at(-1).idx, j.entries.at(-1).tag)"
       # expected at the current release: 88 87 0088_crm_import_decisions
       ```
 
@@ -155,7 +155,7 @@ are `sha256` of each migration **file's bytes**, computed exactly as the
 runner computes them:
 
 ```bash
-node -e "const fs=require('fs'),c=require('crypto');const j=JSON.parse(fs.readFileSync('drizzle/meta/_journal.json','utf8'));for(const e of j.entries){const h=c.createHash('sha256').update(fs.readFileSync('drizzle/'+e.tag+'.sql','utf8')).digest('hex');console.log(e.idx, e.when, h)}"
+node -e "const fs=require('fs'),c=require('crypto');const j=JSON.parse(fs.readFileSync('packages/database/drizzle/meta/_journal.json','utf8'));for(const e of j.entries){const h=c.createHash('sha256').update(fs.readFileSync('packages/database/drizzle/'+e.tag+'.sql','utf8')).digest('hex');console.log(e.idx, e.when, h)}"
 ```
 
 > **Do not compare against the `hash` field embedded in

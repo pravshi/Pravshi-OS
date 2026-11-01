@@ -49,7 +49,7 @@ describe('A1 review: every client address the auth plane uses is validated', () 
     // Every file under src/, however it spells the name: a route or helper that read one of
     // these directly would bypass the deployment's trusted-header choice.
     const ADDRESS_HEADER = /x-(vercel-)?forwarded-for|x-real-ip|cf-connecting-ip|true-client-ip/i;
-    const files = ['src', 'apps/web/src', 'apps/worker/src']
+    const files = ['src', 'apps/web/src', 'apps/worker/src', 'packages/database/src']
       .flatMap((dir) =>
         (readdirSync(dir, { recursive: true }) as string[]).map(
           (f) => `${dir}/${f.replace(/\\/g, '/')}`,

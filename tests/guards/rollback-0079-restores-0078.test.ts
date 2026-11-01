@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
  * rolling 0079 back matched a fresh 0078 database on every order-stable schema fingerprint and
  * the first-use race reappeared.
  */
-const read = (...p: string[]) => readFileSync(join(process.cwd(), ...p), 'utf8');
+const read = (...p: string[]) =>
+  readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
 const M0024 = read('drizzle', '0024_password_reset.sql');
 const M0079 = read('drizzle', '0079_rate_limit_first_use.sql');
 const RB79 = read('scripts', 'db', 'rollback', '0079_rate_limit_first_use.down.sql');
