@@ -63,6 +63,7 @@ describe('A1 review: every client address the auth plane uses is validated', () 
       'packages/database/src',
       'packages/observability/src',
       'packages/security/src',
+      'packages/platform-core/src',
     ]
       .flatMap((dir) =>
         (readdirSync(dir, { recursive: true }) as string[]).map(

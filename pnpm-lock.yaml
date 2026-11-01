@@ -258,6 +258,33 @@ importers:
         specifier: 10.75.2
         version: 10.75.2(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))(next@15.5.28(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)(supports-color@8.1.1)(webpack@5.110.3(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.28)(sharp@0.35.5(@types/node@20.19.43)))
 
+  packages/platform-core:
+    dependencies:
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../database
+      '@pravshi/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../security
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
+      next:
+        specifier: 15.5.28
+        version: 15.5.28(@babel/core@7.29.7(supports-color@8.1.1))(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      resend:
+        specifier: ^6.30.0
+        version: 6.30.0
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
   packages/security:
     dependencies:
       '@pravshi/database':

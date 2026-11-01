@@ -29,6 +29,7 @@
 /packages/database/     @pravshi/maintainers
 /packages/observability/ @pravshi/maintainers
 /packages/security/     @pravshi/maintainers
+/packages/platform-core/ @pravshi/maintainers
 /src/lib/authz/         @pravshi/maintainers
 /src/env.ts             @pravshi/maintainers
 /tests/db/              @pravshi/maintainers

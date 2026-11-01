@@ -324,6 +324,7 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/security/src/auth', logical: 'src/lib/auth' },
   { dir: 'packages/security/src/authz', logical: 'src/lib/authz' },
   { dir: 'packages/security/src/identity', logical: 'src/lib/identity' },
+  { dir: 'packages/platform-core/src', logical: 'src/lib/platform' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -383,7 +384,9 @@ function resolveSpecifier(from: string, spec: string): string | null {
                         rest.slice('lib/identity/'.length),
                       ),
                     ]
-                  : [join('apps', 'web', 'src', rest), join('src', rest)];
+                  : rest.startsWith('lib/platform/')
+                    ? [join('packages', 'platform-core', 'src', rest.slice('lib/platform/'.length))]
+                    : [join('apps', 'web', 'src', rest), join('src', rest)];
     for (const base of candidates) {
       found = existingFile(base);
       if (found !== null) break;
@@ -405,6 +408,12 @@ function resolveSpecifier(from: string, spec: string): string | null {
   } else if (spec.startsWith('@pravshi/security/')) {
     found = existingFile(
       join('packages', 'security', 'src', spec.slice('@pravshi/security/'.length)),
+    );
+  } else if (spec === '@pravshi/platform-core') {
+    found = existingFile(join('packages', 'platform-core', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/platform-core/')) {
+    found = existingFile(
+      join('packages', 'platform-core', 'src', spec.slice('@pravshi/platform-core/'.length)),
     );
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));

@@ -44,6 +44,7 @@ const SOURCE_ROOTS = [
   'packages/database/src',
   'packages/observability/src',
   'packages/security/src',
+  'packages/platform-core/src',
 ] as const;
 const SRC = SOURCE_ROOTS.flatMap((dir) => walk(dir));
 

@@ -197,6 +197,7 @@ const sources = [
   'packages/database/src',
   'packages/observability/src',
   'packages/security/src',
+  'packages/platform-core/src',
 ]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));

@@ -26,6 +26,7 @@ const WORKER_DIR = path.join(REPO_ROOT, 'apps', 'worker', 'src');
 const DATABASE_DIR = path.join(REPO_ROOT, 'packages', 'database', 'src');
 const OBSERVABILITY_DIR = path.join(REPO_ROOT, 'packages', 'observability', 'src');
 const SECURITY_DIR = path.join(REPO_ROOT, 'packages', 'security', 'src');
+const PLATFORM_CORE_DIR = path.join(REPO_ROOT, 'packages', 'platform-core', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -66,6 +67,8 @@ export async function resolve(specifier, context, nextResolve) {
       targetBase = path.join(SECURITY_DIR, 'authz', relative.slice('lib/authz/'.length));
     } else if (relative.startsWith('lib/identity/')) {
       targetBase = path.join(SECURITY_DIR, 'identity', relative.slice('lib/identity/'.length));
+    } else if (relative.startsWith('lib/platform/')) {
+      targetBase = path.join(PLATFORM_CORE_DIR, relative.slice('lib/platform/'.length));
     } else {
       targetBase = path.join(SRC_DIR, relative);
     }
@@ -100,6 +103,17 @@ export async function resolve(specifier, context, nextResolve) {
     const sub =
       specifier === '@pravshi/security' ? 'index.ts' : specifier.slice('@pravshi/security/'.length);
     const url = probe(path.join(SECURITY_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1e. The `@pravshi/platform-core` package alias.
+  if (specifier === '@pravshi/platform-core' || specifier.startsWith('@pravshi/platform-core/')) {
+    const sub =
+      specifier === '@pravshi/platform-core'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/platform-core/'.length);
+    const url = probe(path.join(PLATFORM_CORE_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }
