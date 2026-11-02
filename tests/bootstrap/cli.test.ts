@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
@@ -229,7 +229,10 @@ describe('runBootstrap()', () => {
 });
 
 describe('the script as a file', () => {
-  const source = readFileSync('scripts/bootstrap/run.mjs', 'utf8');
+  const file = existsSync('tooling/security-checks/run.mjs')
+    ? 'tooling/security-checks/run.mjs'
+    : 'scripts/bootstrap/run.mjs';
+  const source = readFileSync(file, 'utf8');
 
   it('writes no files and no CI outputs', () => {
     expect(source).not.toMatch(/writeFile|appendFile|createWriteStream|GITHUB_OUTPUT/);

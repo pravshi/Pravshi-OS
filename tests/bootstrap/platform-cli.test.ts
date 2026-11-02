@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -139,7 +139,10 @@ describe('runPlatformOperation()', () => {
   });
 
   it('the script refuses a non-interactive stdout and writes no files', () => {
-    const source = readFileSync('scripts/bootstrap/platform.mjs', 'utf8');
+    const file = existsSync('tooling/security-checks/platform.mjs')
+      ? 'tooling/security-checks/platform.mjs'
+      : 'scripts/bootstrap/platform.mjs';
+    const source = readFileSync(file, 'utf8');
     expect(source).toMatch(/if \(!process\.stdout\.isTTY\)/);
     expect(source).not.toMatch(/writeFile|appendFile|GITHUB_OUTPUT|GITHUB_ENV/);
   });
