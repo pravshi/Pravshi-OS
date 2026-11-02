@@ -38,7 +38,7 @@
  * service so the scenario measures the assist path, not the limiter;
  * that is harness setup on a fixture org and is stated in the report.
  */
-import '../ci/neon-local.mjs';
+import '../release/neon-local.mjs';
 
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
