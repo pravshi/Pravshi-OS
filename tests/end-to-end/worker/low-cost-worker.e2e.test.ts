@@ -32,7 +32,7 @@ import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
 
-import { mkOrg, mkPerson, mkTask, mkWorkflow, RUN } from '../workflows/helpers';
+import { mkOrg, mkPerson, mkTask, mkWorkflow, RUN } from '../../workflows/helpers';
 import {
   launchReport,
   markSeen,

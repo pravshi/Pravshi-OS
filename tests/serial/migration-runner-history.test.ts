@@ -1,6 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from '@neondatabase/serverless';
@@ -118,6 +126,13 @@ describe.skipIf(!ISOLATED)(
         join(ROOT, 'scripts', 'ci', 'neon-local.mjs'),
         join(dir, 'scripts', 'ci', 'neon-local.mjs'),
       );
+      if (existsSync(join(ROOT, 'tooling', 'release', 'neon-local.mjs'))) {
+        mkdirSync(join(dir, 'tooling', 'release'), { recursive: true });
+        copyFileSync(
+          join(ROOT, 'tooling', 'release', 'neon-local.mjs'),
+          join(dir, 'tooling', 'release', 'neon-local.mjs'),
+        );
+      }
       for (const f of readdirSync(join(ROOT, 'packages', 'database', 'drizzle')).filter((f) =>
         f.endsWith('.sql'),
       )) {

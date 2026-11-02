@@ -12,7 +12,7 @@ import {
   mkWorkflow,
   sqlstateOf,
   type Ctx,
-} from './helpers';
+} from '../workflows/helpers';
 
 /**
  * Phase 5 — cross-tenant RLS matrix for the workflow tables (A1 migration

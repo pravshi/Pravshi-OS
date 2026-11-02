@@ -24,7 +24,7 @@ import {
   mkWorkProject,
   mkWorkTask,
   owner,
-} from './helpers';
+} from '../analytics/helpers';
 
 /**
  * Phase 7 — tenant isolation for analytics. THE BLOCKER SUITE.
