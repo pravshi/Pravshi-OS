@@ -99,7 +99,7 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     class: 'tenant',
     org: 'org_id',
     isolationTest: {
-      file: 'tests/analytics/tenant-isolation.test.ts',
+      file: 'tests/tenant-isolation/analytics.test.ts',
       title: 'alice’s identity sees exactly Org A rows in every analytics table',
     },
   },
@@ -232,7 +232,7 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     class: 'tenant',
     org: 'org_id',
     isolationTest: {
-      file: 'tests/jobs/jobs-rls.test.ts',
+      file: 'tests/tenant-isolation/jobs-rls.test.ts',
       title: 'insert: cross-org insert fails with 42501',
     },
   },
@@ -311,7 +311,7 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     class: 'tenant',
     org: 'org_id',
     isolationTest: {
-      file: 'tests/jobs/jobs-rls.test.ts',
+      file: 'tests/tenant-isolation/jobs-rls.test.ts',
       title: 'insert: schedule whose workflow belongs to another org',
     },
   },
@@ -352,7 +352,7 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     class: 'tenant',
     org: 'org_id',
     isolationTest: {
-      file: 'tests/workflows/workflow-rls.test.ts',
+      file: 'tests/tenant-isolation/workflows-rls.test.ts',
       title: 'step whose org differs from its execution org → 42501',
     },
   },
@@ -360,7 +360,7 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     class: 'tenant',
     org: 'org_id',
     isolationTest: {
-      file: 'tests/workflows/workflow-rls.test.ts',
+      file: 'tests/tenant-isolation/workflows-rls.test.ts',
       title: 'executions select: cross-tenant read → zero rows',
     },
   },
