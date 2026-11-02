@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'packages/products/*'
 
 allowBuilds:
   '@sentry/cli': true

@@ -1,0 +1,39 @@
+{
+  "name": "@pravshi/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./app": {
+      "types": "./src/app/index.ts",
+      "default": "./src/app/index.ts"
+    },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "default": "./src/auth/index.ts"
+    },
+    "./api": {
+      "types": "./src/api/index.ts",
+      "default": "./src/api/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "dependencies": {
+    "@pravshi/contracts": "workspace:*",
+    "@pravshi/mobile-platform": "workspace:*",
+    "react": "19.1.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@pravshi/shared-config": "workspace:*",
+    "@types/react": "^19",
+    "typescript": "^5.9.3"
+  }
+}

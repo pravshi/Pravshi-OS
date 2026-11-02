@@ -14,19 +14,18 @@ const dirs = (p: string) =>
   existsSync(p) ? readdirSync(p).filter((e) => statSync(`${p}/${e}`).isDirectory()) : [];
 
 describe('workspace source roots', () => {
-  it('apps/ holds exactly web and worker, each with a src folder', () => {
+  it('apps/ holds web, worker, and mobile, each with a src folder', () => {
     expect(
       dirs('apps')
         .filter((d) => d !== 'node_modules')
         .sort(),
-    ).toEqual(['web', 'worker']);
+    ).toEqual(['mobile', 'web', 'worker']);
     expect(existsSync('apps/web/src')).toBe(true);
     expect(existsSync('apps/worker/src')).toBe(true);
+    expect(existsSync('apps/mobile/src')).toBe(true);
   });
 
-  it('packages/ holds admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-config, shared-services, shared-ui and work; admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services, shared-ui and work have a src folder', () => {
-    // Step 8 extracts one package per pull request. A package with source code must extend the
-    // source roots every guard walks (see the header); shared-config has none, admin, ai, analytics, automation, contracts, crm-core, database, imports, integrations, observability, platform-core, search, security, shared-services, shared-ui and work have src.
+  it('packages/ holds the core packages, Phase 3 vertical products and delivery channel platforms', () => {
     expect(
       dirs('packages')
         .filter((d) => d !== 'node_modules')
@@ -41,13 +40,17 @@ describe('workspace source roots', () => {
       'database',
       'imports',
       'integrations',
+      'mobile-platform',
       'observability',
       'platform-core',
+      'products',
       'search',
       'security',
       'shared-config',
       'shared-services',
       'shared-ui',
+      'website-platform',
+      'white-label-platform',
       'work',
     ]);
     expect(existsSync('packages/admin/src')).toBe(true);
@@ -59,13 +62,23 @@ describe('workspace source roots', () => {
     expect(existsSync('packages/database/src')).toBe(true);
     expect(existsSync('packages/imports/src')).toBe(true);
     expect(existsSync('packages/integrations/src')).toBe(true);
+    expect(existsSync('packages/mobile-platform/src')).toBe(true);
     expect(existsSync('packages/observability/src')).toBe(true);
     expect(existsSync('packages/platform-core/src')).toBe(true);
     expect(existsSync('packages/search/src')).toBe(true);
     expect(existsSync('packages/security/src')).toBe(true);
     expect(existsSync('packages/shared-services/src')).toBe(true);
     expect(existsSync('packages/shared-ui/src')).toBe(true);
+    expect(existsSync('packages/website-platform/src')).toBe(true);
+    expect(existsSync('packages/white-label-platform/src')).toBe(true);
     expect(existsSync('packages/work/src')).toBe(true);
     expect(existsSync('packages/shared-config/src')).toBe(false);
+    expect(
+      dirs('packages/products')
+        .filter((d) => d !== 'node_modules')
+        .sort(),
+    ).toEqual(['education', 'real-estate']);
+    expect(existsSync('packages/products/education/src')).toBe(true);
+    expect(existsSync('packages/products/real-estate/src')).toBe(true);
   });
 });

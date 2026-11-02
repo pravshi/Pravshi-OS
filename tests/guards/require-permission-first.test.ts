@@ -210,6 +210,12 @@ const sources = [
   'packages/ai/src',
   'packages/admin/src',
   'packages/shared-ui/src',
+  'packages/products/real-estate/src',
+  'packages/products/education/src',
+  'packages/website-platform/src',
+  'packages/white-label-platform/src',
+  'packages/mobile-platform/src',
+  'apps/mobile/src',
 ]
   .flatMap((dir) => walk(dir))
   .map((file) => ({ file, source: readFileSync(file, 'utf8') }));

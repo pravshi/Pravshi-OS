@@ -1,0 +1,10 @@
+{
+  "extends": "../shared-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@pravshi/mobile-platform": ["./src/index.ts"],
+      "@pravshi/mobile-platform/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

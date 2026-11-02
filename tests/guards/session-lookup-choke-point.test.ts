@@ -47,6 +47,12 @@ describe('server-side session lookups', () => {
       'packages/ai/src',
       'packages/admin/src',
       'packages/shared-ui/src',
+      'packages/products/real-estate/src',
+      'packages/products/education/src',
+      'packages/website-platform/src',
+      'packages/white-label-platform/src',
+      'packages/mobile-platform/src',
+      'apps/mobile/src',
     ]
       .flatMap((dir) => walk(dir))
       .filter(

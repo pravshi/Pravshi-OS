@@ -57,6 +57,18 @@
       "@/components/ui/*": ["./packages/shared-ui/src/*"],
       "@pravshi/shared-ui": ["./packages/shared-ui/src/index.ts"],
       "@pravshi/shared-ui/*": ["./packages/shared-ui/src/*"],
+      "@pravshi/product-real-estate": ["./packages/products/real-estate/src/index.ts"],
+      "@pravshi/product-real-estate/*": ["./packages/products/real-estate/src/*"],
+      "@pravshi/product-education": ["./packages/products/education/src/index.ts"],
+      "@pravshi/product-education/*": ["./packages/products/education/src/*"],
+      "@pravshi/website-platform": ["./packages/website-platform/src/index.ts"],
+      "@pravshi/website-platform/*": ["./packages/website-platform/src/*"],
+      "@pravshi/white-label-platform": ["./packages/white-label-platform/src/index.ts"],
+      "@pravshi/white-label-platform/*": ["./packages/white-label-platform/src/*"],
+      "@pravshi/mobile-platform": ["./packages/mobile-platform/src/index.ts"],
+      "@pravshi/mobile-platform/*": ["./packages/mobile-platform/src/*"],
+      "@pravshi/mobile": ["./apps/mobile/src/index.ts"],
+      "@pravshi/mobile/*": ["./apps/mobile/src/*"],
       "@/*": ["./apps/web/src/*", "./src/*"]
     }
   },
