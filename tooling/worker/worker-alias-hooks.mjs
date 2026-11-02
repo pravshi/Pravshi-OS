@@ -39,6 +39,12 @@ const ANALYTICS_DIR = path.join(REPO_ROOT, 'packages', 'analytics', 'src');
 const AI_DIR = path.join(REPO_ROOT, 'packages', 'ai', 'src');
 const ADMIN_DIR = path.join(REPO_ROOT, 'packages', 'admin', 'src');
 const SHARED_UI_DIR = path.join(REPO_ROOT, 'packages', 'shared-ui', 'src');
+const PRODUCT_REAL_ESTATE_DIR = path.join(REPO_ROOT, 'packages', 'products', 'real-estate', 'src');
+const PRODUCT_EDUCATION_DIR = path.join(REPO_ROOT, 'packages', 'products', 'education', 'src');
+const WEBSITE_PLATFORM_DIR = path.join(REPO_ROOT, 'packages', 'website-platform', 'src');
+const WHITE_LABEL_PLATFORM_DIR = path.join(REPO_ROOT, 'packages', 'white-label-platform', 'src');
+const MOBILE_PLATFORM_DIR = path.join(REPO_ROOT, 'packages', 'mobile-platform', 'src');
+const MOBILE_APP_DIR = path.join(REPO_ROOT, 'apps', 'mobile', 'src');
 
 const TS_PROBES = ['.ts', '.tsx', '/index.ts'];
 
@@ -283,6 +289,85 @@ export async function resolve(specifier, context, nextResolve) {
         ? 'index.ts'
         : specifier.slice('@pravshi/shared-ui/'.length);
     const url = probe(path.join(SHARED_UI_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1r. The `@pravshi/product-real-estate` package alias.
+  if (
+    specifier === '@pravshi/product-real-estate' ||
+    specifier.startsWith('@pravshi/product-real-estate/')
+  ) {
+    const sub =
+      specifier === '@pravshi/product-real-estate'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/product-real-estate/'.length);
+    const url = probe(path.join(PRODUCT_REAL_ESTATE_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1s. The `@pravshi/product-education` package alias.
+  if (
+    specifier === '@pravshi/product-education' ||
+    specifier.startsWith('@pravshi/product-education/')
+  ) {
+    const sub =
+      specifier === '@pravshi/product-education'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/product-education/'.length);
+    const url = probe(path.join(PRODUCT_EDUCATION_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1t. The `@pravshi/website-platform` package alias.
+  if (
+    specifier === '@pravshi/website-platform' ||
+    specifier.startsWith('@pravshi/website-platform/')
+  ) {
+    const sub =
+      specifier === '@pravshi/website-platform'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/website-platform/'.length);
+    const url = probe(path.join(WEBSITE_PLATFORM_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1u. The `@pravshi/white-label-platform` package alias.
+  if (
+    specifier === '@pravshi/white-label-platform' ||
+    specifier.startsWith('@pravshi/white-label-platform/')
+  ) {
+    const sub =
+      specifier === '@pravshi/white-label-platform'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/white-label-platform/'.length);
+    const url = probe(path.join(WHITE_LABEL_PLATFORM_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1v. The `@pravshi/mobile-platform` package alias.
+  if (
+    specifier === '@pravshi/mobile-platform' ||
+    specifier.startsWith('@pravshi/mobile-platform/')
+  ) {
+    const sub =
+      specifier === '@pravshi/mobile-platform'
+        ? 'index.ts'
+        : specifier.slice('@pravshi/mobile-platform/'.length);
+    const url = probe(path.join(MOBILE_PLATFORM_DIR, sub));
+    if (url) return { url, shortCircuit: true };
+    return nextResolve(specifier, context);
+  }
+
+  // 1w. The `@pravshi/mobile` app alias.
+  if (specifier === '@pravshi/mobile' || specifier.startsWith('@pravshi/mobile/')) {
+    const sub =
+      specifier === '@pravshi/mobile' ? 'index.ts' : specifier.slice('@pravshi/mobile/'.length);
+    const url = probe(path.join(MOBILE_APP_DIR, sub));
     if (url) return { url, shortCircuit: true };
     return nextResolve(specifier, context);
   }

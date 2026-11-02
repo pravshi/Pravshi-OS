@@ -1,0 +1,13 @@
+{
+  "extends": "../../packages/shared-config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@pravshi/mobile-platform": ["../../packages/mobile-platform/src/index.ts"],
+      "@pravshi/mobile-platform/*": ["../../packages/mobile-platform/src/*"],
+      "@pravshi/contracts": ["../../packages/contracts/src/index.ts"],
+      "@pravshi/contracts/*": ["../../packages/contracts/src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

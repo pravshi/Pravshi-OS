@@ -236,6 +236,31 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
 
+  apps/mobile:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@pravshi/mobile-platform':
+        specifier: workspace:*
+        version: link:../../packages/mobile-platform
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@pravshi/shared-config':
+        specifier: workspace:*
+        version: link:../../packages/shared-config
+      '@types/react':
+        specifier: ^19
+        version: 19.2.18
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   apps/web:
     dependencies:
       next:
@@ -441,6 +466,28 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
 
+  packages/mobile-platform:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@pravshi/shared-config':
+        specifier: workspace:*
+        version: link:../shared-config
+      '@types/react':
+        specifier: ^19
+        version: 19.2.18
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/observability:
     dependencies:
       '@sentry/nextjs':
@@ -470,6 +517,48 @@ importers:
       resend:
         specifier: ^6.30.0
         version: 6.30.0(@react-email/render@1.1.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
+  packages/products/education:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../../database
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../../security
+      '@pravshi/shared-services':
+        specifier: workspace:*
+        version: link:../../shared-services
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
+  packages/products/real-estate:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../../database
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../../security
+      '@pravshi/shared-services':
+        specifier: workspace:*
+        version: link:../../shared-services
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -576,6 +665,48 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/website-platform:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../database
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../security
+      '@pravshi/shared-services':
+        specifier: workspace:*
+        version: link:../shared-services
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
+  packages/white-label-platform:
+    dependencies:
+      '@pravshi/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@pravshi/database':
+        specifier: workspace:*
+        version: link:../database
+      '@pravshi/security':
+        specifier: workspace:*
+        version: link:../security
+      '@pravshi/shared-services':
+        specifier: workspace:*
+        version: link:../shared-services
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
 
   packages/work:
     dependencies:

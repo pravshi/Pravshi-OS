@@ -1,0 +1,42 @@
+{
+  "name": "@pravshi/mobile-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./ui": {
+      "types": "./src/ui/index.ts",
+      "default": "./src/ui/index.ts"
+    },
+    "./camera": {
+      "types": "./src/camera/index.ts",
+      "default": "./src/camera/index.ts"
+    },
+    "./notifications": {
+      "types": "./src/notifications/index.ts",
+      "default": "./src/notifications/index.ts"
+    },
+    "./storage": {
+      "types": "./src/storage/index.ts",
+      "default": "./src/storage/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "dependencies": {
+    "@pravshi/contracts": "workspace:*",
+    "react": "19.1.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@pravshi/shared-config": "workspace:*",
+    "@types/react": "^19",
+    "typescript": "^5.9.3"
+  }
+}

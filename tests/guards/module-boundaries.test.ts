@@ -68,6 +68,12 @@ const MODULE_LAYER: Readonly<Record<string, Layer>> = {
   search: 'L4',
   admin: 'L4',
   invitations: 'L4',
+  'product-real-estate': 'L4',
+  'product-education': 'L4',
+  'website-platform': 'L4',
+  'white-label-platform': 'L4',
+  'mobile-platform': 'L3',
+  mobile: 'entry',
   // control plane
   platform: 'control',
   // (Paths below are LOGICAL: since Step 7 `src/app`, `src/components`, `src/hooks`,
@@ -103,6 +109,10 @@ const L4_EDGES: ReadonlySet<string> = new Set([
   'ai->work',
   'analytics->work',
   'import->crm',
+  'product-real-estate->crm',
+  'product-education->crm',
+  'website-platform->product-real-estate',
+  'website-platform->product-education',
 ]);
 
 // ── the baseline: empty since Step 6 (it held 17 entries at eb4eca3) ──────────────────────
@@ -341,6 +351,12 @@ const PHYSICAL_ROOTS: readonly { dir: string; logical: string }[] = [
   { dir: 'packages/admin/src/admin', logical: 'src/lib/admin' },
   { dir: 'packages/admin/src/invitations', logical: 'src/lib/invitations' },
   { dir: 'packages/shared-ui/src', logical: 'src/components/ui' },
+  { dir: 'packages/products/real-estate/src', logical: 'src/lib/product-real-estate' },
+  { dir: 'packages/products/education/src', logical: 'src/lib/product-education' },
+  { dir: 'packages/website-platform/src', logical: 'src/lib/website-platform' },
+  { dir: 'packages/white-label-platform/src', logical: 'src/lib/white-label-platform' },
+  { dir: 'packages/mobile-platform/src', logical: 'src/lib/mobile-platform' },
+  { dir: 'apps/mobile/src', logical: 'src/mobile' },
 ];
 
 /** A physical, repository-relative path as its logical `src/…` path (null when outside the roots). */
@@ -626,6 +642,57 @@ function resolveSpecifier(from: string, spec: string): string | null {
     found = existingFile(
       join('packages', 'shared-ui', 'src', spec.slice('@pravshi/shared-ui/'.length)),
     );
+  } else if (spec === '@pravshi/product-real-estate') {
+    found = existingFile(join('packages', 'products', 'real-estate', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/product-real-estate/')) {
+    found = existingFile(
+      join(
+        'packages',
+        'products',
+        'real-estate',
+        'src',
+        spec.slice('@pravshi/product-real-estate/'.length),
+      ),
+    );
+  } else if (spec === '@pravshi/product-education') {
+    found = existingFile(join('packages', 'products', 'education', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/product-education/')) {
+    found = existingFile(
+      join(
+        'packages',
+        'products',
+        'education',
+        'src',
+        spec.slice('@pravshi/product-education/'.length),
+      ),
+    );
+  } else if (spec === '@pravshi/website-platform') {
+    found = existingFile(join('packages', 'website-platform', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/website-platform/')) {
+    found = existingFile(
+      join('packages', 'website-platform', 'src', spec.slice('@pravshi/website-platform/'.length)),
+    );
+  } else if (spec === '@pravshi/white-label-platform') {
+    found = existingFile(join('packages', 'white-label-platform', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/white-label-platform/')) {
+    found = existingFile(
+      join(
+        'packages',
+        'white-label-platform',
+        'src',
+        spec.slice('@pravshi/white-label-platform/'.length),
+      ),
+    );
+  } else if (spec === '@pravshi/mobile-platform') {
+    found = existingFile(join('packages', 'mobile-platform', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/mobile-platform/')) {
+    found = existingFile(
+      join('packages', 'mobile-platform', 'src', spec.slice('@pravshi/mobile-platform/'.length)),
+    );
+  } else if (spec === '@pravshi/mobile') {
+    found = existingFile(join('apps', 'mobile', 'src', 'index'));
+  } else if (spec.startsWith('@pravshi/mobile/')) {
+    found = existingFile(join('apps', 'mobile', 'src', spec.slice('@pravshi/mobile/'.length)));
   } else if (spec.startsWith('.')) {
     found = existingFile(join(dirname(from), spec));
   } else return null; // a package import: outside the graph
