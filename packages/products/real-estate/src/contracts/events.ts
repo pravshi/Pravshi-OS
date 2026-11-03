@@ -3,7 +3,25 @@
  *
  * Emitted across the domain events port for workflow orchestration, audit logging,
  * and outbound notifications. Tenant-stamped by authorization context.
+ *
+ * All domain event types, Zod payload schemas, and canonical envelope contracts
+ * are frozen in Layer 3 (`@pravshi/contracts`).
  */
+export {
+  REAL_ESTATE_EVENT_TYPES,
+  RealEstateEventTypeSchema,
+  DEFERRED_RE_WORKFLOW_TRIGGER_TYPES,
+  DEFERRED_RE_INTEGRATION_EVENT_KEYS,
+  REAL_ESTATE_ENTITY_TYPES,
+  RealEstateEntityTypeSchema,
+  RealEstateDomainEventEnvelopeSchema,
+  buildRealEstateDedupKey,
+  type RealEstateEventType,
+  type DeferredRealEstateWorkflowTriggerType,
+  type DeferredRealEstateIntegrationEventKey,
+  type RealEstateEntityType,
+  type RealEstateDomainEventEnvelope,
+} from '@pravshi/contracts';
 
 export interface ListingPublishedEvent {
   readonly type: 'real_estate.listing.published';

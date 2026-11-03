@@ -65,6 +65,7 @@ import type { Authorization } from '@/lib/authz/require-permission';
 // (match → evaluate → execute) per §13 of the architecture audit.
 import { runWorkflowsForEvent } from './engine';
 import { WORKFLOW_TRIGGER_TYPES, type WorkflowTriggerType } from './schema';
+import type { DomainEntityType } from '@/lib/events';
 
 /**
  * Phase-5 trigger types — the canonical definition lives in `./schema` (the
@@ -79,7 +80,7 @@ export interface WorkflowEvent {
   readonly id: string; // uuid, one per emission
   readonly orgId: string; // from auth.ctx — never from input
   readonly type: WorkflowTriggerType;
-  readonly entityType: 'deal' | 'task' | 'project' | 'company' | 'contact' | null;
+  readonly entityType: DomainEntityType | null;
   readonly entityId: string | null;
   readonly actorPersonId: string; // auth.ctx.personId
   readonly occurredAt: string; // ISO-8601

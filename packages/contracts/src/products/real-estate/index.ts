@@ -7,3 +7,4 @@ export * from './leads';
 export * from './visits';
 export * from './transactions';
 export * from './compliance';
+export * from './events';

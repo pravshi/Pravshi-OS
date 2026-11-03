@@ -112,6 +112,18 @@ export const WORKFLOW_TRIGGER_TYPES = [
   'scheduled',
   'webhook',
   'task.overdue',
+  // Real Estate workflow triggers (P0 contract registered; runtime deferred to later phases):
+  'lead.created',
+  'lead.assigned',
+  'lead.converted',
+  'visit.scheduled',
+  'visit.completed',
+  'booking.created',
+  'booking.cancelled',
+  'payment.reconciled',
+  'demand.issued',
+  'commission.approved',
+  'cp.claim.disputed',
 ] as const;
 
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];
@@ -138,7 +150,20 @@ export const IMPLEMENTED_TRIGGER_TYPES = [
 export type ImplementedTriggerType = (typeof IMPLEMENTED_TRIGGER_TYPES)[number];
 
 /** Phase 6+ contracts: schema-accepted, registry-documented, no runtime yet. */
-export const DEFERRED_TRIGGER_TYPES = ['task.overdue'] as const;
+export const DEFERRED_TRIGGER_TYPES = [
+  'task.overdue',
+  'lead.created',
+  'lead.assigned',
+  'lead.converted',
+  'visit.scheduled',
+  'visit.completed',
+  'booking.created',
+  'booking.cancelled',
+  'payment.reconciled',
+  'demand.issued',
+  'commission.approved',
+  'cp.claim.disputed',
+] as const;
 export type DeferredTriggerType = (typeof DEFERRED_TRIGGER_TYPES)[number];
 
 /** Accepts every type in the canonical enum (§10):
