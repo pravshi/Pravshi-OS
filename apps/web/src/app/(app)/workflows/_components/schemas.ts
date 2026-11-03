@@ -54,6 +54,17 @@ export const TRIGGER_TYPE_LABELS: Record<ImplementedTriggerType, string> = {
 
 export const DEFERRED_TRIGGER_LABELS: Record<(typeof DEFERRED_TRIGGER_TYPES)[number], string> = {
   'task.overdue': 'Task overdue',
+  'lead.created': 'Lead created (Real Estate)',
+  'lead.assigned': 'Lead assigned (Real Estate)',
+  'lead.converted': 'Lead converted (Real Estate)',
+  'visit.scheduled': 'Site visit scheduled (Real Estate)',
+  'visit.completed': 'Site visit completed (Real Estate)',
+  'booking.created': 'Booking created (Real Estate)',
+  'booking.cancelled': 'Booking cancelled (Real Estate)',
+  'payment.reconciled': 'Payment reconciled (Real Estate)',
+  'demand.issued': 'Demand issued (Real Estate)',
+  'commission.approved': 'Commission approved (Real Estate)',
+  'cp.claim.disputed': 'CP claim disputed (Real Estate)',
 };
 
 export const ACTION_TYPE_LABELS: Record<ImplementedActionType, string> = {

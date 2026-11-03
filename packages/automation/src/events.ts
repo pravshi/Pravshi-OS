@@ -65,6 +65,7 @@ import type { Authorization } from '@/lib/authz/require-permission';
 // (match → evaluate → execute) per §13 of the architecture audit.
 import { runWorkflowsForEvent } from './engine';
 import { WORKFLOW_TRIGGER_TYPES, type WorkflowTriggerType } from './schema';
+import type { DomainEntityType } from '@/lib/events';
 
 /**
  * Phase-5 trigger types — the canonical definition lives in `./schema` (the
@@ -79,7 +80,7 @@ export interface WorkflowEvent {
   readonly id: string; // uuid, one per emission
   readonly orgId: string; // from auth.ctx — never from input
   readonly type: WorkflowTriggerType;
-  readonly entityType: 'deal' | 'task' | 'project' | 'company' | 'contact' | null;
+  readonly entityType: DomainEntityType | null;
   readonly entityId: string | null;
   readonly actorPersonId: string; // auth.ctx.personId
   readonly occurredAt: string; // ISO-8601
@@ -88,11 +89,15 @@ export interface WorkflowEvent {
 }
 
 /** Input accepted by `dispatchWorkflowEvent`: the caller supplies the domain
- *  facts; identity fields are stamped from the Authorization. */
+ *  facts; identity fields are stamped from the Authorization while preserving
+ *  canonical origin event id and occurredAt timestamps if supplied. */
 export type WorkflowEventInput = Omit<
   WorkflowEvent,
   'id' | 'orgId' | 'actorPersonId' | 'occurredAt'
->;
+> & {
+  readonly id?: string;
+  readonly occurredAt?: string;
+};
 
 /**
  * Joins the non-empty parts with `:`, e.g. `buildDedupKey('deal_stage_history', historyId)`.
@@ -233,10 +238,10 @@ export async function dispatchWorkflowEvent(
 
     const fullEvent: WorkflowEvent = {
       ...event,
-      id: randomUUID(),
+      id: event.id ?? randomUUID(),
       orgId: auth.ctx.orgId,
       actorPersonId: auth.ctx.personId,
-      occurredAt: new Date().toISOString(),
+      occurredAt: event.occurredAt ?? new Date().toISOString(),
     };
 
     // Awaited inline (D1): on the serverless target the function may freeze
