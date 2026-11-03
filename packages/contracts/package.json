@@ -5,6 +5,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./base": "./src/base.ts",
+    "./crm/leads": "./src/crm/leads.ts",
+    "./products/real-estate": "./src/products/real-estate/index.ts",
+    "./products/real-estate/*": "./src/products/real-estate/*.ts",
     "./*": "./src/*.ts"
   },
   "dependencies": {

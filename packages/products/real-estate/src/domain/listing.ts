@@ -166,3 +166,17 @@ export function assertListingPublishable(listing: RealEstateListing): void {
     );
   }
 }
+
+/**
+ * Canonical real-estate contracts re-exported from @pravshi/contracts (Layer 3).
+ */
+export type {
+  InventoryAtom,
+  InventoryAtomType,
+  InventoryAtomStatus,
+  ResolvedAreaMeasurement,
+  AreaMeasurement,
+  AreaMeasurementInput,
+  AreaUnit,
+  AreaConversionProvenance,
+} from '@pravshi/contracts';

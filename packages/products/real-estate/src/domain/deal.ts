@@ -147,3 +147,15 @@ export function assertCanCloseWonRealEstateDeal(deal: RealEstateDeal): void {
   }
   validateCommissionSplits(deal.commissionSplits);
 }
+
+/**
+ * Canonical real-estate contracts re-exported from @pravshi/contracts (Layer 3).
+ */
+export type {
+  PricingStructure as PricingStructurePaise,
+  CostSheetSnapshot,
+  BookingContract,
+  BookingStatus,
+  StatutoryGateStatus,
+  MoneyPaise,
+} from '@pravshi/contracts';
