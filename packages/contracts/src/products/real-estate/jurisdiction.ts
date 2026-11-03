@@ -12,7 +12,10 @@ import { z } from 'zod';
  */
 export const JurisdictionCodeSchema = z
   .string()
-  .regex(/^IN-[A-Z]{2}$/, 'Jurisdiction must be an ISO 3166-2:IN state code (e.g., IN-AP, IN-TG, IN-KA)');
+  .regex(
+    /^IN-[A-Z]{2}$/,
+    'Jurisdiction must be an ISO 3166-2:IN state code (e.g., IN-AP, IN-TG, IN-KA)',
+  );
 
 export type JurisdictionCode = z.infer<typeof JurisdictionCodeSchema>;
 
@@ -47,4 +50,3 @@ export const JurisdictionRegistryEntrySchema = z.object({
   registeredAt: z.string().datetime(),
 });
 export type JurisdictionRegistryEntry = z.infer<typeof JurisdictionRegistryEntrySchema>;
-

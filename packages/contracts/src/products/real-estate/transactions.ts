@@ -39,9 +39,10 @@ export const PricingStructureSchema = z
       return sum === p.grossTotalPaise && Number.isSafeInteger(sum);
     },
     {
-      message: 'FINANCIAL INTEGRITY ERROR: grossTotalPaise must equal component sum without aggregate overflow beyond MAX_SAFE_INTEGER',
+      message:
+        'FINANCIAL INTEGRITY ERROR: grossTotalPaise must equal component sum without aggregate overflow beyond MAX_SAFE_INTEGER',
       path: ['grossTotalPaise'],
-    }
+    },
   );
 export type PricingStructure = z.infer<typeof PricingStructureSchema>;
 
@@ -57,7 +58,9 @@ export type PricingStructure = z.infer<typeof PricingStructureSchema>;
 export const CostSheetSnapshotSchema = z.object({
   costSheetId: UuidSchema,
   inventoryAtomId: UuidSchema,
-  snapshotHash: z.string().regex(/^[a-f0-9]{64}$/, 'Must be a 64-character lowercase SHA-256 hash of canonicalized JSON'),
+  snapshotHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/, 'Must be a 64-character lowercase SHA-256 hash of canonicalized JSON'),
   pricing: PricingStructureSchema,
   approvedByUserId: UuidSchema,
   validUntil: z.string().datetime(),
@@ -99,20 +102,14 @@ export const BookingContractSchema = z
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })
-  .refine(
-    (b) => b.totalAgreedValuePaise === b.costSheetSnapshot.pricing.grossTotalPaise,
-    {
-      message: 'totalAgreedValuePaise must exactly match costSheetSnapshot.pricing.grossTotalPaise',
-      path: ['totalAgreedValuePaise'],
-    }
-  )
-  .refine(
-    (b) => b.cumulativeCollectionsPaise <= b.totalAgreedValuePaise,
-    {
-      message: 'cumulativeCollectionsPaise cannot exceed totalAgreedValuePaise',
-      path: ['cumulativeCollectionsPaise'],
-    }
-  )
+  .refine((b) => b.totalAgreedValuePaise === b.costSheetSnapshot.pricing.grossTotalPaise, {
+    message: 'totalAgreedValuePaise must exactly match costSheetSnapshot.pricing.grossTotalPaise',
+    path: ['totalAgreedValuePaise'],
+  })
+  .refine((b) => b.cumulativeCollectionsPaise <= b.totalAgreedValuePaise, {
+    message: 'cumulativeCollectionsPaise cannot exceed totalAgreedValuePaise',
+    path: ['cumulativeCollectionsPaise'],
+  })
   .refine(
     (b) => {
       if (b.status === 'agreement_registered') {
@@ -127,8 +124,9 @@ export const BookingContractSchema = z
       return true;
     },
     {
-      message: 'agreement_registered status requires non-empty registeredAgreementNumber and valid registeredAgreementDate',
+      message:
+        'agreement_registered status requires non-empty registeredAgreementNumber and valid registeredAgreementDate',
       path: ['registeredAgreementNumber'],
-    }
+    },
   );
 export type BookingContract = z.infer<typeof BookingContractSchema>;

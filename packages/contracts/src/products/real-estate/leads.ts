@@ -8,13 +8,7 @@ import { z } from 'zod';
 import { UuidSchema, MoneyPaiseSchema } from '../../base';
 import { JurisdictionCodeSchema } from './jurisdiction';
 
-export const PROPERTY_TYPES = [
-  'apartment',
-  'villa',
-  'plot',
-  'commercial',
-  'farm_land',
-] as const;
+export const PROPERTY_TYPES = ['apartment', 'villa', 'plot', 'commercial', 'farm_land'] as const;
 export const PropertyTypeEnum = z.enum(PROPERTY_TYPES);
 export type PropertyType = z.infer<typeof PropertyTypeEnum>;
 
@@ -53,11 +47,8 @@ export const RealEstateLeadPreferencesSchema = z
     possessionTimeline: PossessionTimelineEnum.default('ready_to_move'),
     financingMode: z.enum(['bank_loan', 'self_funded', 'undecided']).default('undecided'),
   })
-  .refine(
-    (data) => data.budgetMinPaise <= data.budgetMaxPaise,
-    {
-      message: 'budgetMinPaise must not exceed budgetMaxPaise',
-      path: ['budgetMinPaise'],
-    }
-  );
+  .refine((data) => data.budgetMinPaise <= data.budgetMaxPaise, {
+    message: 'budgetMinPaise must not exceed budgetMaxPaise',
+    path: ['budgetMinPaise'],
+  });
 export type RealEstateLeadPreferences = z.infer<typeof RealEstateLeadPreferencesSchema>;

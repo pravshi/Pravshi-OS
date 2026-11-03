@@ -17,12 +17,7 @@ export const RULE_VERIFICATION_STATUSES = [
 export const RuleVerificationStatusEnum = z.enum(RULE_VERIFICATION_STATUSES);
 export type RuleVerificationStatus = z.infer<typeof RuleVerificationStatusEnum>;
 
-export const ENFORCEMENT_BEHAVIORS = [
-  'hard_block',
-  'warning',
-  'advisory',
-  'disabled',
-] as const;
+export const ENFORCEMENT_BEHAVIORS = ['hard_block', 'warning', 'advisory', 'disabled'] as const;
 export const EnforcementBehaviorEnum = z.enum(ENFORCEMENT_BEHAVIORS);
 export type EnforcementBehavior = z.infer<typeof EnforcementBehaviorEnum>;
 
@@ -45,9 +40,13 @@ export const LegalVerificationDetailsSchema = z.object({
   verifiedByCounselName: z.string().min(3, 'Counsel name is required'),
   barCouncilRegistrationNumber: z.string().min(5, 'Valid Bar Council registration required'),
   legalOpinionDocumentRef: z.string().min(5, 'Legal opinion document reference is required'),
-  opinionDocumentSha256: z.string().regex(/^[a-f0-9]{64}$/, 'Must be a 64-char lowercase SHA-256 hash of signed opinion'),
+  opinionDocumentSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/, 'Must be a 64-char lowercase SHA-256 hash of signed opinion'),
   verifiedAt: z.string().datetime(),
-  statutoryGazetteReference: z.string().min(5, 'Official Gazette or statutory notification citation required'),
+  statutoryGazetteReference: z
+    .string()
+    .min(5, 'Official Gazette or statutory notification citation required'),
   verifiedScope: z.string().min(10, 'Specific scope of legal verification required'),
 });
 export type LegalVerificationDetails = z.infer<typeof LegalVerificationDetailsSchema>;
@@ -86,9 +85,10 @@ export const RegulatoryRuleContractSchema = z
       return true;
     },
     {
-      message: 'SAFETY VIOLATION: A regulatory rule with PENDING_LEGAL_VERIFICATION cannot enforce hard_block. Verified legal counsel is required.',
+      message:
+        'SAFETY VIOLATION: A regulatory rule with PENDING_LEGAL_VERIFICATION cannot enforce hard_block. Verified legal counsel is required.',
       path: ['enforcementBehavior'],
-    }
+    },
   )
   .refine(
     (rule) => {
@@ -104,9 +104,10 @@ export const RegulatoryRuleContractSchema = z
       return true;
     },
     {
-      message: 'hard_block enforcement strictly requires VERIFIED_LEGAL_COUNSEL with verified submittedEvidence AND a VERIFIED_TRUSTED server approval stamp.',
+      message:
+        'hard_block enforcement strictly requires VERIFIED_LEGAL_COUNSEL with verified submittedEvidence AND a VERIFIED_TRUSTED server approval stamp.',
       path: ['enforcementBehavior'],
-    }
+    },
   )
   .refine(
     (rule) => {
@@ -119,7 +120,7 @@ export const RegulatoryRuleContractSchema = z
     {
       message: 'Rules marked NOT_APPLICABLE must have enforcementBehavior set to disabled.',
       path: ['enforcementBehavior'],
-    }
+    },
   );
 
 export type RegulatoryRuleContract = z.infer<typeof RegulatoryRuleContractSchema>;

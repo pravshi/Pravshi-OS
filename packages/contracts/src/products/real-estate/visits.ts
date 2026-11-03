@@ -39,11 +39,12 @@ export const SiteVisitScheduleSchema = z
     status: SiteVisitStatusEnum.default('scheduled'),
   })
   .refine(
-    (data) => new Date(data.scheduledEndTime).getTime() > new Date(data.scheduledStartTime).getTime(),
+    (data) =>
+      new Date(data.scheduledEndTime).getTime() > new Date(data.scheduledStartTime).getTime(),
     {
       message: 'scheduledEndTime must be strictly later than scheduledStartTime',
       path: ['scheduledEndTime'],
-    }
+    },
   );
 export type SiteVisitSchedule = z.infer<typeof SiteVisitScheduleSchema>;
 
@@ -54,7 +55,9 @@ export const VerificationProofDataSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('otp'),
     telecomMessageRef: z.string().min(5),
-    verifiedTokenSha256: z.string().regex(/^[a-f0-9]{64}$/, 'Must be a 64-character SHA-256 hash of token'),
+    verifiedTokenSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/, 'Must be a 64-character SHA-256 hash of token'),
     verifiedAt: z.string().datetime(),
   }),
   z.object({
@@ -72,7 +75,9 @@ export const VerificationProofDataSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('manual_override'),
     overrideAuthorizedByUserId: UuidSchema,
-    overrideReason: z.string().min(15, 'Manual override reason must be at least 15 characters of justification'),
+    overrideReason: z
+      .string()
+      .min(15, 'Manual override reason must be at least 15 characters of justification'),
   }),
 ]);
 export type VerificationProofData = z.infer<typeof VerificationProofDataSchema>;
@@ -96,7 +101,7 @@ export const SiteVisitOutcomeInputSchema = z
     {
       message: 'completedAt cannot be in the future',
       path: ['completedAt'],
-    }
+    },
   );
 export type SiteVisitOutcomeInput = z.infer<typeof SiteVisitOutcomeInputSchema>;
 

@@ -180,4 +180,3 @@ export type {
   AreaUnit,
   AreaConversionProvenance,
 } from '@pravshi/contracts';
-

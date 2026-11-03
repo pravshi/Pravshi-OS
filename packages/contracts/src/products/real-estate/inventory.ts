@@ -36,7 +36,9 @@ export const AREA_CONVERSION_AUTHORITIES = [
 export const AreaConversionProvenanceSchema = z.object({
   sourceAuthority: z.enum(AREA_CONVERSION_AUTHORITIES),
   effectiveVersion: z.string().min(1, 'effectiveVersion is required'),
-  sourceCitation: z.string().min(3, 'sourceCitation must provide verifiable statutory or municipal reference'),
+  sourceCitation: z
+    .string()
+    .min(3, 'sourceCitation must provide verifiable statutory or municipal reference'),
   districtOrMicroMarket: z.string().optional(),
   isLegallyAuthoritative: z.boolean().default(false),
 });
@@ -76,9 +78,10 @@ export const ResolvedAreaMeasurementSchema = z
       return Math.abs(expected - actual) <= 0.0001;
     },
     {
-      message: 'normalizedSqFt must match enteredValue * conversionFactorToSqFt within rounding tolerance (4 decimal places)',
+      message:
+        'normalizedSqFt must match enteredValue * conversionFactorToSqFt within rounding tolerance (4 decimal places)',
       path: ['normalizedSqFt'],
-    }
+    },
   );
 
 export type ResolvedAreaMeasurement = z.infer<typeof ResolvedAreaMeasurementSchema>;

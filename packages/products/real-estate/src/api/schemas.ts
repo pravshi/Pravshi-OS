@@ -156,4 +156,3 @@ export {
   RegulatoryRuleContractSchema,
   JurisdictionComplianceConfigSchema,
 } from '@pravshi/contracts';
-

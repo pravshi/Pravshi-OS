@@ -51,7 +51,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
     it('validates exact additive component equality in PricingStructure', () => {
       const validPricing = {
         baseAmountPaise: 50_000_000, // ₹5,00,000
-        floorRisePaise: 5_000_000,   // ₹50,000
+        floorRisePaise: 5_000_000, // ₹50,000
         preferentialLocationChargePaise: 2_500_000,
         amenitiesChargePaise: 2_500_000,
         clubhouseMembershipChargePaise: 1_000_000,
@@ -75,7 +75,9 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         grossTotalPaise: 54_000_000, // expected 55_000_000
       };
 
-      expect(() => PricingStructureSchema.parse(mismatchedPricing)).toThrow(/FINANCIAL INTEGRITY ERROR/);
+      expect(() => PricingStructureSchema.parse(mismatchedPricing)).toThrow(
+        /FINANCIAL INTEGRITY ERROR/,
+      );
     });
 
     it('rejects PricingStructure if component sum causes aggregate overflow beyond MAX_SAFE_INTEGER', () => {
@@ -156,7 +158,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => RegulatoryRuleContractSchema.parse(untrustedRule)).toThrow(
-        /hard_block enforcement strictly requires.*VERIFIED_TRUSTED server approval stamp/
+        /hard_block enforcement strictly requires.*VERIFIED_TRUSTED server approval stamp/,
       );
     });
 
@@ -200,7 +202,9 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         enforcementBehavior: 'advisory', // should be disabled
       };
 
-      expect(() => RegulatoryRuleContractSchema.parse(notApplicableRule)).toThrow(/must have enforcementBehavior set to disabled/);
+      expect(() => RegulatoryRuleContractSchema.parse(notApplicableRule)).toThrow(
+        /must have enforcementBehavior set to disabled/,
+      );
     });
   });
 
@@ -323,7 +327,9 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         resolvedAt: '2026-01-01T00:00:00Z',
       };
 
-      expect(() => ResolvedAreaMeasurementSchema.parse(mismatchedArea)).toThrow(/normalizedSqFt must match/);
+      expect(() => ResolvedAreaMeasurementSchema.parse(mismatchedArea)).toThrow(
+        /normalizedSqFt must match/,
+      );
     });
 
     it('rejects negative area values or negative conversion factors', () => {
@@ -332,7 +338,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
           enteredValue: -5,
           enteredUnit: 'sqft',
           targetJurisdiction: 'IN-AP',
-        })
+        }),
       ).toThrow();
     });
   });
@@ -351,7 +357,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => SiteVisitScheduleSchema.parse(invalidSchedule)).toThrow(
-        /scheduledEndTime must be strictly later than scheduledStartTime/
+        /scheduledEndTime must be strictly later than scheduledStartTime/,
       );
     });
 
@@ -370,7 +376,9 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         feedbackNotes: 'Customer loved the high ceiling and lake view.',
       };
 
-      expect(() => SiteVisitOutcomeInputSchema.parse(futureCompleted)).toThrow(/completedAt cannot be in the future/);
+      expect(() => SiteVisitOutcomeInputSchema.parse(futureCompleted)).toThrow(
+        /completedAt cannot be in the future/,
+      );
     });
 
     it('parses valid OTP and manual override verification proofs', () => {
@@ -384,7 +392,8 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       const manualOverrideProof = {
         method: 'manual_override',
         overrideAuthorizedByUserId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-        overrideReason: 'Network outage at remote project site; manager manually verified via customer phone confirmation.',
+        overrideReason:
+          'Network outage at remote project site; manager manually verified via customer phone confirmation.',
       };
 
       expect(() => VerificationProofDataSchema.parse(otpProof)).not.toThrow();
@@ -398,7 +407,9 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         overrideReason: 'Network down', // Only 12 chars
       };
 
-      expect(() => VerificationProofDataSchema.parse(shortReason)).toThrow(/at least 15 characters/);
+      expect(() => VerificationProofDataSchema.parse(shortReason)).toThrow(
+        /at least 15 characters/,
+      );
     });
 
     it('validates server-derived SiteVisitOutcomeRecord with authoritative 24h discipline', () => {
@@ -449,7 +460,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
         CostSheetSnapshotSchema.parse({
           ...validSnapshot,
           snapshotHash: 'short-hash',
-        })
+        }),
       ).toThrow(/64-character lowercase SHA-256 hash/);
     });
 
@@ -470,7 +481,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => BookingContractSchema.parse(mismatchedBooking)).toThrow(
-        /totalAgreedValuePaise must exactly match costSheetSnapshot.pricing.grossTotalPaise/
+        /totalAgreedValuePaise must exactly match costSheetSnapshot.pricing.grossTotalPaise/,
       );
     });
 
@@ -491,7 +502,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => BookingContractSchema.parse(overcollectedBooking)).toThrow(
-        /cumulativeCollectionsPaise cannot exceed totalAgreedValuePaise/
+        /cumulativeCollectionsPaise cannot exceed totalAgreedValuePaise/,
       );
     });
 
@@ -514,7 +525,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => BookingContractSchema.parse(incompleteRegisteredBooking)).toThrow(
-        /agreement_registered status requires non-empty registeredAgreementNumber/
+        /agreement_registered status requires non-empty registeredAgreementNumber/,
       );
     });
   });
@@ -543,7 +554,7 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
       };
 
       expect(() => RealEstateLeadPreferencesSchema.parse(invertedBudget)).toThrow(
-        /budgetMinPaise must not exceed budgetMaxPaise/
+        /budgetMinPaise must not exceed budgetMaxPaise/,
       );
     });
 
@@ -562,4 +573,3 @@ describe('PR-RE-001: P0 Real Estate Contracts Freeze Test Suite', () => {
     });
   });
 });
-

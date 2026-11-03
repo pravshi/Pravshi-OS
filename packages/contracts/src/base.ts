@@ -23,17 +23,16 @@ export const CalendarDateSchema = z.string().refine(
       date.getUTCDate() === day
     );
   },
-  { message: 'Must be a valid calendar date in YYYY-MM-DD format (e.g. 2026-02-28)' }
+  { message: 'Must be a valid calendar date in YYYY-MM-DD format (e.g. 2026-02-28)' },
 );
 
 /**
  * Monetary values represented as non-negative safe integers in paise (1 INR = 100 paise).
  * Strictly enforces Number.isSafeInteger to prevent JavaScript floating-point arithmetic errors.
  */
-export const MoneyPaiseSchema = z.number().refine(
-  (n) => Number.isSafeInteger(n) && n >= 0,
-  { message: 'Monetary amounts must be non-negative safe integers (up to Number.MAX_SAFE_INTEGER)' }
-);
+export const MoneyPaiseSchema = z.number().refine((n) => Number.isSafeInteger(n) && n >= 0, {
+  message: 'Monetary amounts must be non-negative safe integers (up to Number.MAX_SAFE_INTEGER)',
+});
 
 export type MoneyPaise = z.infer<typeof MoneyPaiseSchema>;
 
@@ -74,4 +73,3 @@ export const DateRangeQuerySchema = z.object({
   to: z.string().datetime().optional(),
 });
 export type DateRangeQuery = z.infer<typeof DateRangeQuerySchema>;
-

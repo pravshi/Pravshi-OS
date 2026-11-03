@@ -136,4 +136,3 @@ export type {
   SiteVisitOutcomeRecord,
   VerificationProofData,
 } from '@pravshi/contracts';
-
