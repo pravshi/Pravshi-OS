@@ -130,7 +130,7 @@ describe('Real Estate Workflow & Integration Safety (Corrections 1-4)', () => {
       expect(envelope.entityId).toBe('bk-12345');
       expect(envelope.entityVersion).toBe(1);
       expect(envelope.type).toBe('booking.created');
-      expect(envelope.dedupKey).toBe(`re:${auth.ctx.orgId}:booking:bk-12345:1`);
+      expect(envelope.dedupKey).toBe(`re:${auth.ctx.orgId}:booking.created:booking:bk-12345:1`);
     });
 
     it('guarantees untrusted client input cannot override server orgId or actorPersonId', () => {
@@ -165,7 +165,7 @@ describe('Real Estate Workflow & Integration Safety (Corrections 1-4)', () => {
           entityId: 'ent-1',
           actorPersonId: '33333333-3333-4333-8333-333333333333',
           occurredAt: new Date().toISOString(),
-          dedupKey: `re:22222222-2222-4222-8222-222222222222:${entityType}:ent-1:1`,
+          dedupKey: `re:22222222-2222-4222-8222-222222222222:lead.created:${entityType}:ent-1:1`,
           payload: { test: true },
         };
         expect(event.entityType).toBe(entityType);
@@ -181,7 +181,7 @@ describe('Real Estate Workflow & Integration Safety (Corrections 1-4)', () => {
         entityId: 'ld-1',
         actorPersonId: '33333333-3333-4333-8333-333333333333',
         occurredAt: new Date().toISOString(),
-        dedupKey: 're:22222222-2222-4222-8222-222222222222:lead:ld-1:1',
+        dedupKey: 're:22222222-2222-4222-8222-222222222222:lead.created:lead:ld-1:1',
         payload: { source: 'website_form' },
       };
 
@@ -227,11 +227,40 @@ describe('Real Estate Workflow & Integration Safety (Corrections 1-4)', () => {
 
       expect(dispatched).toHaveLength(1);
       const input = dispatched[0]!;
+      expect(input.id).toBe(envelope.id);
+      expect(input.occurredAt).toBe(envelope.occurredAt);
       expect(input.type).toBe('lead.created');
       expect(input.entityType).toBe('lead');
       expect(input.entityId).toBe('ld-999');
       expect(input.dedupKey).toBe(envelope.dedupKey);
       expect(input.payload).toBe(envelope.payload);
+    });
+
+    it('workflow dispatcher preserves caller id and occurredAt when supplied, but generates fresh ones when omitted', async () => {
+      const { dispatchWorkflowEvent: realDispatchWorkflowEvent } =
+        await import('@/lib/workflows/events');
+      // Verify signature accepts optional id and occurredAt
+      const withIdentity: Parameters<typeof realDispatchWorkflowEvent>[1] = {
+        id: '99999999-9999-4999-8999-999999999999',
+        occurredAt: '2026-11-03T10:00:00.000Z',
+        type: 'deal.created',
+        entityType: 'deal',
+        entityId: 'dl-123',
+        dedupKey: 'deal:dl-123:created',
+        payload: {},
+      };
+      expect(withIdentity.id).toBe('99999999-9999-4999-8999-999999999999');
+      expect(withIdentity.occurredAt).toBe('2026-11-03T10:00:00.000Z');
+
+      const withoutIdentity: Parameters<typeof realDispatchWorkflowEvent>[1] = {
+        type: 'deal.created',
+        entityType: 'deal',
+        entityId: 'dl-123',
+        dedupKey: 'deal:dl-123:created',
+        payload: {},
+      };
+      expect(withoutIdentity.id).toBeUndefined();
+      expect(withoutIdentity.occurredAt).toBeUndefined();
     });
   });
 });

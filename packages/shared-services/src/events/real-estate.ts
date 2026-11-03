@@ -46,6 +46,7 @@ export function createTrustedRealEstateEventEnvelope<
   const id = randomUUID();
   const dedupKey = buildRealEstateDedupKey(
     orgId,
+    args.type,
     args.entityType,
     args.entityId,
     args.entityVersion,
@@ -75,17 +76,20 @@ export function createTrustedRealEstateEventEnvelope<
  * Hands a canonical Real Estate domain event to the workflow dispatcher port.
  *
  * Reconciles the Real Estate event envelope with the workflow engine contract:
- * Preserves the canonical `dedupKey`, `entityType`, `entityId`, and `payload`
- * without generating duplicate event identities or deviating timestamps.
+ * Preserves the canonical `id`, `occurredAt`, `dedupKey`, `entityType`,
+ * `entityId`, and `payload` without generating duplicate event identities or
+ * deviating execution timestamps.
  */
 export async function dispatchRealEstateWorkflowEvent(
   auth: Authorization,
   envelope: RealEstateDomainEventEnvelope,
 ): Promise<void> {
   const input: DomainWorkflowEventInput = {
+    id: envelope.id,
     type: envelope.type as DomainWorkflowEventType,
     entityType: envelope.entityType,
     entityId: envelope.entityId,
+    occurredAt: envelope.occurredAt,
     dedupKey: envelope.dedupKey,
     payload: envelope.payload,
   };

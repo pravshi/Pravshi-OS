@@ -594,28 +594,108 @@ describe('Real Estate Domain Event Catalogue & Contracts', () => {
   });
 
   describe('Deduplication Stability, Non-Collision & Tenant Isolation', () => {
-    it('produces identical dedupKey for the same tenant, entity, and version', () => {
-      const key1 = buildRealEstateDedupKey('org-123', 'booking', 'b-456', 1);
-      const key2 = buildRealEstateDedupKey('org-123', 'booking', 'b-456', 1);
-      expect(key1).toBe('re:org-123:booking:b-456:1');
+    it('produces identical dedupKey for the same tenant, event type, entity, and version', () => {
+      const key1 = buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-456', 1);
+      const key2 = buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-456', 1);
+      expect(key1).toBe('re:org-123:booking.created:booking:b-456:1');
       expect(key1).toBe(key2);
     });
 
-    it('guarantees tenant isolation: different orgs with same entityId NEVER collide', () => {
-      const orgA = buildRealEstateDedupKey('org-A', 'booking', 'b-456', 1);
-      const orgB = buildRealEstateDedupKey('org-B', 'booking', 'b-456', 1);
-      expect(orgA).not.toBe(orgB);
-      expect(orgA).toBe('re:org-A:booking:b-456:1');
-      expect(orgB).toBe('re:org-B:booking:b-456:1');
+    it('guarantees event-type isolation: booking.created and booking.cancelled NEVER collide for same booking and version', () => {
+      const createdKey = buildRealEstateDedupKey(
+        'org-123',
+        'booking.created',
+        'booking',
+        'b-456',
+        1,
+      );
+      const cancelledKey = buildRealEstateDedupKey(
+        'org-123',
+        'booking.cancelled',
+        'booking',
+        'b-456',
+        1,
+      );
+      expect(createdKey).not.toBe(cancelledKey);
+      expect(createdKey).toBe('re:org-123:booking.created:booking:b-456:1');
+      expect(cancelledKey).toBe('re:org-123:booking.cancelled:booking:b-456:1');
     });
 
-    it('guarantees distinct occurrences have distinct keys across versions and entities', () => {
-      const v1 = buildRealEstateDedupKey('org-123', 'booking', 'b-456', 1);
-      const v2 = buildRealEstateDedupKey('org-123', 'booking', 'b-456', 2);
-      const otherEntity = buildRealEstateDedupKey('org-123', 'payment', 'b-456', 1);
+    it('guarantees tenant isolation: different orgs with same entityId and event type NEVER collide', () => {
+      const orgA = buildRealEstateDedupKey('org-A', 'booking.created', 'booking', 'b-456', 1);
+      const orgB = buildRealEstateDedupKey('org-B', 'booking.created', 'booking', 'b-456', 1);
+      expect(orgA).not.toBe(orgB);
+      expect(orgA).toBe('re:org-A:booking.created:booking:b-456:1');
+      expect(orgB).toBe('re:org-B:booking.created:booking:b-456:1');
+    });
+
+    it('guarantees distinct occurrences have distinct keys across versions, entities, and IDs', () => {
+      const v1 = buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-456', 1);
+      const v2 = buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-456', 2);
+      const otherEntity = buildRealEstateDedupKey(
+        'org-123',
+        'booking.created',
+        'payment',
+        'b-456',
+        1,
+      );
+      const otherId = buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-789', 1);
 
       expect(v1).not.toBe(v2);
       expect(v1).not.toBe(otherEntity);
+      expect(v1).not.toBe(otherId);
+    });
+
+    it('guarantees child-record events use intended aggregate identity and versioning', () => {
+      // Payment child-record lifecycle on receipt rcpt-100 (parent booking bk-456)
+      const paymentReceived = buildRealEstateDedupKey(
+        'org-123',
+        'payment.received',
+        'payment',
+        'rcpt-100',
+        1,
+      );
+      const paymentReconciled = buildRealEstateDedupKey(
+        'org-123',
+        'payment.reconciled',
+        'payment',
+        'rcpt-100',
+        2,
+      );
+      const parentBooking = buildRealEstateDedupKey(
+        'org-123',
+        'booking.created',
+        'booking',
+        'bk-456',
+        1,
+      );
+
+      expect(paymentReceived).toBe('re:org-123:payment.received:payment:rcpt-100:1');
+      expect(paymentReconciled).toBe('re:org-123:payment.reconciled:payment:rcpt-100:2');
+      expect(paymentReceived).not.toBe(paymentReconciled);
+      expect(paymentReceived).not.toBe(parentBooking);
+
+      // Commission child-record state machine on commission comm-99 (parent deal dl-100)
+      const commAccrued = buildRealEstateDedupKey(
+        'org-123',
+        'commission.accrued',
+        'commission',
+        'comm-99',
+        1,
+      );
+      const commApproved = buildRealEstateDedupKey(
+        'org-123',
+        'commission.approved',
+        'commission',
+        'comm-99',
+        2,
+      );
+      const parentDeal = buildRealEstateDedupKey('org-123', 'deal.closed_won', 'deal', 'dl-100', 1);
+
+      expect(commAccrued).toBe('re:org-123:commission.accrued:commission:comm-99:1');
+      expect(commApproved).toBe('re:org-123:commission.approved:commission:comm-99:2');
+      expect(commAccrued).not.toBe(commApproved);
+      expect(commAccrued).not.toBe(parentDeal);
     });
   });
 
@@ -630,7 +710,7 @@ describe('Real Estate Domain Event Catalogue & Contracts', () => {
         entityId: 'bk-100',
         entityVersion: 1,
         type: 'booking.created',
-        dedupKey: 're:3f68a78a-c452-473d-9cb1-e01da13d5236:booking:bk-100:1',
+        dedupKey: 're:3f68a78a-c452-473d-9cb1-e01da13d5236:booking.created:booking:bk-100:1',
         payload: {
           bookingId: 'bk-100',
           dealId: 'dl-100',

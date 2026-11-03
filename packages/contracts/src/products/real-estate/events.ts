@@ -543,18 +543,26 @@ export type RealEstateDomainEventEnvelope<
 
 /**
  * Generates a tenant-scoped deterministic deduplication key for Real Estate domain events.
- * Guarantees cross-tenant isolation and per-occurrence uniqueness.
+ * Guarantees cross-tenant isolation, event-type isolation, and per-occurrence uniqueness.
  *
- * Example: `buildRealEstateDedupKey('org-123', 'booking', 'b-456', 2)`
- *       -> `'re:org-123:booking:b-456:2'`
+ * Explicitly distinguishes:
+ * - Different tenants (`orgId`)
+ * - Different event types (`eventType`, e.g. booking.created vs booking.cancelled)
+ * - Different aggregate/entity types (`entityType`, e.g. booking vs payment)
+ * - Different aggregate/entity IDs (`entityId`)
+ * - Different persisted versions or occurrence identities (`versionOrOccurrence`)
+ *
+ * Example: `buildRealEstateDedupKey('org-123', 'booking.created', 'booking', 'b-456', 1)`
+ *       -> `'re:org-123:booking.created:booking:b-456:1'`
  */
 export function buildRealEstateDedupKey(
   orgId: string,
+  eventType: string,
   entityType: string,
   entityId: string,
-  versionOrAction: string | number,
+  versionOrOccurrence: string | number,
 ): string {
-  return ['re', orgId, entityType, entityId, String(versionOrAction)]
+  return ['re', orgId, eventType, entityType, entityId, String(versionOrOccurrence)]
     .filter((p) => p !== '')
     .join(':');
 }
