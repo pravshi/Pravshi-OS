@@ -126,3 +126,14 @@ export function assertCanCompleteSiteVisit(visit: SiteVisit): void {
     );
   }
 }
+
+/**
+ * Canonical real-estate contracts re-exported from @pravshi/contracts (Layer 3).
+ */
+export type {
+  SiteVisitSchedule,
+  SiteVisitOutcomeInput,
+  SiteVisitOutcomeRecord,
+  VerificationProofData,
+} from '@pravshi/contracts';
+

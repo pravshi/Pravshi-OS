@@ -124,3 +124,36 @@ export const ManageDealSchema = z.object({
 });
 
 export type ManageDealInput = z.infer<typeof ManageDealSchema>;
+
+/**
+ * Canonical Real Estate contract schemas re-exported from @pravshi/contracts (Layer 3).
+ */
+export {
+  // Primitives & Money
+  MoneyPaiseSchema,
+  CalendarDateSchema,
+  // Jurisdiction
+  JurisdictionCodeSchema,
+  JurisdictionRegistryEntrySchema,
+  // Inventory & Area
+  AreaMeasurementInputSchema,
+  ResolvedAreaMeasurementSchema,
+  AreaMeasurementSchema,
+  InventoryAtomSchema,
+  // Leads
+  RealEstateLeadPreferencesSchema,
+  LeadContractSchema,
+  // Site Visits
+  SiteVisitScheduleSchema,
+  SiteVisitOutcomeInputSchema,
+  SiteVisitOutcomeRecordSchema,
+  VerificationProofDataSchema,
+  // Transactions
+  PricingStructureSchema as PricingStructurePaiseSchema,
+  CostSheetSnapshotSchema,
+  BookingContractSchema,
+  // Compliance
+  RegulatoryRuleContractSchema,
+  JurisdictionComplianceConfigSchema,
+} from '@pravshi/contracts';
+
