@@ -9,4 +9,6 @@
 
 export * from './base';
 export * from './crm/leads';
+export * from './crm/tasks';
+export * from './crm/attribution';
 export * from './products/real-estate/index';
