@@ -576,8 +576,12 @@ create policy crm_leads_select on public.crm_leads
         case (select authz.scope_for('leads.view'))
           when 'GLOBAL' then true
           when 'DEPARTMENT' then (
-            authz.in_my_department(owner_person_id)
-            or authz.is_my_report(owner_person_id)
+            (select authz.in_my_departments(owner_person_id))
+            or (select authz.reports_to_me(owner_person_id))
+          )
+          when 'TEAM' then (
+            owner_person_id = (select authz.person_id())
+            or (select authz.reports_to_me(owner_person_id))
           )
           when 'SELF' then owner_person_id = (select authz.person_id())
           else false
@@ -597,8 +601,13 @@ create policy crm_leads_insert on public.crm_leads
         when 'GLOBAL' then true
         when 'DEPARTMENT' then (
           owner_person_id is null
-          or authz.in_my_department(owner_person_id)
-          or authz.is_my_report(owner_person_id)
+          or (select authz.in_my_departments(owner_person_id))
+          or (select authz.reports_to_me(owner_person_id))
+        )
+        when 'TEAM' then (
+          owner_person_id is null
+          or owner_person_id = (select authz.person_id())
+          or (select authz.reports_to_me(owner_person_id))
         )
         when 'SELF' then (
           owner_person_id is null
@@ -620,16 +629,22 @@ create policy crm_leads_update on public.crm_leads
         when 'GLOBAL' then true
         when 'DEPARTMENT' then (
           (owner_person_id is null and (
-            team_id is null or exists (
+            team_id is not null and exists (
               select 1 from public.teams t
               where t.id = crm_leads.team_id
                 and t.department_id = any ((select authz.my_departments())::uuid[])
             )
           ))
           or (owner_person_id is not null and (
-            authz.in_my_department(owner_person_id)
-            or authz.is_my_report(owner_person_id)
+            (select authz.in_my_departments(owner_person_id))
+            or (select authz.reports_to_me(owner_person_id))
           ))
+        )
+        when 'TEAM' then (
+          owner_person_id is not null and (
+            owner_person_id = (select authz.person_id())
+            or (select authz.reports_to_me(owner_person_id))
+          )
         )
         when 'SELF' then owner_person_id = (select authz.person_id())
         else false
@@ -727,8 +742,12 @@ create policy crm_lead_tasks_select on public.crm_lead_tasks
       case (select authz.scope_for('leads.view'))
         when 'GLOBAL' then true
         when 'DEPARTMENT' then (
-          authz.in_my_department(assignee_person_id)
-          or authz.is_my_report(assignee_person_id)
+          (select authz.in_my_departments(assignee_person_id))
+          or (select authz.reports_to_me(assignee_person_id))
+        )
+        when 'TEAM' then (
+          assignee_person_id = (select authz.person_id())
+          or (select authz.reports_to_me(assignee_person_id))
         )
         when 'SELF' then assignee_person_id = (select authz.person_id())
         else false
@@ -754,8 +773,12 @@ create policy crm_lead_tasks_update on public.crm_lead_tasks
       case (select authz.scope_for('leads.edit'))
         when 'GLOBAL' then true
         when 'DEPARTMENT' then (
-          authz.in_my_department(assignee_person_id)
-          or authz.is_my_report(assignee_person_id)
+          (select authz.in_my_departments(assignee_person_id))
+          or (select authz.reports_to_me(assignee_person_id))
+        )
+        when 'TEAM' then (
+          assignee_person_id = (select authz.person_id())
+          or (select authz.reports_to_me(assignee_person_id))
         )
         when 'SELF' then assignee_person_id = (select authz.person_id())
         else false
@@ -864,3 +887,4 @@ revoke all on public.crm_leads, public.crm_lead_assignment_history,
   public.crm_assignment_cursors, public.crm_lead_tasks, public.crm_dedup_candidates,
   public.crm_lead_attribution_corrections, public.re_lead_preferences
   from app_admin, app_worker, app_auth, app_platform;
+

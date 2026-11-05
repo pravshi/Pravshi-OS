@@ -61,3 +61,4 @@ alter table public.activities
   check (entity_type in ('company', 'contact', 'deal'));
 
 commit;
+

@@ -81,6 +81,10 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     expect(M0089).toContain("when 'GLOBAL' then true");
     expect(M0089).toContain("when 'DEPARTMENT' then (");
     expect(M0089).toContain("when 'SELF' then owner_person_id = (select authz.person_id())");
+    expect(M0089).toContain('(select authz.in_my_departments(owner_person_id))');
+    expect(M0089).toContain('(select authz.reports_to_me(owner_person_id))');
+    expect(M0089).not.toContain('authz.in_my_department(');
+    expect(M0089).not.toContain('authz.is_my_report(');
   });
 
   it('revokes unpermitted table operations from app_user and runtime roles', () => {
