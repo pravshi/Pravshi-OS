@@ -422,11 +422,25 @@ describe('insert rules', () => {
           ctxOf(c1),
           `insert into public.activities
              (org_id, entity_type, entity_id, type, subject, owner_person_id)
-           values ($1,'lead',$2,'CALL','Bad entity',$3)`,
+           values ($1,'unknown_type',$2,'CALL','Bad entity',$3)`,
           [orgA, coS1, c1],
         ),
       ),
     ).toBe('23514');
+  });
+
+  it('the entity_type CHECK accepts lead (migration 0089)', async () => {
+    expect(
+      await sqlstateOf(
+        inContext(
+          ctxOf(c1),
+          `insert into public.activities
+             (org_id, entity_type, entity_id, type, subject, owner_person_id)
+           values ($1,'lead',$2,'CALL','Lead activity',$3)`,
+          [orgA, coS1, c1],
+        ),
+      ),
+    ).toBe('NO ERROR');
   });
 
   it('a blank subject is rejected', async () => {
