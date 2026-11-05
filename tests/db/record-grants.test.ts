@@ -1037,8 +1037,8 @@ describe('the rest of the authorization model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(policies.rows[0]!.n)).toBe(117); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert)
-    expect(Number(policies.rows[0]!.with_scope)).toBe(28); // 0081: four scope-driven crm_imports(/_rows) policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans
+    expect(Number(policies.rows[0]!.n)).toBe(136); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds nineteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections, re_lead_preferences)
+    expect(Number(policies.rows[0]!.with_scope)).toBe(32); // 0081: four scope-driven crm_imports(/_rows) policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds four scope-driven select/update policies on crm_leads and crm_lead_tasks
   });
 
   it('leaves app_user with no writes on any authorization table', async () => {
