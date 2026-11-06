@@ -38,7 +38,13 @@ const asUser = new Pool({ connectionString: process.env.DATABASE_URL_TEST });
 
 const ctxFor = (personId: string, orgId: string): Ctx => ({ personId, orgId });
 
-const LEADS_PERMS = ['leads.view', 'leads.create', 'leads.edit', 'leads.assign'];
+const LEADS_PERMS = [
+  'leads.view',
+  'leads.create',
+  'leads.edit',
+  'leads.assign',
+  'leads.attribution.request',
+];
 
 let orgA = '';
 let orgB = '';
@@ -148,15 +154,15 @@ describe.skipIf(!ready)('PR-P1-01: CRM leads & lineage tenant isolation (live DB
   });
 
   it('isolates crm_lead_assignment_history across tenants', async () => {
-    // Insert assignment history for Org A
-    await inContext(
+    // The ledger is written by the database: leadA was created with an owner, so its initial
+    // assignment is already recorded, and Org A sees it.
+    const seenByAlice = await inContext<{ id: string }>(
       asUser,
       ctxFor(alice, orgA),
-      `insert into public.crm_lead_assignment_history
-         (org_id, lead_id, to_person_id, reassigned_by_person_id, reason)
-       values ($1, $2, $3, $3, 'Initial assignment')`,
-      [orgA, leadA, alice],
+      `select id from public.crm_lead_assignment_history where lead_id = $1`,
+      [leadA],
     );
+    expect(seenByAlice).toHaveLength(1);
 
     // Org B cannot see Org A assignment history
     const seenByBob = await inContext<{ id: string }>(

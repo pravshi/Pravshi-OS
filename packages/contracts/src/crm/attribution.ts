@@ -1,7 +1,12 @@
 /**
  * Pravshi OS — CRM Attribution Governance Contract (Layer 2).
  *
- * Governs two-person marketing origin correction workflows.
+ * Governs the correction of a lead's marketing origin (source, sub-category, campaign).
+ * Founder decisions of 2026-11-06, enforced by migration 0089:
+ *   - permissions: leads.attribution.request to ask, leads.attribution.approve to decide (approve
+ *     or reject), leads.attribution.single_manager for the single-manager exception;
+ *   - organization policy: TWO_PERSON (default) or SINGLE_MANAGER — there is no OFF value;
+ *   - a rejection needs a reason and never changes the lead's attribution.
  */
 import { z } from 'zod';
 import { UuidSchema } from '../base';
@@ -14,6 +19,20 @@ export const ATTRIBUTION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
 export const AttributionStatusEnum = z.enum(ATTRIBUTION_STATUSES);
 export type AttributionStatus = z.infer<typeof AttributionStatusEnum>;
 
+/** The only two organization policies. Absent or any other stored value means TWO_PERSON. */
+export const ATTRIBUTION_POLICIES = ['TWO_PERSON', 'SINGLE_MANAGER'] as const;
+export const AttributionPolicyEnum = z.enum(ATTRIBUTION_POLICIES);
+export type AttributionPolicy = z.infer<typeof AttributionPolicyEnum>;
+
+export const ATTRIBUTION_PERMISSIONS = {
+  request: 'leads.attribution.request',
+  approve: 'leads.attribution.approve',
+  singleManager: 'leads.attribution.single_manager',
+} as const;
+
+/** Minimum length of a rejection reason (the database enforces the same rule). */
+export const ATTRIBUTION_REJECTION_REASON_MIN = 5;
+
 export const AttributionCorrectionSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
@@ -24,7 +43,10 @@ export const AttributionCorrectionSchema = z.object({
   reason: z.string().min(10, 'Reason must be at least 10 characters explaining correction'),
   status: AttributionStatusEnum.default('PENDING'),
   requestedByPersonId: UuidSchema,
+  /** Set only on approval, and then equal to decidedByPersonId. */
   approvedByPersonId: UuidSchema.nullable().optional(),
+  /** Who decided the request — approved or rejected. */
+  decidedByPersonId: UuidSchema.nullable().optional(),
   requestedAt: z.string().datetime(),
   decidedAt: z.string().datetime().nullable().optional(),
   rejectionReason: z.string().nullable().optional(),
@@ -42,11 +64,21 @@ export type RequestAttributionCorrectionInput = z.infer<
   typeof RequestAttributionCorrectionInputSchema
 >;
 
-export const ReviewAttributionCorrectionInputSchema = z.object({
-  correctionId: UuidSchema,
-  decision: z.enum(['APPROVE', 'REJECT']),
-  rejectionReason: z.string().min(5).optional(),
-});
+export const ReviewAttributionCorrectionInputSchema = z
+  .object({
+    correctionId: UuidSchema,
+    decision: z.enum(['APPROVE', 'REJECT']),
+    rejectionReason: z.string().trim().min(ATTRIBUTION_REJECTION_REASON_MIN).optional(),
+  })
+  .refine((v) => v.decision !== 'REJECT' || v.rejectionReason !== undefined, {
+    message: 'A rejection requires a reason',
+    path: ['rejectionReason'],
+  });
 export type ReviewAttributionCorrectionInput = z.infer<
   typeof ReviewAttributionCorrectionInputSchema
 >;
+
+export const SetAttributionPolicyInputSchema = z.object({
+  policy: AttributionPolicyEnum,
+});
+export type SetAttributionPolicyInput = z.infer<typeof SetAttributionPolicyInputSchema>;

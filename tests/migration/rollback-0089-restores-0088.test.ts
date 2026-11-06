@@ -5,7 +5,9 @@ import { splitStatements } from '../../scripts/migrate-ws.mjs';
 
 /**
  * scripts/db/rollback/0089_crm_leads_and_lineage.down.sql: refuses unless the database is at
- * 0089 and drops exactly the 6 tables and the functions 0089 creates, and reverts its alters.
+ * exactly this revision of 0089 with complete, consistent history metadata, and drops exactly the
+ * tables, functions and permissions 0089 creates, and reverts its alters. The data-level rehearsal
+ * (refusals with real rows, schema identical to 0088 afterwards) is recorded in the PR report.
  */
 const read = (...p: string[]) =>
   readFileSync(join(process.cwd(), 'packages', 'database', ...p), 'utf8');
@@ -21,45 +23,69 @@ const TABLES = [
   'public.crm_lead_tasks',
   'public.crm_dedup_candidates',
   'public.crm_lead_attribution_corrections',
+  'public.crm_statement_identity',
 ];
 
 const FUNCTIONS = [
   'public.guard_crm_lead_assignment_history',
   'public.guard_crm_lead_attribution',
+  'public.guard_crm_lead_server_fields',
   'public.guard_crm_lead_owner_change',
   'public.crm_stamp_actor',
   'public.guard_crm_dedup_candidate_identity',
-  'public.crm_lead_in_edit_scope',
+  'public.crm_capture_statement_identity',
+  'public.crm_assert_statement_identity',
+  'public.crm_record_lead_assignment',
+  'public.crm_lead_in_scope',
+  'public.crm_attribution_policy',
+  'public.set_lead_attribution_policy',
+  'public.crm_decide_lead_attribution_correction',
   'public.apply_lead_attribution_correction',
+  'public.reject_lead_attribution_correction',
+];
+
+const PERMISSIONS = [
+  'leads.attribution.request',
+  'leads.attribution.approve',
+  'leads.attribution.single_manager',
 ];
 
 const JOURNAL = JSON.parse(read('drizzle', 'meta', '_journal.json')) as {
   entries: Array<{ idx: number; tag: string; when: number; hash: string }>;
 };
 
+const statements = splitStatements(ROLLBACK)
+  .map((s: string) => squash(stripComments(s)))
+  .filter((s: string) => s.length > 0);
+
 describe('0089 does what its rollback undoes', () => {
-  it('refuses any database that is not at exactly this revision of 0089, or whose data it would lose', () => {
+  it('refuses missing, empty or inconsistent history metadata, any other revision, and data it would lose', () => {
     const e0089 = JOURNAL.entries.find((e) => e.tag === '0089_crm_leads_and_lineage')!;
+    const guard = statements[2]!;
+    expect(guard).toMatch(/^do \$\$/);
+    // Every comparison is NULL-safe: a NULL must never let a check pass.
+    expect(guard).not.toMatch(/\s<>\s/);
+    expect(guard).toContain('v_count is distinct from 89');
+    expect(guard).toContain("hash is null or btrim(hash) = '' or created_at is null");
+    expect(guard).toContain('v_incomplete is distinct from 0');
+    expect(guard).toContain('v_max - v_min + 1 is distinct from v_count');
     // The rollback names the checksum and timing of the 0089 it undoes; they must be the journal's.
-    expect(ROLLBACK).toContain(`v_last.hash <> '${e0089.hash}'`);
-    expect(ROLLBACK).toContain(`v_last.created_at <> ${e0089.when}`);
-    expect(ROLLBACK).toContain("where entity_type = 'lead'");
-    expect(ROLLBACK).toContain('where merged_into_contact_id is not null');
+    expect(guard).toContain(`v_last_hash is distinct from '${e0089.hash}'`);
+    expect(guard).toContain(`v_last_created_at is distinct from ${e0089.when}`);
+    expect(guard).toContain(`where created_at >= ${e0089.when}`);
+    expect(guard).toContain('v_at_or_after is distinct from 1');
+    expect(guard).toContain("where entity_type = 'lead'");
+    expect(guard).toContain('where merged_into_contact_id is not null');
   });
 
-  it('creates 6 tables and 7 functions; the rollback drops exactly those, without CASCADE', () => {
+  it('drops exactly the tables and functions 0089 creates, without CASCADE, tables first', () => {
     expect([...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1])).toEqual(TABLES);
     expect([...M0089.matchAll(/^create or replace function (\S+)\(/gm)].map((m) => m[1])).toEqual(
       FUNCTIONS,
     );
 
-    const statements = splitStatements(ROLLBACK)
-      .map((s) => squash(stripComments(s)))
-      .filter((s) => s.length > 0);
-
     expect(statements[0]).toBe('begin;');
     expect(statements[1]).toBe("set local lock_timeout = '5s';");
-    expect(statements[2]).toContain('from drizzle.__drizzle_migrations) <> 89');
     expect(statements[statements.length - 1]).toBe('commit;');
 
     const droppedTables = statements
@@ -73,11 +99,22 @@ describe('0089 does what its rollback undoes', () => {
       .filter(Boolean);
     expect([...droppedFunctions].sort()).toEqual([...FUNCTIONS].sort());
 
-    // The scope helper is referenced by a policy on crm_lead_attribution_corrections, so it can
-    // only be dropped after that table.
-    const at = (needle: string) => statements.findIndex((s) => s.includes(needle));
-    expect(at('drop function if exists public.crm_lead_in_edit_scope')).toBeGreaterThan(
-      at('drop table if exists public.crm_lead_attribution_corrections'),
+    // Policies and triggers refer to the functions, so every table goes before any function.
+    const lastTable = Math.max(
+      ...TABLES.map((t) => statements.indexOf(`drop table if exists ${t};`)),
     );
+    const firstFunction = statements.findIndex((s) => s.startsWith('drop function if exists'));
+    expect(lastTable).toBeLessThan(firstFunction);
+  });
+
+  it('removes the three attribution permissions and every grant of them', () => {
+    for (const key of PERMISSIONS) {
+      expect(M0089).toContain(`'${key}'`);
+      expect(ROLLBACK).toContain(`'${key}'`);
+    }
+    const grants = statements.findIndex((s) => s.startsWith('delete from public.role_permissions'));
+    const catalogue = statements.findIndex((s) => s.startsWith('delete from public.permissions'));
+    expect(grants).toBeGreaterThan(-1);
+    expect(catalogue).toBeGreaterThan(grants);
   });
 });

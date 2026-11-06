@@ -7,7 +7,7 @@ const read = (...p: string[]) =>
 const M0089 = read('drizzle', '0089_crm_leads_and_lineage.sql');
 
 describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () => {
-  it('creates the 6 shared CRM tables with composite organization constraints, and no product table', () => {
+  it('creates the 6 shared CRM tables (plus the operational identity pin), and no product table', () => {
     const createdTables = [...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1]);
     expect(createdTables).toEqual([
       'public.crm_leads',
@@ -16,6 +16,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'public.crm_lead_tasks',
       'public.crm_dedup_candidates',
       'public.crm_lead_attribution_corrections',
+      'public.crm_statement_identity',
     ]);
     // Founder decision AD-6: the Real Estate extension belongs to the Real Estate stage.
     expect(M0089).not.toMatch(/create table public\.re_/);
@@ -84,9 +85,10 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
 
   it('tells callers apart correctly in every guard', () => {
     // A guard that uses current_user must run with invoker rights: in a SECURITY DEFINER function
-    // current_user is the owner (app_owner), so such a guard never fires. A definer guard must
-    // use something a definer cannot change — the presence of a person identity. The behaviour is
-    // proven against the database in tests/tenant-isolation/crm-leads-integrity.test.ts.
+    // current_user is the owner (app_owner), so such a guard never fires. A definer guard, and the
+    // actor stamp, recognise the owner plane by session_user (the login, which neither a definer
+    // nor app_user can change) — never by an empty identity, which a statement could produce
+    // itself. The behaviour is proven against the database in crm-leads-integrity.test.ts.
     const fn = (name: string) => {
       const m = M0089.match(
         new RegExp(`create or replace function public\\.${name}\\(\\)[\\s\\S]*?\\$\\$;`),
@@ -96,6 +98,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     };
     for (const name of [
       'guard_crm_lead_attribution',
+      'guard_crm_lead_server_fields',
       'crm_stamp_actor',
       'guard_crm_dedup_candidate_identity',
     ]) {
@@ -103,15 +106,31 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       expect(fn(name), name).not.toContain('security definer');
     }
     expect(fn('guard_crm_lead_attribution')).toContain("and current_user <> 'app_owner' then");
+    expect(fn('guard_crm_lead_server_fields')).toContain("if current_user = 'app_owner' then");
+    expect(fn('crm_stamp_actor')).toContain("if session_user = 'app_owner' then");
+    expect(fn('guard_crm_dedup_candidate_identity')).toContain("if session_user <> 'app_owner'");
+    // No guard grants an exemption because the identity is empty.
+    for (const name of [
+      'guard_crm_lead_attribution',
+      'guard_crm_lead_server_fields',
+      'guard_crm_lead_owner_change',
+      'crm_stamp_actor',
+      'guard_crm_dedup_candidate_identity',
+    ]) {
+      expect(fn(name), name).not.toContain("current_setting('app.person_id', true), '') is");
+    }
 
     // The owner guard needs authz.crm_owner_reachable (not executable by app_user, 0033), so it
     // is a definer — and therefore must not mention current_user at all.
     const owner = fn('guard_crm_lead_owner_change');
     expect(owner).toContain('security definer');
     expect(owner).not.toContain('current_user');
-    expect(owner).toContain("if nullif(current_setting('app.person_id', true), '') is null then");
+    expect(owner).toContain("if session_user = 'app_owner' then");
     expect(owner).toContain("authz.crm_owner_reachable('leads.assign', new.owner_person_id)");
-    expect(owner).toContain('if new.team_id is distinct from old.team_id then');
+    expect(owner).toContain("if tg_op = 'INSERT' then");
+    expect(M0089).toMatch(
+      /create trigger crm_leads_owner_guard\s+before insert or update on public\.crm_leads/,
+    );
 
     for (const t of [
       'crm_leads_attribution_guard',
@@ -119,9 +138,33 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'crm_leads_actor_stamp',
       'crm_lead_tasks_actor_stamp',
       'crm_dedup_candidates_identity_guard',
+      'crm_leads_server_fields_guard',
+      'crm_leads_assignment_ledger_insert',
+      'crm_leads_assignment_ledger_update',
     ]) {
       expect(M0089).toContain(`create trigger ${t}`);
     }
+  });
+
+  it('pins the caller identity for every statement on every new CRM table', () => {
+    for (const t of [
+      'crm_leads',
+      'crm_lead_assignment_history',
+      'crm_assignment_cursors',
+      'crm_lead_tasks',
+      'crm_dedup_candidates',
+      'crm_lead_attribution_corrections',
+    ]) {
+      expect(M0089, t).toContain(
+        `create trigger ${t}_identity_capture\n  before insert or update or delete on public.${t}\n  for each statement execute function public.crm_capture_statement_identity();`,
+      );
+      expect(M0089, t).toContain(
+        `create trigger ${t}_identity_pin\n  before insert or update or delete on public.${t}\n  for each row execute function public.crm_assert_statement_identity();`,
+      );
+    }
+    expect(M0089).toMatch(
+      /revoke all on public\.crm_statement_identity\s+from public, app_user, app_admin, app_worker, app_auth, app_platform;/,
+    );
   });
 
   it('never queries crm_leads from a crm_leads policy (Postgres rejects it with 42P17)', () => {
@@ -139,15 +182,33 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
 
   it('binds every caller-supplied principal column to authz.person_id()', () => {
     expect(M0089).toContain('and requested_by_person_id = (select authz.person_id())');
-    expect(M0089).toContain('and reassigned_by_person_id = (select authz.person_id())');
     expect(M0089).toContain(
       "or (status <> 'PENDING' and reviewed_by_person_id = (select authz.person_id()))",
     );
-    // Ledger entries record the present: the lead's current owner, at the transaction time.
-    expect(M0089).toContain('and created_at = now()');
-    expect(M0089).toContain(
-      'and l.owner_person_id is not distinct from crm_lead_assignment_history.to_person_id',
+    // The assignment ledger is written by the database from the persisted row; app_user has no
+    // INSERT policy and no INSERT privilege on it.
+    expect(M0089).not.toMatch(
+      /create policy \w+ on public\.crm_lead_assignment_history\s+for insert/,
     );
+    expect(M0089).toContain("case when tg_op = 'UPDATE' then old.owner_person_id end");
+  });
+
+  it('uses the dedicated attribution permissions and allows only TWO_PERSON or SINGLE_MANAGER', () => {
+    for (const [key, action] of [
+      ['leads.attribution.request', 'request'],
+      ['leads.attribution.approve', 'approve'],
+      ['leads.attribution.single_manager', 'single_manager'],
+    ]) {
+      expect(M0089).toContain(`('${key}', 'leads.attribution', '${action}', 'sales',`);
+    }
+    expect(M0089).toContain("(select authz.has('leads.attribution.request'))");
+    expect(M0089).toContain("if not authz.has('leads.attribution.approve') then");
+    expect(M0089).toContain(
+      "if p_policy is null or p_policy not in ('TWO_PERSON', 'SINGLE_MANAGER') then",
+    );
+    expect(M0089).toContain("if not authz.has('settings.manage') then");
+    expect(M0089).toContain("p_action := 'crm_lead.attribution_single_manager_exception_used'");
+    expect(M0089).toContain("p_action := 'crm_lead.attribution_correction_rejected'");
   });
 
   it('implements security definer attribution mutator with empty search_path and in-transaction audit log', () => {
@@ -162,6 +223,9 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       (m) => m[1],
     );
     expect(forcedTables).toEqual([
+      // section 9f, created with its functions
+      'public.crm_statement_identity',
+      // section 10
       'public.crm_leads',
       'public.crm_lead_assignment_history',
       'public.crm_assignment_cursors',
@@ -170,7 +234,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'public.crm_lead_attribution_corrections',
     ]);
 
-    // Every new table carries the row audit trigger.
+    // Every new CRM table carries the row audit trigger (the operational identity pin does not).
     expect([...M0089.matchAll(/^create trigger (\w+_audit)$/gm)].map((m) => m[1])).toEqual([
       'crm_leads_audit',
       'crm_lead_assignment_history_audit',
@@ -199,7 +263,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'revoke update, delete on public.crm_lead_attribution_corrections from app_user;',
     );
     expect(M0089).toContain(
-      'revoke update, delete on public.crm_lead_assignment_history from app_user;',
+      'revoke insert, update, delete on public.crm_lead_assignment_history from app_user;',
     );
     expect(M0089).toContain('from app_admin, app_worker, app_auth, app_platform;');
   });

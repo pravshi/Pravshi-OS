@@ -946,7 +946,7 @@ describe('RLS', () => {
     // integration_inbound_events and integration_sync_checkpoints — none of
     // them scope-driven (they branch on authz.has), so with_scope below
     // stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(133); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds sixteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
+    expect(Number(rows[0]!.n)).toBe(132); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds fifteen app_user policies (crm_leads, crm_lead_assignment_history select only — the ledger is trigger-written, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
     // Fourteen branch on scope_for: audit_logs from Task 1.10; people, engagements and
     // engagement_events from Task 1.16; invitations, invitation_roles, login_events
     // and departments (inviter view) from the invitation flow; and six from the CRM

@@ -12,6 +12,9 @@ import {
   ReviewAttributionCorrectionInputSchema,
   ATTRIBUTION_FIELDS,
   ATTRIBUTION_STATUSES,
+  ATTRIBUTION_POLICIES,
+  ATTRIBUTION_PERMISSIONS,
+  SetAttributionPolicyInputSchema,
 } from '@pravshi/contracts';
 
 describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
@@ -284,6 +287,56 @@ describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
         rejectionReason: 'Source attribution confirmed as website ad campaign',
       };
       expect(ReviewAttributionCorrectionInputSchema.safeParse(rejectDecision).success).toBe(true);
+    });
+
+    it('requires a reason to reject, and a non-blank one', () => {
+      expect(
+        ReviewAttributionCorrectionInputSchema.safeParse({ correctionId, decision: 'REJECT' })
+          .success,
+      ).toBe(false);
+      expect(
+        ReviewAttributionCorrectionInputSchema.safeParse({
+          correctionId,
+          decision: 'REJECT',
+          rejectionReason: '     ',
+        }).success,
+      ).toBe(false);
+    });
+
+    it('allows exactly the two founder-approved policies (no OFF value)', () => {
+      expect([...ATTRIBUTION_POLICIES]).toEqual(['TWO_PERSON', 'SINGLE_MANAGER']);
+      for (const policy of ['TWO_PERSON', 'SINGLE_MANAGER']) {
+        expect(SetAttributionPolicyInputSchema.safeParse({ policy }).success).toBe(true);
+      }
+      for (const policy of ['OFF', 'DISABLED', 'NONE', 'single_manager', '']) {
+        expect(SetAttributionPolicyInputSchema.safeParse({ policy }).success, policy).toBe(false);
+      }
+    });
+
+    it('names the dedicated permission keys', () => {
+      expect(ATTRIBUTION_PERMISSIONS).toEqual({
+        request: 'leads.attribution.request',
+        approve: 'leads.attribution.approve',
+        singleManager: 'leads.attribution.single_manager',
+      });
+    });
+
+    it('records the decider for approvals and rejections alike', () => {
+      const rejected = AttributionCorrectionSchema.safeParse({
+        id: correctionId,
+        organizationId: orgId,
+        leadId,
+        fieldName: 'source',
+        newValue: 'website',
+        reason: 'Customer came from the website form',
+        status: 'REJECTED',
+        requestedByPersonId: personId,
+        decidedByPersonId: contactId,
+        requestedAt: nowIso,
+        decidedAt: nowIso,
+        rejectionReason: 'Original source confirmed',
+      });
+      expect(rejected.success).toBe(true);
     });
   });
 });

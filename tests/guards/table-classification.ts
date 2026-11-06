@@ -436,6 +436,8 @@ export const TABLES: Readonly<Record<string, Classification>> = {
   // ── operational ──
   'public.bootstrap_setup_token': { class: 'operational' },
   'public.bootstrap_state': { class: 'operational' },
+  // 0089: the per-statement caller-identity pin; only app_owner's definer triggers touch it.
+  'public.crm_statement_identity': { class: 'operational' },
   'auth.auth_accounts': { class: 'operational', access: ['app_auth'] },
   'auth.auth_rate_limits': { class: 'operational', access: ['app_auth'] },
   'auth.auth_sessions': { class: 'operational', access: ['app_auth'] },

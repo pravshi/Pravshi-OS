@@ -3,27 +3,31 @@
 -- Prepared in advance. Run as the migration owner, in one transaction, only with the founder's
 -- approval for the named database. It does NOT remove 0089's row from the history.
 --
--- What this removes: 6 tables (crm_leads, crm_lead_assignment_history, crm_assignment_cursors,
--- crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections) with their policies and
--- triggers (guards, actor stamping, row audit), and the 0089 functions (the attribution, owner and
--- dedup guards, the actor stamp, the edit-scope helper, the attribution mutator); drops the
--- columns 0089 added to contacts (merge pointers) and activities (logged_at), and restores the
+-- What this removes: the 6 CRM tables (crm_leads, crm_lead_assignment_history,
+-- crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections)
+-- and the operational crm_statement_identity table, with their policies and triggers; the 15
+-- functions 0089 creates; the three leads.attribution.* permissions and every grant of them; the
+-- columns 0089 added to contacts (merge pointers) and activities (logged_at); and it restores the
 -- 0088 activities_entity_type check. Audit entries already written to audit_logs are append-only
--- and stay.
+-- and stay. An organization's settings.attribution value (set through
+-- set_lead_attribution_policy) is left in place: 0088 never reads it.
 --
 -- DATA CONSEQUENCES — read before approving:
 --   * Every lead, task, dedup candidate, assignment-history entry and attribution correction is
---     dropped with its table.
+--     dropped with its table, and every role loses the three attribution permissions.
 --   * It REFUSES while any activity is linked to a lead (entity_type = 'lead'): the 0088 check
 --     cannot hold those rows, and deleting them silently is not this script's decision.
 --   * It REFUSES while any contact records a merge (merged_into_contact_id set): dropping the
 --     columns would silently undo recorded merges.
 --   Each refusal names what to decide first. Roll the APPLICATION back with the database: the
---   0089 application code reads these tables and columns.
+--   0089 application code reads these tables, columns and permissions.
 --
--- Refuses unless the database is at exactly THIS revision of 0089 (count, checksum and timing of
--- the last history row): earlier revisions of 0089 were pushed to the PR branch with different
--- contents (one created re_lead_preferences), and this script would not fully undo them.
+-- PRECONDITIONS (all fail closed — a missing, empty or inconsistent value is a refusal):
+--   * the history has exactly 89 rows, numbered without gaps, none with a missing or empty
+--     checksum or a missing timing;
+--   * its last row is THIS revision of 0089 (checksum and timing below) and is the only row at or
+--     after that timing — earlier revisions of 0089 were pushed to the PR branch with different
+--     contents (one created re_lead_preferences), and this script would not fully undo them.
 
 begin;
 
@@ -31,16 +35,42 @@ set local lock_timeout = '5s';
 
 do $$
 declare
-  v_last record;
+  v_count bigint;
+  v_min integer;
+  v_max integer;
+  v_incomplete bigint;
+  v_last_hash text;
+  v_last_created_at bigint;
+  v_at_or_after bigint;
 begin
-  if (select count(*) from drizzle.__drizzle_migrations) <> 89 then
+  select count(*), min(id), max(id),
+         count(*) filter (where hash is null or btrim(hash) = '' or created_at is null)
+    into v_count, v_min, v_max, v_incomplete
+  from drizzle.__drizzle_migrations;
+
+  if v_count is distinct from 89 then
     raise exception '0089 rollback refused: the database is not at 0089 (roll back later migrations first)';
   end if;
-  select hash, created_at into v_last from drizzle.__drizzle_migrations order by id desc limit 1;
-  if v_last.hash <> '8de1b87403e8d5bece5a82bc3ebe45ba337a5188bd8e4a6e3f3d3c4719e0330d'
-     or v_last.created_at <> 1791604728057 then
+  if v_incomplete is distinct from 0 then
+    raise exception '0089 rollback refused: the migration history has rows with a missing or empty checksum or timing';
+  end if;
+  if v_max - v_min + 1 is distinct from v_count then
+    raise exception '0089 rollback refused: the migration history is not numbered without gaps';
+  end if;
+
+  select hash, created_at into v_last_hash, v_last_created_at
+  from drizzle.__drizzle_migrations order by id desc limit 1;
+  if v_last_hash is distinct from 'df6e05c8d4cae1747f268b8ff216cc188a832ab3b26822eda7b56299927188ee'
+     or v_last_created_at is distinct from 1791604728057 then
     raise exception '0089 rollback refused: the applied 0089 is not the revision this script undoes (checksum or timing differs)';
   end if;
+
+  select count(*) into v_at_or_after
+  from drizzle.__drizzle_migrations where created_at >= 1791604728057;
+  if v_at_or_after is distinct from 1 then
+    raise exception '0089 rollback refused: the migration history is inconsistent (more than one row at or after the 0089 timing)';
+  end if;
+
   if exists (select 1 from public.activities where entity_type = 'lead') then
     raise exception '0089 rollback refused: activities are linked to leads; decide their disposal first (the 0088 check cannot hold them)';
   end if;
@@ -50,22 +80,7 @@ begin
 end;
 $$;
 
--- Drop security triggers and functions
-drop trigger if exists crm_leads_attribution_guard on public.crm_leads;
-drop trigger if exists crm_leads_owner_guard on public.crm_leads;
-drop trigger if exists crm_leads_actor_stamp on public.crm_leads;
-drop trigger if exists crm_lead_tasks_actor_stamp on public.crm_lead_tasks;
-drop trigger if exists crm_dedup_candidates_identity_guard on public.crm_dedup_candidates;
-drop function if exists public.guard_crm_lead_attribution();
-drop function if exists public.guard_crm_lead_owner_change();
-drop function if exists public.crm_stamp_actor();
-drop function if exists public.guard_crm_dedup_candidate_identity();
-drop function if exists public.apply_lead_attribution_correction(uuid);
-
-drop trigger if exists crm_lead_assignment_history_guard on public.crm_lead_assignment_history;
-drop function if exists public.guard_crm_lead_assignment_history();
-
--- Drop new tables, children before crm_leads (their policies and audit triggers go with them).
+-- Drop the tables, children before crm_leads (their policies and triggers go with them).
 -- No CASCADE: an unexpected dependent object must stop the rollback, not be dropped silently.
 drop table if exists public.crm_lead_attribution_corrections;
 drop table if exists public.crm_dedup_candidates;
@@ -73,9 +88,60 @@ drop table if exists public.crm_lead_tasks;
 drop table if exists public.crm_assignment_cursors;
 drop table if exists public.crm_lead_assignment_history;
 drop table if exists public.crm_leads;
+drop table if exists public.crm_statement_identity;
 
--- Referenced by crm_lead_attr_corr_insert, so only after its table is gone.
-drop function if exists public.crm_lead_in_edit_scope(uuid, uuid);
+-- The functions, now that no trigger or policy refers to them.
+drop function if exists public.apply_lead_attribution_correction(uuid);
+drop function if exists public.reject_lead_attribution_correction(uuid, text);
+drop function if exists public.crm_decide_lead_attribution_correction(uuid, boolean, text);
+drop function if exists public.set_lead_attribution_policy(text);
+drop function if exists public.crm_attribution_policy();
+drop function if exists public.crm_lead_in_scope(text, uuid, uuid);
+drop function if exists public.crm_record_lead_assignment();
+drop function if exists public.crm_assert_statement_identity();
+drop function if exists public.crm_capture_statement_identity();
+drop function if exists public.guard_crm_dedup_candidate_identity();
+drop function if exists public.crm_stamp_actor();
+drop function if exists public.guard_crm_lead_owner_change();
+drop function if exists public.guard_crm_lead_server_fields();
+drop function if exists public.guard_crm_lead_attribution();
+drop function if exists public.guard_crm_lead_assignment_history();
+
+-- The attribution permissions and their grants (SUPER_ADMIN is a protected role: its grants are
+-- changed with the protection trigger off, exactly as 0089 and 0081 add them).
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'role_permissions_enforce_protection'
+      and tgrelid = 'public.role_permissions'::regclass
+  ) then
+    alter table public.role_permissions disable trigger role_permissions_enforce_protection;
+  end if;
+end
+$$;
+
+delete from public.role_permissions rp
+using public.permissions p
+where p.id = rp.permission_id
+  and p.key in ('leads.attribution.request', 'leads.attribution.approve',
+                'leads.attribution.single_manager');
+
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgname = 'role_permissions_enforce_protection'
+      and tgrelid = 'public.role_permissions'::regclass
+  ) then
+    alter table public.role_permissions enable trigger role_permissions_enforce_protection;
+  end if;
+end
+$$;
+
+delete from public.permissions
+where key in ('leads.attribution.request', 'leads.attribution.approve',
+              'leads.attribution.single_manager');
 
 -- Revert altered contacts table
 alter table public.contacts

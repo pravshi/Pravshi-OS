@@ -690,7 +690,7 @@ describe('the rest of the authorization model is unchanged', () => {
     // select/insert on integration_webhook_deliveries, select/insert/update
     // on each of integration_inbound_events and
     // integration_sync_checkpoints).
-    expect(policies.rows[0]!.n).toBe(133); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds sixteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
+    expect(policies.rows[0]!.n).toBe(132); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds fifteen app_user policies (crm_leads, crm_lead_assignment_history select only — the ledger is trigger-written, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
   });
 
   it('has hardened authz.aal() to require a verified factor (migration 0016)', async () => {
