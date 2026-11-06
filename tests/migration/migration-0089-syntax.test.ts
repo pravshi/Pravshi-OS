@@ -52,18 +52,41 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
   });
 
   it('alters contacts and activities with backfilled timestamps and foreign keys', () => {
-    expect(M0089).toContain('add column if not exists merged_into_contact_id uuid');
-    expect(M0089).toContain('add column if not exists logged_at timestamptz');
-    expect(M0089).toMatch(
-      /update public\.activities\s+set logged_at = created_at\s+where logged_at is null;/,
-    );
+    // Plain ADD COLUMN / CREATE INDEX on existing tables: drift must fail, not be adopted.
+    expect(M0089).toContain('add column merged_into_contact_id uuid');
+    expect(M0089).toContain('add column logged_at timestamptz');
+    expect(M0089).not.toMatch(/add column if not exists|create index if not exists/);
     expect(M0089).toContain("check (entity_type in ('company', 'contact', 'deal', 'lead'))");
   });
 
-  it('implements the attribution and owner guards as SECURITY INVOKER triggers', () => {
-    // A SECURITY DEFINER trigger sees current_user = its owner (app_owner), so a definer guard
-    // testing current_user never fires. The behaviour is proven against the database in
-    // tests/tenant-isolation/crm-leads-integrity.test.ts; this pins the text.
+  it('backfills activities.logged_at without touching updated_at, updated_by or the audit log', () => {
+    // The backfill would otherwise fire set_updated_at() and stamp_crm_actor() on every existing
+    // row, replacing each row's real last-edit time and editor. The data-level proof is the
+    // upgrade rehearsal (0088 with activities -> 0089); this pins the shape.
+    const backfill = M0089.match(
+      /alter table public\.activities\s+disable trigger[\s\S]*?update public\.activities\s+set logged_at = created_at\s+where logged_at is null;\s+alter table public\.activities\s+enable trigger[\s\S]*?;/,
+    );
+    expect(backfill).not.toBeNull();
+    const block = backfill![0];
+    for (const t of [
+      'activities_set_updated_at',
+      'activities_stamp_actor',
+      'activities_audit',
+      'activities_link_immutable',
+      'activities_enforce_owner_change',
+    ]) {
+      expect(block, t).toContain(`disable trigger ${t}`);
+      expect(block, t).toContain(`enable trigger ${t}`);
+    }
+    // Exactly one UPDATE of activities in the whole migration, and it is inside that block.
+    expect(M0089.match(/update public\.activities/g)).toHaveLength(1);
+  });
+
+  it('tells callers apart correctly in every guard', () => {
+    // A guard that uses current_user must run with invoker rights: in a SECURITY DEFINER function
+    // current_user is the owner (app_owner), so such a guard never fires. A definer guard must
+    // use something a definer cannot change — the presence of a person identity. The behaviour is
+    // proven against the database in tests/tenant-isolation/crm-leads-integrity.test.ts.
     const fn = (name: string) => {
       const m = M0089.match(
         new RegExp(`create or replace function public\\.${name}\\(\\)[\\s\\S]*?\\$\\$;`),
@@ -73,17 +96,32 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     };
     for (const name of [
       'guard_crm_lead_attribution',
-      'guard_crm_lead_owner_change',
       'crm_stamp_actor',
+      'guard_crm_dedup_candidate_identity',
     ]) {
       expect(fn(name), name).toContain('security invoker');
       expect(fn(name), name).not.toContain('security definer');
     }
     expect(fn('guard_crm_lead_attribution')).toContain("and current_user <> 'app_owner' then");
-    expect(M0089).toContain('create trigger crm_leads_attribution_guard');
-    expect(M0089).toContain('create trigger crm_leads_owner_guard');
-    expect(M0089).toContain('create trigger crm_leads_actor_stamp');
-    expect(M0089).toContain('create trigger crm_lead_tasks_actor_stamp');
+
+    // The owner guard needs authz.crm_owner_reachable (not executable by app_user, 0033), so it
+    // is a definer — and therefore must not mention current_user at all.
+    const owner = fn('guard_crm_lead_owner_change');
+    expect(owner).toContain('security definer');
+    expect(owner).not.toContain('current_user');
+    expect(owner).toContain("if nullif(current_setting('app.person_id', true), '') is null then");
+    expect(owner).toContain("authz.crm_owner_reachable('leads.assign', new.owner_person_id)");
+    expect(owner).toContain('if new.team_id is distinct from old.team_id then');
+
+    for (const t of [
+      'crm_leads_attribution_guard',
+      'crm_leads_owner_guard',
+      'crm_leads_actor_stamp',
+      'crm_lead_tasks_actor_stamp',
+      'crm_dedup_candidates_identity_guard',
+    ]) {
+      expect(M0089).toContain(`create trigger ${t}`);
+    }
   });
 
   it('never queries crm_leads from a crm_leads policy (Postgres rejects it with 42P17)', () => {
@@ -102,7 +140,14 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
   it('binds every caller-supplied principal column to authz.person_id()', () => {
     expect(M0089).toContain('and requested_by_person_id = (select authz.person_id())');
     expect(M0089).toContain('and reassigned_by_person_id = (select authz.person_id())');
-    expect(M0089).toContain('or reviewed_by_person_id = (select authz.person_id())');
+    expect(M0089).toContain(
+      "or (status <> 'PENDING' and reviewed_by_person_id = (select authz.person_id()))",
+    );
+    // Ledger entries record the present: the lead's current owner, at the transaction time.
+    expect(M0089).toContain('and created_at = now()');
+    expect(M0089).toContain(
+      'and l.owner_person_id is not distinct from crm_lead_assignment_history.to_person_id',
+    );
   });
 
   it('implements security definer attribution mutator with empty search_path and in-transaction audit log', () => {

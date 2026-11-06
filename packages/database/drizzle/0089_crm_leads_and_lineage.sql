@@ -356,10 +356,13 @@ comment on table public.crm_lead_attribution_corrections is
 
 
 -- 7. Alter public.contacts
+--
+-- Plain ADD COLUMN / CREATE INDEX on purpose (no IF NOT EXISTS): on a database that has drifted,
+-- a pre-existing column of the same name must stop the migration, not be silently adopted.
 alter table public.contacts
-  add column if not exists merged_into_contact_id uuid,
-  add column if not exists merged_at timestamptz,
-  add column if not exists merge_reason text;
+  add column merged_into_contact_id uuid,
+  add column merged_at timestamptz,
+  add column merge_reason text;
 
 alter table public.contacts
   add constraint contacts_no_self_merge
@@ -369,31 +372,54 @@ alter table public.contacts
   add constraint contacts_merged_into_same_org
   foreign key (merged_into_contact_id, org_id) references public.contacts (id, org_id);
 
-create index if not exists contacts_org_merge_idx
+create index contacts_org_merge_idx
   on public.contacts (org_id, merged_into_contact_id)
   where merged_into_contact_id is not null;
 
 
 -- 8. Alter public.activities
 alter table public.activities
-  add column if not exists logged_at timestamptz;
+  add column logged_at timestamptz;
+
+-- The backfill is a schema change, not an edit. Without this, every existing row's BEFORE UPDATE
+-- triggers would run: set_updated_at() would set updated_at to the migration time and
+-- stamp_crm_actor() would set updated_by to NULL (a migration has no identity) — erasing the real
+-- last-edit time and editor of every activity, unrecoverably and with no audit entry
+-- (audit_row_change skips actorless writes). The triggers are disabled for this one statement
+-- only (the table is already held ACCESS EXCLUSIVE by the ADD COLUMN above, and the whole
+-- migration is one transaction, so no other session can write in between) and re-enabled at
+-- once. The audit and link/owner guards are disabled too: they would do nothing for an actorless
+-- update of a column they do not read, and skipping them keeps the locked window short.
+alter table public.activities
+  disable trigger activities_set_updated_at,
+  disable trigger activities_stamp_actor,
+  disable trigger activities_audit,
+  disable trigger activities_link_immutable,
+  disable trigger activities_enforce_owner_change;
 
 update public.activities
   set logged_at = created_at
   where logged_at is null;
 
 alter table public.activities
+  enable trigger activities_set_updated_at,
+  enable trigger activities_stamp_actor,
+  enable trigger activities_audit,
+  enable trigger activities_link_immutable,
+  enable trigger activities_enforce_owner_change;
+
+alter table public.activities
   alter column logged_at set default now(),
   alter column logged_at set not null;
 
 alter table public.activities
-  drop constraint if exists activities_entity_type;
+  drop constraint activities_entity_type;
 
 alter table public.activities
   add constraint activities_entity_type
   check (entity_type in ('company', 'contact', 'deal', 'lead'));
 
-create index if not exists activities_org_lead_timeline_idx
+create index activities_org_lead_timeline_idx
   on public.activities (org_id, entity_id, logged_at desc)
   where entity_type = 'lead' and deleted_at is null;
 
@@ -434,25 +460,63 @@ create trigger crm_leads_attribution_guard
 comment on function public.guard_crm_lead_attribution() is
   'BEFORE UPDATE on crm_leads (0089). SECURITY INVOKER: refuses a change to source, source_subcategory or campaign_id unless the statement runs as app_owner, which only apply_lead_attribution_correction() does at runtime. Holds even if roles.sql re-grants table-level UPDATE.';
 
--- 9b. Owner-change guard.
+-- 9b. Owner and team change guard.
 --
--- Changing who owns a lead needs leads.assign. A policy cannot express this: comparing the new
--- owner with the stored one needs a subquery on crm_leads inside a crm_leads policy, which
--- Postgres rejects on every UPDATE ("infinite recursion detected in policy", 42P17). The
--- trigger sees OLD and NEW directly. Invoker rights, for the same reason as 9a.
+-- Moving a lead — to another owner or another team — needs leads.assign, and the destination
+-- must be inside the caller's leads.assign reach: the new owner per authz.crm_owner_reachable
+-- (the CRM convention of 0033's enforce_crm_owner_change, which also raises before the FK check
+-- and so closes the person-existence oracle), the new team in one of the caller's departments
+-- unless the caller's assign scope is GLOBAL. A policy cannot express this: comparing NEW with
+-- the stored row needs a subquery on crm_leads inside a crm_leads policy, which Postgres
+-- rejects on every UPDATE (42P17). The trigger sees OLD and NEW directly.
+--
+-- SECURITY DEFINER because authz.crm_owner_reachable is deliberately not executable by app_user
+-- (0033: it would be a scope-membership oracle). It therefore cannot use current_user to tell
+-- callers apart; like 0076's schedules guard it exempts only a transaction with no person
+-- identity (migrations, owner-side maintenance). app_user cannot UPDATE without an identity:
+-- crm_leads_update needs authz.is_active().
 create or replace function public.guard_crm_lead_owner_change()
 returns trigger
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 begin
-  if new.owner_person_id is distinct from old.owner_person_id
-     and current_user <> 'app_owner'
-     and not coalesce(authz.has('leads.assign'), false) then
-    raise exception 'Changing the owner of a lead requires leads.assign'
-      using errcode = '42501';
+  if nullif(current_setting('app.person_id', true), '') is null then
+    return new;
   end if;
+
+  if new.owner_person_id is distinct from old.owner_person_id then
+    if not coalesce(authz.has('leads.assign'), false) then
+      raise exception 'Changing the owner of a lead requires leads.assign'
+        using errcode = '42501';
+    end if;
+    if new.owner_person_id is not null
+       and not authz.crm_owner_reachable('leads.assign', new.owner_person_id) then
+      raise exception 'owner_person_id may only move to someone within your leads.assign scope'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  if new.team_id is distinct from old.team_id then
+    if not coalesce(authz.has('leads.assign'), false) then
+      raise exception 'Moving a lead to another team requires leads.assign'
+        using errcode = '42501';
+    end if;
+    if new.team_id is not null
+       and authz.scope_for('leads.assign') is distinct from 'GLOBAL'
+       and not exists (
+         select 1 from public.teams t
+         where t.id = new.team_id
+           and t.org_id = authz.org_id()
+           and t.deleted_at is null
+           and t.department_id = any (authz.my_departments()::uuid[])
+       ) then
+      raise exception 'team_id may only move to a team in your departments'
+        using errcode = '42501';
+    end if;
+  end if;
+
   return new;
 end;
 $$;
@@ -464,15 +528,18 @@ create trigger crm_leads_owner_guard
   for each row execute function public.guard_crm_lead_owner_change();
 
 comment on function public.guard_crm_lead_owner_change() is
-  'BEFORE UPDATE on crm_leads (0089). A change of owner_person_id needs leads.assign (app_owner excepted). Replaces a self-referencing WITH CHECK that made every app_user UPDATE fail with 42P17.';
+  'BEFORE UPDATE on crm_leads (0089). Moving a lead (owner_person_id or team_id) needs leads.assign and a destination inside the caller''s assign reach; a transaction without person identity is exempt. Replaces a self-referencing WITH CHECK that made every app_user UPDATE fail with 42P17.';
 
 -- 9c. Actor stamping.
 --
 -- created_by / updated_by name the person who made the change. They are taken from the
 -- transaction identity, never from the statement: on INSERT both are stamped, on UPDATE
--- created_by keeps its stored value and updated_by is stamped. With no person identity
--- (migrations, owner-side seeds) — or a non-UUID worker-plane identity — the row is left as
--- written; app_user cannot reach these tables without an identity (RLS needs authz.is_active()).
+-- created_by keeps its stored value and updated_by is stamped. With no person identity at all
+-- (migrations, owner-side seeds) the row is left as written; app_user cannot reach these tables
+-- without an identity (RLS needs authz.is_active()). ANY other identity value is resolved and
+-- stamped — any UUID spelling Postgres accepts resolves through authz.person_id(), and one that
+-- does not parse (a worker-plane 'system:…' id) stamps NULL — so a caller-supplied value never
+-- survives.
 create or replace function public.crm_stamp_actor()
 returns trigger
 language plpgsql
@@ -483,11 +550,14 @@ declare
   v_setting text := nullif(current_setting('app.person_id', true), '');
   v_person uuid;
 begin
-  if v_setting is null
-     or v_setting !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+  if v_setting is null then
     return new;
   end if;
-  v_person := authz.person_id();
+  begin
+    v_person := authz.person_id();
+  exception when invalid_text_representation then
+    v_person := null;
+  end;
   if tg_op = 'INSERT' then
     new.created_by := v_person;
     new.updated_by := v_person;
@@ -511,6 +581,44 @@ create trigger crm_lead_tasks_actor_stamp
 
 comment on function public.crm_stamp_actor() is
   'BEFORE INSERT OR UPDATE on crm_leads and crm_lead_tasks (0089). Stamps created_by/updated_by from the transaction identity; a value supplied by the caller never survives.';
+
+-- 9c2. Dedup candidate identity.
+--
+-- A candidate is evidence that two records may be the same; a review decides it, nothing
+-- rewrites it. Once inserted, which records it pairs (and the score and reasons that justify it)
+-- cannot change — otherwise a reviewer could retarget a candidate at records outside their scope
+-- and a later merge that trusts the row would act on them. Only status and review fields move.
+-- A transaction with no person identity (owner-side maintenance) is exempt.
+create or replace function public.guard_crm_dedup_candidate_identity()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if nullif(current_setting('app.person_id', true), '') is not null
+     and (new.org_id is distinct from old.org_id
+          or new.entity_type is distinct from old.entity_type
+          or new.primary_entity_id is distinct from old.primary_entity_id
+          or new.duplicate_entity_id is distinct from old.duplicate_entity_id
+          or new.confidence_score is distinct from old.confidence_score
+          or new.match_reasons is distinct from old.match_reasons
+          or new.created_at is distinct from old.created_at) then
+    raise exception 'A dedup candidate''s pair and evidence are immutable; only its review may change'
+      using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_crm_dedup_candidate_identity() from public;
+
+create trigger crm_dedup_candidates_identity_guard
+  before update on public.crm_dedup_candidates
+  for each row execute function public.guard_crm_dedup_candidate_identity();
+
+comment on function public.guard_crm_dedup_candidate_identity() is
+  'BEFORE UPDATE on crm_dedup_candidates (0089). The paired records, score and reasons are immutable after insert (person identity present); only status and review fields change.';
 
 -- 9d. Lead edit scope.
 --
@@ -830,8 +938,13 @@ create policy crm_lead_assign_hist_select on public.crm_lead_assignment_history
     )
   );
 
--- The reassigner is the caller (as 0076 binds jobs.enqueued_by), and the lead must be one the
--- caller can see: this is an append-only ledger, so a forged row could never be corrected.
+-- This is an append-only ledger, so a forged row could never be corrected. An entry therefore
+-- records what is true at the moment it is written: the reassigner is the caller (as 0076 binds
+-- jobs.enqueued_by); to_person_id is the lead's CURRENT owner (the entry is written in the same
+-- transaction as the ownership change, after it, so it can only describe a change that happened);
+-- created_at is the transaction time (no backdating); and the lead is one the caller can see.
+-- from_person_id is the previous owner as the writer reports it and cannot be re-derived here;
+-- the lead service records it from the row it changed (see the PR correction report).
 create policy crm_lead_assign_hist_insert on public.crm_lead_assignment_history
   for insert to app_user
   with check (
@@ -843,10 +956,12 @@ create policy crm_lead_assign_hist_insert on public.crm_lead_assignment_history
       or (select authz.has('leads.edit'))
     )
     and reassigned_by_person_id = (select authz.person_id())
+    and created_at = now()
     and exists (
       select 1 from public.crm_leads l
       where l.id = crm_lead_assignment_history.lead_id
         and l.org_id = crm_lead_assignment_history.org_id
+        and l.owner_person_id is not distinct from crm_lead_assignment_history.to_person_id
     )
   );
 
@@ -857,12 +972,23 @@ alter table public.crm_assignment_cursors force row level security;
 create policy crm_assignment_cursors_owner_all on public.crm_assignment_cursors
   for all to app_owner using (true) with check (true);
 
+-- A team's round-robin state belongs to whoever may assign within that team: GLOBAL assigners
+-- anywhere, everyone else only for teams of their own departments (the teams subquery also runs
+-- under teams RLS, so a non-member sees no team at all — fail closed).
 create policy crm_assignment_cursors_select on public.crm_assignment_cursors
   for select to app_user
   using (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.assign'))
+    and (
+      (select authz.scope_for('leads.assign')) = 'GLOBAL'
+      or exists (
+        select 1 from public.teams t
+        where t.id = crm_assignment_cursors.team_id
+          and t.department_id = any ((select authz.my_departments())::uuid[])
+      )
+    )
   );
 
 create policy crm_assignment_cursors_insert on public.crm_assignment_cursors
@@ -871,6 +997,14 @@ create policy crm_assignment_cursors_insert on public.crm_assignment_cursors
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.assign'))
+    and (
+      (select authz.scope_for('leads.assign')) = 'GLOBAL'
+      or exists (
+        select 1 from public.teams t
+        where t.id = crm_assignment_cursors.team_id
+          and t.department_id = any ((select authz.my_departments())::uuid[])
+      )
+    )
   );
 
 create policy crm_assignment_cursors_update on public.crm_assignment_cursors
@@ -879,6 +1013,14 @@ create policy crm_assignment_cursors_update on public.crm_assignment_cursors
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.assign'))
+    and (
+      (select authz.scope_for('leads.assign')) = 'GLOBAL'
+      or exists (
+        select 1 from public.teams t
+        where t.id = crm_assignment_cursors.team_id
+          and t.department_id = any ((select authz.my_departments())::uuid[])
+      )
+    )
   );
 
 -- Tasks RLS
@@ -911,8 +1053,12 @@ create policy crm_lead_tasks_select on public.crm_lead_tasks
     )
   );
 
--- A task may only be attached to a lead or contact the caller can see (each subquery runs
--- under that table's own RLS), so a task cannot be planted on another agent's lead.
+-- On INSERT and on every UPDATE (an explicit WITH CHECK, so re-pointing an existing task is held
+-- to the same rule): a task may only be attached to a lead or contact the caller can see (each
+-- subquery runs under that table's own RLS), so it cannot be planted on another agent's lead;
+-- and its assignee must be someone the caller may give work to under leads.edit — themselves,
+-- or within their department / reporting line / organization per their scope — so it cannot be
+-- pushed onto any colleague's worklist.
 create policy crm_lead_tasks_insert on public.crm_lead_tasks
   for insert to app_user
   with check (
@@ -932,6 +1078,18 @@ create policy crm_lead_tasks_insert on public.crm_lead_tasks
         where c.id = crm_lead_tasks.contact_id
           and c.org_id = crm_lead_tasks.org_id
       )
+    )
+    and (
+      assignee_person_id = (select authz.person_id())
+      or case (select authz.scope_for('leads.edit'))
+        when 'GLOBAL' then true
+        when 'DEPARTMENT' then (
+          (select authz.in_my_departments(assignee_person_id))
+          or (select authz.reports_to_me(assignee_person_id))
+        )
+        when 'TEAM' then (select authz.reports_to_me(assignee_person_id))
+        else false
+      end
     )
   );
 
@@ -956,6 +1114,37 @@ create policy crm_lead_tasks_update on public.crm_lead_tasks
         else false
       end
     )
+  )
+  with check (
+    org_id = (select authz.org_id())
+    and (select authz.is_active())
+    and (select authz.has('leads.edit'))
+    and (
+      crm_lead_tasks.lead_id is null or exists (
+        select 1 from public.crm_leads l
+        where l.id = crm_lead_tasks.lead_id
+          and l.org_id = crm_lead_tasks.org_id
+      )
+    )
+    and (
+      crm_lead_tasks.contact_id is null or exists (
+        select 1 from public.contacts c
+        where c.id = crm_lead_tasks.contact_id
+          and c.org_id = crm_lead_tasks.org_id
+      )
+    )
+    and (
+      assignee_person_id = (select authz.person_id())
+      or case (select authz.scope_for('leads.edit'))
+        when 'GLOBAL' then true
+        when 'DEPARTMENT' then (
+          (select authz.in_my_departments(assignee_person_id))
+          or (select authz.reports_to_me(assignee_person_id))
+        )
+        when 'TEAM' then (select authz.reports_to_me(assignee_person_id))
+        else false
+      end
+    )
   );
 
 -- Dedup candidates RLS
@@ -965,23 +1154,54 @@ alter table public.crm_dedup_candidates force row level security;
 create policy crm_dedup_candidates_owner_all on public.crm_dedup_candidates
   for all to app_owner using (true) with check (true);
 
+-- A candidate exposes the two records it pairs (and the evidence in match_reasons), so it is
+-- visible, and can be created or reviewed, only when the caller can see BOTH records — each
+-- subquery runs under crm_leads / contacts RLS. A candidate starts PENDING and unreviewed; a
+-- decided candidate names the caller as its reviewer. Which records it pairs never changes after
+-- insert (guard_crm_dedup_candidate_identity).
 create policy crm_dedup_candidates_select on public.crm_dedup_candidates
   for select to app_user
   using (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.view'))
+    and case crm_dedup_candidates.entity_type
+      when 'lead' then
+        exists (select 1 from public.crm_leads l
+                where l.id = crm_dedup_candidates.primary_entity_id and l.org_id = crm_dedup_candidates.org_id)
+        and exists (select 1 from public.crm_leads l
+                    where l.id = crm_dedup_candidates.duplicate_entity_id and l.org_id = crm_dedup_candidates.org_id)
+      when 'contact' then
+        exists (select 1 from public.contacts c
+                where c.id = crm_dedup_candidates.primary_entity_id and c.org_id = crm_dedup_candidates.org_id)
+        and exists (select 1 from public.contacts c
+                    where c.id = crm_dedup_candidates.duplicate_entity_id and c.org_id = crm_dedup_candidates.org_id)
+      else false
+    end
   );
 
--- A candidate is created unreviewed; whoever records a review is the caller.
 create policy crm_dedup_candidates_insert on public.crm_dedup_candidates
   for insert to app_user
   with check (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
+    and status = 'PENDING'
     and reviewed_by_person_id is null
     and reviewed_at is null
+    and case crm_dedup_candidates.entity_type
+      when 'lead' then
+        exists (select 1 from public.crm_leads l
+                where l.id = crm_dedup_candidates.primary_entity_id and l.org_id = crm_dedup_candidates.org_id)
+        and exists (select 1 from public.crm_leads l
+                    where l.id = crm_dedup_candidates.duplicate_entity_id and l.org_id = crm_dedup_candidates.org_id)
+      when 'contact' then
+        exists (select 1 from public.contacts c
+                where c.id = crm_dedup_candidates.primary_entity_id and c.org_id = crm_dedup_candidates.org_id)
+        and exists (select 1 from public.contacts c
+                    where c.id = crm_dedup_candidates.duplicate_entity_id and c.org_id = crm_dedup_candidates.org_id)
+      else false
+    end
   );
 
 create policy crm_dedup_candidates_update on public.crm_dedup_candidates
@@ -996,8 +1216,8 @@ create policy crm_dedup_candidates_update on public.crm_dedup_candidates
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
     and (
-      reviewed_by_person_id is null
-      or reviewed_by_person_id = (select authz.person_id())
+      (status = 'PENDING' and reviewed_by_person_id is null)
+      or (status <> 'PENDING' and reviewed_by_person_id = (select authz.person_id()))
     )
   );
 

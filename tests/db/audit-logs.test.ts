@@ -962,7 +962,7 @@ describe('the rest of the model is untouched', () => {
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
     expect(Number(rows[0]!.n)).toBe(133); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds sixteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
-    expect(Number(rows[0]!.with_scope)).toBe(32); // 0081 adds four scope-driven crm_imports(/_rows) select/update policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds four scope-driven select/update policies on crm_leads and crm_lead_tasks
+    expect(Number(rows[0]!.with_scope)).toBe(34); // 0081 adds four scope-driven crm_imports(/_rows) select/update policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds six scope-driven select/update policies on crm_leads, crm_lead_tasks and crm_assignment_cursors
   });
 
   it('leaves every table in public RLS-enabled and forced', async () => {

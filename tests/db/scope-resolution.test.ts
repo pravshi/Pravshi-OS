@@ -954,7 +954,7 @@ describe('RLS', () => {
     // deals branch on scope_for for view/edit. The Track B migrations add eight more —
     // the select and update policies on activities, company_contacts, company_links and
     // contact_links branch on scope_for for view/edit. The rest stay relationship-scoped.
-    expect(Number(rows[0]!.with_scope)).toBe(32); // 0081: four scope-driven crm_imports(/_rows) policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds four scope-driven select/update policies on crm_leads and crm_lead_tasks
+    expect(Number(rows[0]!.with_scope)).toBe(34); // 0081: four scope-driven crm_imports(/_rows) policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds six scope-driven select/update policies on crm_leads, crm_lead_tasks and crm_assignment_cursors
   });
 });
 

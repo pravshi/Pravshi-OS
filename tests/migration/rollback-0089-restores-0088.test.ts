@@ -28,12 +28,26 @@ const FUNCTIONS = [
   'public.guard_crm_lead_attribution',
   'public.guard_crm_lead_owner_change',
   'public.crm_stamp_actor',
+  'public.guard_crm_dedup_candidate_identity',
   'public.crm_lead_in_edit_scope',
   'public.apply_lead_attribution_correction',
 ];
 
+const JOURNAL = JSON.parse(read('drizzle', 'meta', '_journal.json')) as {
+  entries: Array<{ idx: number; tag: string; when: number; hash: string }>;
+};
+
 describe('0089 does what its rollback undoes', () => {
-  it('creates 6 tables and 6 functions; the rollback drops exactly those', () => {
+  it('refuses any database that is not at exactly this revision of 0089, or whose data it would lose', () => {
+    const e0089 = JOURNAL.entries.find((e) => e.tag === '0089_crm_leads_and_lineage')!;
+    // The rollback names the checksum and timing of the 0089 it undoes; they must be the journal's.
+    expect(ROLLBACK).toContain(`v_last.hash <> '${e0089.hash}'`);
+    expect(ROLLBACK).toContain(`v_last.created_at <> ${e0089.when}`);
+    expect(ROLLBACK).toContain("where entity_type = 'lead'");
+    expect(ROLLBACK).toContain('where merged_into_contact_id is not null');
+  });
+
+  it('creates 6 tables and 7 functions; the rollback drops exactly those, without CASCADE', () => {
     expect([...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1])).toEqual(TABLES);
     expect([...M0089.matchAll(/^create or replace function (\S+)\(/gm)].map((m) => m[1])).toEqual(
       FUNCTIONS,
@@ -49,9 +63,10 @@ describe('0089 does what its rollback undoes', () => {
     expect(statements[statements.length - 1]).toBe('commit;');
 
     const droppedTables = statements
-      .map((s) => s.match(/^drop table if exists (\S+) cascade;$/)?.[1])
+      .map((s) => s.match(/^drop table if exists (\S+);$/)?.[1])
       .filter(Boolean);
     expect([...droppedTables].sort()).toEqual([...TABLES].sort());
+    expect(statements.filter((s) => /\bcascade\b/i.test(s))).toEqual([]);
 
     const droppedFunctions = statements
       .map((s) => s.match(/^drop function if exists (\S+)\(/)?.[1])

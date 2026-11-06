@@ -34,6 +34,8 @@ let carol = '';
 let dave = '';
 let erin = '';
 let frank = '';
+let gina = ''; // DEPARTMENT leads.view/create/edit/assign, department X
+let teamOther = ''; // a team of a department gina does not belong to
 let leadAlice = '';
 let leadCarol = '';
 let leadDave = '';
@@ -172,6 +174,7 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
     carol = await mkPersonIn(orgA, deptX, 'Carol', frank);
     erin = await mkPersonIn(orgA, deptX, 'Erin');
     dave = await mkPersonIn(orgA, deptOther, 'Dave');
+    gina = await mkPersonIn(orgA, deptX, 'Gina');
     bob = await mkPersonIn(orgB, deptB, 'Bob');
 
     await grant(orgA, alice, 'GLOBAL', [...VIEW_EDIT, 'leads.assign']);
@@ -179,6 +182,7 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
     await grant(orgA, dave, 'SELF', VIEW_EDIT);
     await grant(orgA, erin, 'DEPARTMENT', VIEW_EDIT);
     await grant(orgA, frank, 'TEAM', VIEW_EDIT);
+    await grant(orgA, gina, 'DEPARTMENT', [...VIEW_EDIT, 'leads.assign']);
     await grant(orgB, bob, 'GLOBAL', [...VIEW_EDIT, 'leads.assign']);
 
     teamX1 = (
@@ -197,6 +201,12 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
       `insert into public.team_members (org_id, team_id, person_id) values ($1,$2,$3)`,
       [orgA, teamX1, erin],
     );
+    teamOther = (
+      await owner.query<{ id: string }>(
+        `insert into public.teams (org_id, department_id, name) values ($1,$2,'Team Other') returning id`,
+        [orgA, deptOther],
+      )
+    ).rows[0]!.id;
 
     leadAlice = await seedLead(orgA, alice, null);
     leadCarol = await seedLead(orgA, carol, null);
@@ -212,7 +222,7 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
   });
 
   describe('function properties', () => {
-    it('runs the guards, stamping and scope helper with invoker rights, and the mutator as app_owner', async () => {
+    it('runs the attribution guard with invoker rights, the definers as app_owner, and every function with an empty search_path', async () => {
       const { rows } = await owner.query<{
         proname: string;
         prosecdef: boolean;
@@ -223,19 +233,27 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public' and p.proname in (
            'guard_crm_lead_attribution', 'guard_crm_lead_owner_change', 'crm_stamp_actor',
-           'crm_lead_in_edit_scope', 'apply_lead_attribution_correction')
+           'guard_crm_dedup_candidate_identity', 'crm_lead_in_edit_scope',
+           'apply_lead_attribution_correction')
          order by p.proname`,
       );
+      expect(rows).toHaveLength(6);
       const by = new Map(rows.map((r) => [r.proname, r]));
-      // A SECURITY DEFINER guard sees current_user = its owner (app_owner) and never fires.
+      // The attribution guard tells callers apart by current_user, so it MUST run with invoker
+      // rights: a SECURITY DEFINER guard sees current_user = its owner (app_owner), never fires.
       expect(by.get('guard_crm_lead_attribution')!.prosecdef).toBe(false);
-      expect(by.get('guard_crm_lead_owner_change')!.prosecdef).toBe(false);
       expect(by.get('crm_stamp_actor')!.prosecdef).toBe(false);
+      expect(by.get('guard_crm_dedup_candidate_identity')!.prosecdef).toBe(false);
       expect(by.get('crm_lead_in_edit_scope')!.prosecdef).toBe(false);
-      // The guards' "current_user = app_owner" exemption holds only inside this function.
+      // The owner guard calls authz.crm_owner_reachable, which app_user may not execute (0033),
+      // so it is a definer; it tells callers apart by the presence of a person identity instead.
+      expect(by.get('guard_crm_lead_owner_change')!.prosecdef).toBe(true);
+      // The attribution guard's "current_user = app_owner" exemption holds inside this function.
       expect(by.get('apply_lead_attribution_correction')!.prosecdef).toBe(true);
-      expect(by.get('apply_lead_attribution_correction')!.owner).toBe('app_owner');
-      for (const r of rows) expect(r.config, r.proname).toContain('search_path=""');
+      for (const r of rows) {
+        if (r.prosecdef) expect(r.owner, r.proname).toBe('app_owner');
+        expect(r.config, r.proname).toContain('search_path=""');
+      }
     });
   });
 
@@ -327,24 +345,29 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
       expect(state).toBe('23503');
     });
 
-    it('binds reassigned_by_person_id to the caller and requires a visible lead', async () => {
-      const forged = await sqlstateOf(
+    it('accepts a ledger entry only as the truth: caller as reassigner, current owner, current time, visible lead', async () => {
+      const history = (ctx: Ctx, lead: string, to: string, by: string, createdAt?: string) =>
         inContext(
           asUser,
-          at(alice, orgA),
-          `insert into public.crm_lead_assignment_history (org_id, lead_id, to_person_id, reassigned_by_person_id, reason)
-           values ($1, $2, $3, $4, 'forged reassigner')`,
-          [orgA, leadCarol, alice, carol],
-        ),
-      );
-      expect(forged).toBe('42501');
-      await inContext(
-        asUser,
-        at(alice, orgA),
-        `insert into public.crm_lead_assignment_history (org_id, lead_id, to_person_id, reassigned_by_person_id, reason)
-         values ($1, $2, $3, $3, 'self as reassigner')`,
-        [orgA, leadCarol, alice],
-      );
+          ctx,
+          `insert into public.crm_lead_assignment_history (org_id, lead_id, to_person_id, reassigned_by_person_id, reason${createdAt ? ', created_at' : ''})
+           values ($1, $2, $3, $4, 'ledger entry'${createdAt ? ', $5' : ''})`,
+          createdAt ? [ctx.orgId, lead, to, by, createdAt] : [ctx.orgId, lead, to, by],
+        );
+      // leadCarol is owned by carol.
+      expect(
+        await sqlstateOf(history(at(alice, orgA), leadCarol, carol, carol)),
+        'forged reassigner',
+      ).toBe('42501');
+      expect(
+        await sqlstateOf(history(at(alice, orgA), leadCarol, alice, alice)),
+        'to_person_id is not the current owner',
+      ).toBe('42501');
+      expect(
+        await sqlstateOf(history(at(alice, orgA), leadCarol, carol, alice, '2026-01-01T00:00:00Z')),
+        'backdated',
+      ).toBe('42501');
+      await history(at(alice, orgA), leadCarol, carol, alice);
       const invisible = await sqlstateOf(
         inContext(
           asUser,
@@ -412,6 +435,205 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
         [orgA, leadCarol, carol],
       );
       expect(own).toHaveLength(1);
+    });
+  });
+
+  describe('independent security review, round 2 (F-SEC-1/2/3/4/6/7)', () => {
+    let hank = ''; // GLOBAL view/create/edit but only DEPARTMENT leads.assign (department X)
+
+    beforeAll(async () => {
+      const deptOfCarol = (
+        await owner.query<{ d: string }>(
+          `select department_id d from public.engagements where person_id = $1`,
+          [carol],
+        )
+      ).rows[0]!.d;
+      hank = await mkPersonIn(orgA, deptOfCarol, 'Hank');
+      await grant(orgA, hank, 'GLOBAL', VIEW_EDIT);
+      await grant(orgA, hank, 'DEPARTMENT', ['leads.assign']);
+      await owner.query(
+        `insert into public.team_members (org_id, team_id, person_id) values ($1,$2,$3)`,
+        [orgA, teamX2, gina],
+      );
+    });
+
+    it('F-SEC-4: a new owner must be inside the caller’s leads.assign reach', async () => {
+      // hank sees every lead (GLOBAL view), so only the guard can refuse: dave is outside
+      // hank's department, erin is inside it.
+      const out = await sqlstateOf(
+        inContext(
+          asUser,
+          at(hank, orgA),
+          `update public.crm_leads set owner_person_id = $2 where id = $1`,
+          [leadCarol, dave],
+        ),
+      );
+      expect(out).toBe('42501');
+      const inside = await affectedThenRollback(
+        at(hank, orgA),
+        `update public.crm_leads set owner_person_id = $2 where id = $1`,
+        [leadCarol, erin],
+      );
+      expect(inside).toBe(1);
+    });
+
+    it('F-SEC-4: moving a lead to another team needs leads.assign and a team in the caller’s departments', async () => {
+      const noAssign = await sqlstateOf(
+        inContext(
+          asUser,
+          at(erin, orgA),
+          `update public.crm_leads set team_id = $2 where id = $1`,
+          [leadCarol, teamX1],
+        ),
+      );
+      expect(noAssign).toBe('42501');
+      const otherDept = await sqlstateOf(
+        inContext(
+          asUser,
+          at(hank, orgA),
+          `update public.crm_leads set team_id = $2 where id = $1`,
+          [leadCarol, teamOther],
+        ),
+      );
+      expect(otherDept).toBe('42501');
+      const ownDept = await affectedThenRollback(
+        at(hank, orgA),
+        `update public.crm_leads set team_id = $2 where id = $1`,
+        [leadCarol, teamX1],
+      );
+      expect(ownDept).toBe(1);
+    });
+
+    it('F-SEC-2: a dedup candidate is visible and creatable only when both records are', async () => {
+      const [cand] = await inContext<{ id: string }>(
+        asUser,
+        at(alice, orgA),
+        `insert into public.crm_dedup_candidates (org_id, entity_type, primary_entity_id, duplicate_entity_id, confidence_score)
+         values ($1, 'lead', $2, $3, 0.8) returning id`,
+        [orgA, leadCarol, leadDave],
+      );
+      // carol can see her own lead but not dave's.
+      const seen = await inContext(
+        asUser,
+        at(carol, orgA),
+        `select id from public.crm_dedup_candidates where id = $1`,
+        [cand!.id],
+      );
+      expect(seen).toHaveLength(0);
+      const created = await sqlstateOf(
+        inContext(
+          asUser,
+          at(carol, orgA),
+          `insert into public.crm_dedup_candidates (org_id, entity_type, primary_entity_id, duplicate_entity_id, confidence_score)
+           values ($1, 'lead', $2, $3, 0.7)`,
+          [orgA, leadCarol, leadAlice],
+        ),
+      );
+      expect(created).toBe('42501');
+    });
+
+    it('F-SEC-2: a candidate’s pair is immutable and a decided review names the caller', async () => {
+      const [cand] = await inContext<{ id: string }>(
+        asUser,
+        at(alice, orgA),
+        `insert into public.crm_dedup_candidates (org_id, entity_type, primary_entity_id, duplicate_entity_id, confidence_score)
+         values ($1, 'lead', $2, $3, 0.6) returning id`,
+        [orgA, pondNoTeam, leadDave],
+      );
+      const retarget = await sqlstateOf(
+        inContext(
+          asUser,
+          at(alice, orgA),
+          `update public.crm_dedup_candidates set duplicate_entity_id = $2 where id = $1`,
+          [cand!.id, leadCarol],
+        ),
+      );
+      expect(retarget).toBe('42501');
+      const anonymous = await sqlstateOf(
+        inContext(
+          asUser,
+          at(alice, orgA),
+          `update public.crm_dedup_candidates set status = 'DISMISSED' where id = $1`,
+          [cand!.id],
+        ),
+      );
+      expect(anonymous).toBe('42501');
+    });
+
+    it('F-SEC-3: a task cannot be re-pointed to an invisible lead, nor pushed onto an out-of-reach colleague', async () => {
+      const [task] = await inContext<{ id: string }>(
+        asUser,
+        at(carol, orgA),
+        `insert into public.crm_lead_tasks (org_id, lead_id, title, task_type, due_at, assignee_person_id)
+         values ($1, $2, 'Re-point me', 'FOLLOW_UP', now() + interval '1 day', $3) returning id`,
+        [orgA, leadCarol, carol],
+      );
+      const repoint = await sqlstateOf(
+        inContext(
+          asUser,
+          at(carol, orgA),
+          `update public.crm_lead_tasks set lead_id = $2 where id = $1`,
+          [task!.id, leadAlice],
+        ),
+      );
+      expect(repoint).toBe('42501');
+      const pushed = await sqlstateOf(
+        inContext(
+          asUser,
+          at(carol, orgA),
+          `insert into public.crm_lead_tasks (org_id, lead_id, title, task_type, due_at, assignee_person_id)
+           values ($1, $2, 'For dave', 'FOLLOW_UP', now() + interval '1 day', $3)`,
+          [orgA, leadCarol, dave],
+        ),
+      );
+      expect(pushed).toBe('42501');
+      // frank (TEAM) may hand work to carol, who reports to him.
+      const delegated = await inContext(
+        asUser,
+        at(frank, orgA),
+        `insert into public.crm_lead_tasks (org_id, lead_id, title, task_type, due_at, assignee_person_id)
+         values ($1, $2, 'For carol', 'FOLLOW_UP', now() + interval '1 day', $3) returning id`,
+        [orgA, leadCarol, carol],
+      );
+      expect(delegated).toHaveLength(1);
+    });
+
+    it('F-SEC-6: a DEPARTMENT assigner reaches only the round-robin state of teams in their departments', async () => {
+      const otherTeam = await sqlstateOf(
+        inContext(
+          asUser,
+          at(gina, orgA),
+          `insert into public.crm_assignment_cursors (org_id, team_id) values ($1, $2)`,
+          [orgA, teamOther],
+        ),
+      );
+      expect(otherTeam).toBe('42501');
+      const ownTeam = await inContext(
+        asUser,
+        at(gina, orgA),
+        `insert into public.crm_assignment_cursors (org_id, team_id) values ($1, $2) returning id`,
+        [orgA, teamX2],
+      );
+      expect(ownTeam).toHaveLength(1);
+      const [global] = await inContext<{ n: number }>(
+        asUser,
+        at(alice, orgA),
+        `select count(*)::int n from public.crm_assignment_cursors where team_id = $1`,
+        [teamX2],
+      );
+      expect(global!.n).toBe(1);
+    });
+
+    it('F-SEC-7: stamps the caller even when the identity is spelled as a braced UUID', async () => {
+      const [row] = await inContext<{ created_by: string }>(
+        asUser,
+        { personId: `{${alice}}`, orgId: orgA },
+        `insert into public.crm_leads (org_id, full_name, primary_phone, source, sla_due_at, owner_person_id, created_by)
+         values ($1, 'Braced', '+919800000005', 'manual', now() + interval '1 hour', $2, $3)
+         returning created_by`,
+        [orgA, alice, carol],
+      );
+      expect(row!.created_by).toBe(alice);
     });
   });
 
