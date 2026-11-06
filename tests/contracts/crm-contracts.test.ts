@@ -62,11 +62,73 @@ describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
       }
     });
 
-    it('confirms conversionDealId is completely removed from schema', () => {
-      const parsedKeys = Object.keys(LeadContractSchema.shape);
-      expect(parsedKeys).not.toContain('conversionDealId');
-      expect(parsedKeys).toContain('convertedContactId');
-      expect(parsedKeys).toContain('conversionContactId');
+    // Backward compatibility (F-P118-7). The previous version is the LeadContractSchema on main
+    // at ea18837; its keys and a payload in exactly its shape are frozen here, so a later change
+    // that removes a field or makes a new one required fails this suite.
+    const PREVIOUS_KEYS = [
+      'id',
+      'organizationId',
+      'fullName',
+      'primaryPhone',
+      'email',
+      'source',
+      'sourceSubcategory',
+      'campaignId',
+      'ownerId',
+      'stage',
+      'consentRecordId',
+      'conversionContactId',
+      'conversionDealId',
+      'convertedAt',
+      'createdAt',
+      'updatedAt',
+    ];
+
+    it('keeps every field of the previous contract version', () => {
+      const keys = Object.keys(LeadContractSchema.shape);
+      for (const k of PREVIOUS_KEYS) expect(keys, k).toContain(k);
+      expect(keys).toContain('convertedContactId');
+    });
+
+    it('parses a payload in exactly the previous version’s shape (no newly required field)', () => {
+      const previous = {
+        id: leadId,
+        organizationId: orgId,
+        fullName: 'Legacy Lead',
+        primaryPhone: '+919876543210',
+        email: null,
+        source: 'manual',
+        sourceSubcategory: 'walk-in desk',
+        campaignId: 'diwali-2026',
+        ownerId: personId,
+        stage: 'converted',
+        consentRecordId: null,
+        conversionContactId: contactId,
+        conversionDealId: correctionId,
+        convertedAt: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const parsed = LeadContractSchema.safeParse(previous);
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.conversionDealId).toBe(correctionId);
+        expect(parsed.data.conversionContactId).toBe(contactId);
+      }
+    });
+
+    it('still validates the deprecated fields (they are accepted, not ignored)', () => {
+      const bad = LeadContractSchema.safeParse({
+        id: leadId,
+        organizationId: orgId,
+        fullName: 'Legacy Lead',
+        primaryPhone: '+919876543210',
+        source: 'manual',
+        conversionDealId: 'not-a-uuid',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+      expect(bad.success).toBe(false);
     });
 
     it('validates lead capture input with optional consent proof', () => {

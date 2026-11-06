@@ -33,6 +33,11 @@ export const LEAD_SOURCES = [
 export const LeadSourceEnum = z.enum(LEAD_SOURCES);
 export type LeadSource = z.infer<typeof LeadSourceEnum>;
 
+/**
+ * Compatibility rule (PR-P1-01 review, F-P118-7): this contract is additive. Every payload valid
+ * under the previous version stays valid — no field is removed, renamed or made newly required.
+ * Fields the newer model supersedes are kept, marked @deprecated, and stay optional.
+ */
 export const LeadContractSchema = z.object({
   id: UuidSchema,
   organizationId: UuidSchema,
@@ -45,14 +50,20 @@ export const LeadContractSchema = z.object({
   ownerId: UuidSchema.nullable().optional(),
   teamId: UuidSchema.nullable().optional(),
   stage: LeadStageEnum.default('new'),
-  slaDueAt: z.string().datetime(),
+  /** Always present on leads read from 0089 onwards; optional so earlier payloads still parse. */
+  slaDueAt: z.string().datetime().optional(),
   firstContactedAt: z.string().datetime().nullable().optional(),
   firstSuccessfulContactAt: z.string().datetime().nullable().optional(),
   escalatedAt: z.string().datetime().nullable().optional(),
   consentRecordId: UuidSchema.nullable().optional(),
   convertedContactId: UuidSchema.nullable().optional(),
-  /** Backwards compatibility alias for convertedContactId */
+  /** @deprecated Use convertedContactId. Kept for payloads of the previous contract version. */
   conversionContactId: UuidSchema.nullable().optional(),
+  /**
+   * @deprecated A lead converts to a contact (convertedContactId); deals are linked from the
+   * contact. Accepted for payloads of the previous contract version; never populated by 0089.
+   */
+  conversionDealId: UuidSchema.nullable().optional(),
   convertedAt: z.string().datetime().nullable().optional(),
   mergedIntoLeadId: UuidSchema.nullable().optional(),
   createdAt: z.string().datetime(),
