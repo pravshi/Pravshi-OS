@@ -19,6 +19,10 @@
 --     cannot hold those rows, and deleting them silently is not this script's decision.
 --   * It REFUSES while any contact records a merge (merged_into_contact_id set): dropping the
 --     columns would silently undo recorded merges.
+--   * It REFUSES while any record grant names a leads.attribution.* permission (the 0081
+--     pattern): revoke those grants first.
+--   The tables these refusals inspect are locked first, so nothing can change between the checks
+--   and the drops.
 --   Each refusal names what to decide first. Roll the APPLICATION back with the database: the
 --   0089 application code reads these tables, columns and permissions.
 --
@@ -32,6 +36,12 @@
 begin;
 
 set local lock_timeout = '5s';
+
+-- Lock what the refusals below inspect before inspecting it (the 0081/0088 pattern), so nothing
+-- checked here can change between the check and the drop: no lead activity, contact merge,
+-- record grant or role grant can be committed by another session meanwhile.
+lock table public.contacts, public.activities, public.record_grants, public.role_permissions
+  in exclusive mode;
 
 do $$
 declare
@@ -60,7 +70,7 @@ begin
 
   select hash, created_at into v_last_hash, v_last_created_at
   from drizzle.__drizzle_migrations order by id desc limit 1;
-  if v_last_hash is distinct from 'df6e05c8d4cae1747f268b8ff216cc188a832ab3b26822eda7b56299927188ee'
+  if v_last_hash is distinct from '752f9f4582ff163c591cf08a4615168d6b89b92b41efee91cc337ea2c10cfe27'
      or v_last_created_at is distinct from 1791604728057 then
     raise exception '0089 rollback refused: the applied 0089 is not the revision this script undoes (checksum or timing differs)';
   end if;
@@ -76,6 +86,14 @@ begin
   end if;
   if exists (select 1 from public.contacts where merged_into_contact_id is not null) then
     raise exception '0089 rollback refused: contacts record merges; decide how to preserve them first (dropping the columns would undo them)';
+  end if;
+  if exists (
+    select 1 from public.record_grants g
+    join public.permissions p on p.id = g.permission_id
+    where p.key in ('leads.attribution.request', 'leads.attribution.approve',
+                    'leads.attribution.single_manager')
+  ) then
+    raise exception '0089 rollback refused: record grants name a leads.attribution.* permission; revoke them first';
   end if;
 end;
 $$;

@@ -190,7 +190,7 @@ const expectAgreement = (rows: { key: string; h: boolean; s: string | null }[], 
   // new Phase 10 integration permission (integrations.view) from migration
   // 0057 (integrations.manage was already in the catalogue from migration
   // 0008; 0057 re-homes and grants it), plus crm.import from migration 0081.
-  expect(rows.length, `${label}: catalogue size`).toBe(128);
+  expect(rows.length, `${label}: catalogue size`).toBe(131); // 0089 adds the three leads.attribution.* permissions
   for (const r of rows) {
     expect(r.h, `${label}: has(${r.key}) must equal scope_for is not null (${r.s})`).toBe(
       r.s !== null,

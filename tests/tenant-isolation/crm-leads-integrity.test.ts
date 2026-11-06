@@ -836,6 +836,72 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
       expect(owners.rows[0]!.owner_person_id).toBe(carol);
     });
 
+    it('item 2 (review round 3): an identity changed in RETURNING or through a data-modifying CTE aborts too', async () => {
+      // RETURNING is evaluated after the BEFORE ROW checks and before the AFTER triggers (audit,
+      // assignment ledger): without the AFTER ROW pin the audit entry would name alice.
+      const auditBefore = await owner.query<{ n: number }>(
+        `select count(*)::int as n from public.audit_logs where entity_id = $1`,
+        [carolLead2],
+      );
+      const returning = await sqlstateOf(
+        inContext(
+          asUser,
+          at(carol, orgA),
+          `update public.crm_leads set full_name = 'Returning' where id = $1
+           returning left(set_config('app.person_id', $2, true), 0) as x`,
+          [carolLead2, alice],
+        ),
+      );
+      expect(returning).toBe('42501');
+      const auditAfter = await owner.query<{ n: number }>(
+        `select count(*)::int as n from public.audit_logs where entity_id = $1`,
+        [carolLead2],
+      );
+      expect(auditAfter.rows[0]!.n).toBe(auditBefore.rows[0]!.n);
+
+      // A data-modifying CTE on another pinned table fires its own statement capture when it is
+      // first read — here after the main statement's WHERE switched the identity to alice. It
+      // must not be able to re-capture the changed identity for the transaction.
+      const [task] = await inContext<{ id: string }>(
+        asUser,
+        at(carol, orgA),
+        `insert into public.crm_lead_tasks (org_id, lead_id, title, task_type, due_at, assignee_person_id)
+         values ($1, $2, 'CTE', 'FOLLOW_UP', now() + interval '1 day', $3) returning id`,
+        [orgA, carolLead2, carol],
+      );
+      const cte = await sqlstateOf(
+        inContext(
+          asUser,
+          at(carol, orgA),
+          `with t as (update public.crm_lead_tasks set title = 'CTE touched' where id = $3 returning id)
+           update public.crm_leads set owner_person_id = $2
+           where id = $1
+             -- CASE fixes the order: the identity is switched BEFORE the CTE is first read.
+             and case when set_config('app.person_id', $4, true) is not null
+                      then exists (select 1 from t) else false end`,
+          [carolLead2, dave, task!.id, alice],
+        ),
+      );
+      expect(cte).toBe('42501');
+      const owners = await owner.query<{ owner_person_id: string; full_name: string }>(
+        `select owner_person_id, full_name from public.crm_leads where id = $1`,
+        [carolLead2],
+      );
+      expect(owners.rows[0]!.owner_person_id).toBe(carol);
+      expect(owners.rows[0]!.full_name).not.toBe('Returning');
+    });
+
+    it('F-SEC-14: updated_at is stamped by the server on every update', async () => {
+      const [row] = await inContext<{ updated_at: Date; now: Date }>(
+        asUser,
+        at(carol, orgA),
+        `update public.crm_leads set full_name = full_name, updated_at = '2020-01-01' where id = $1
+         returning updated_at, now() as now`,
+        [carolLead3],
+      );
+      expect(row!.updated_at.getTime()).toBe(row!.now.getTime());
+    });
+
     it('item 1: an unfiltered bulk update decides only candidates whose two records the caller can see', async () => {
       await inContext(
         asUser,

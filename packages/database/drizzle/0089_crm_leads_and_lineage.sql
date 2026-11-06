@@ -524,13 +524,17 @@ begin
     new.first_contacted_at := null;
     new.first_successful_contact_at := null;
     new.escalated_at := null;
-  elsif new.created_at is distinct from old.created_at
-     or new.sla_due_at is distinct from old.sla_due_at
-     or new.first_contacted_at is distinct from old.first_contacted_at
-     or new.first_successful_contact_at is distinct from old.first_successful_contact_at
-     or new.escalated_at is distinct from old.escalated_at then
-    raise exception 'created_at and the SLA fields of a lead are server-owned'
-      using errcode = '42501';
+  else
+    if new.created_at is distinct from old.created_at
+       or new.sla_due_at is distinct from old.sla_due_at
+       or new.first_contacted_at is distinct from old.first_contacted_at
+       or new.first_successful_contact_at is distinct from old.first_successful_contact_at
+       or new.escalated_at is distinct from old.escalated_at then
+      raise exception 'created_at and the SLA fields of a lead are server-owned'
+        using errcode = '42501';
+    end if;
+    -- The last-change time is the server's too.
+    new.updated_at := now();
   end if;
   return new;
 end;
@@ -717,23 +721,29 @@ comment on function public.guard_crm_dedup_candidate_identity() is
 
 -- 9f. Statement identity pin.
 --
--- The caller's identity (app.person_id, app.org_id) is set by withAuthorizedDb() before any
--- statement runs, and every RLS policy, guard and audit entry reads it. Because set_config() can
--- be called from inside an expression, a statement could otherwise change the identity part-way:
--- after RLS admitted the row under one identity and before the triggers, the WITH CHECK or the
--- audit read it under another. To make that impossible rather than merely unlikely, the identity
--- is captured when each statement on these tables starts (BEFORE ... FOR EACH STATEMENT, before any
--- expression of the statement is evaluated) and every row the statement writes is checked against
--- it (BEFORE ... FOR EACH ROW, after the row's own expressions). Any difference aborts the statement
--- with 42501, whatever order the other triggers fire in.
+-- The caller's identity (app.person_id, app.org_id) is set by withAuthorizedDb() once per
+-- transaction, and every RLS policy, guard and audit entry reads it. Because set_config() can be
+-- called from inside an expression, a statement could otherwise change the identity part-way:
+-- after RLS admitted a row under one identity, the triggers, the WITH CHECK, the RETURNING list or
+-- the AFTER triggers (audit, assignment ledger) could read another. So, on every one of these
+-- tables:
+--   * BEFORE ... FOR EACH STATEMENT captures the identity before any expression of the statement
+--     is evaluated — and, the identity being constant for a transaction, aborts if the transaction
+--     already recorded a different one (an earlier step of the same statement, such as a
+--     data-modifying CTE, cannot re-capture a changed identity);
+--   * BEFORE ... FOR EACH ROW checks each row after its own expressions (VALUES, SET, ON CONFLICT);
+--   * AFTER ... FOR EACH ROW checks again after the RETURNING list, before the statement ends, so
+--     an AFTER trigger never acts — and the statement never commits — under a changed identity.
+-- Any difference aborts the statement with 42501. The other triggers may fire in any order: an
+-- abort rolls back whatever they did.
 --
--- What this does not do: it does not authenticate the identity itself. A value set by an earlier
--- statement of the same transaction is captured as the identity of the next statement. That trust
--- is withAuthorizedDb()'s (the only database path, ADR-010 single-db-path guard) and the
--- confinement of the app_user credential to the server.
+-- What this does not do: it does not authenticate the identity itself — that is
+-- withAuthorizedDb()'s (the only database path, ADR-010 single-db-path guard) together with the
+-- confinement of the app_user credential to the server. It protects the identity a transaction
+-- started with from being changed while statements on these tables run.
 --
 -- The capture lives in a table only app_owner (the owner of the two definer functions) can write;
--- one row per backend, overwritten by each statement, keyed to the transaction.
+-- one row per backend, keyed to the transaction.
 create table public.crm_statement_identity (
   backend_pid integer primary key,
   xact xid8 not null,
@@ -759,7 +769,20 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_pin public.crm_statement_identity;
 begin
+  -- withAuthorizedDb() sets the identity once per transaction. A capture that would REPLACE an
+  -- identity already recorded for this transaction means it was changed part-way — possibly in
+  -- an earlier step of the same statement (a data-modifying CTE) — so it aborts instead of
+  -- overwriting the pin.
+  select * into v_pin from public.crm_statement_identity where backend_pid = pg_backend_pid();
+  if found and v_pin.xact = pg_current_xact_id()
+     and (v_pin.person_id is distinct from current_setting('app.person_id', true)
+          or v_pin.org_id is distinct from current_setting('app.org_id', true)) then
+    raise exception 'The caller identity changed within the transaction'
+      using errcode = '42501';
+  end if;
   insert into public.crm_statement_identity (backend_pid, xact, person_id, org_id)
   values (pg_backend_pid(), pg_current_xact_id(),
           current_setting('app.person_id', true), current_setting('app.org_id', true))
@@ -797,15 +820,18 @@ revoke all on function public.crm_capture_statement_identity() from public;
 revoke all on function public.crm_assert_statement_identity() from public;
 
 comment on function public.crm_capture_statement_identity() is
-  'BEFORE ... FOR EACH STATEMENT on the 0089 CRM tables: records the caller identity at the start of the statement.';
+  'BEFORE ... FOR EACH STATEMENT on the 0089 CRM tables: records the caller identity at the start of the statement; aborts (42501) if the transaction already recorded a different one.';
 comment on function public.crm_assert_statement_identity() is
-  'BEFORE ... FOR EACH ROW on the 0089 CRM tables: aborts (42501) when the caller identity differs from the one captured at the start of the statement.';
+  'BEFORE and AFTER ... FOR EACH ROW on the 0089 CRM tables: aborts (42501) when the caller identity differs from the one captured for the statement.';
 
 create trigger crm_leads_identity_capture
   before insert or update or delete on public.crm_leads
   for each statement execute function public.crm_capture_statement_identity();
 create trigger crm_leads_identity_pin
   before insert or update or delete on public.crm_leads
+  for each row execute function public.crm_assert_statement_identity();
+create trigger crm_leads_identity_pin_after
+  after insert or update or delete on public.crm_leads
   for each row execute function public.crm_assert_statement_identity();
 
 create trigger crm_lead_assignment_history_identity_capture
@@ -814,12 +840,18 @@ create trigger crm_lead_assignment_history_identity_capture
 create trigger crm_lead_assignment_history_identity_pin
   before insert or update or delete on public.crm_lead_assignment_history
   for each row execute function public.crm_assert_statement_identity();
+create trigger crm_lead_assignment_history_identity_pin_after
+  after insert or update or delete on public.crm_lead_assignment_history
+  for each row execute function public.crm_assert_statement_identity();
 
 create trigger crm_assignment_cursors_identity_capture
   before insert or update or delete on public.crm_assignment_cursors
   for each statement execute function public.crm_capture_statement_identity();
 create trigger crm_assignment_cursors_identity_pin
   before insert or update or delete on public.crm_assignment_cursors
+  for each row execute function public.crm_assert_statement_identity();
+create trigger crm_assignment_cursors_identity_pin_after
+  after insert or update or delete on public.crm_assignment_cursors
   for each row execute function public.crm_assert_statement_identity();
 
 create trigger crm_lead_tasks_identity_capture
@@ -828,6 +860,9 @@ create trigger crm_lead_tasks_identity_capture
 create trigger crm_lead_tasks_identity_pin
   before insert or update or delete on public.crm_lead_tasks
   for each row execute function public.crm_assert_statement_identity();
+create trigger crm_lead_tasks_identity_pin_after
+  after insert or update or delete on public.crm_lead_tasks
+  for each row execute function public.crm_assert_statement_identity();
 
 create trigger crm_dedup_candidates_identity_capture
   before insert or update or delete on public.crm_dedup_candidates
@@ -835,12 +870,18 @@ create trigger crm_dedup_candidates_identity_capture
 create trigger crm_dedup_candidates_identity_pin
   before insert or update or delete on public.crm_dedup_candidates
   for each row execute function public.crm_assert_statement_identity();
+create trigger crm_dedup_candidates_identity_pin_after
+  after insert or update or delete on public.crm_dedup_candidates
+  for each row execute function public.crm_assert_statement_identity();
 
 create trigger crm_lead_attribution_corrections_identity_capture
   before insert or update or delete on public.crm_lead_attribution_corrections
   for each statement execute function public.crm_capture_statement_identity();
 create trigger crm_lead_attribution_corrections_identity_pin
   before insert or update or delete on public.crm_lead_attribution_corrections
+  for each row execute function public.crm_assert_statement_identity();
+create trigger crm_lead_attribution_corrections_identity_pin_after
+  after insert or update or delete on public.crm_lead_attribution_corrections
   for each row execute function public.crm_assert_statement_identity();
 
 -- 9g. Assignment ledger, written from the persisted row.
@@ -1139,7 +1180,7 @@ begin
     raise exception 'Correction request is already decided' using errcode = '23514';
   end if;
 
-  v_policy := public.crm_attribution_policy();
+  v_policy := coalesce(public.crm_attribution_policy(), 'TWO_PERSON');
   if v_corr.requested_by_person_id = v_person then
     if v_policy <> 'SINGLE_MANAGER'
        or not authz.has('leads.attribution.single_manager')

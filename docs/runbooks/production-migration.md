@@ -528,8 +528,10 @@ tenant data, only Better Auth's own self-service endpoints);
   `settings.attribution` value stays (0088 never reads it). It refuses unless the history is
   complete and consistent (89 rows numbered without gaps, no missing or empty checksum or timing)
   and its last row is exactly this revision of 0089 (checksum and timing, and no other row at or
-  after that timing); it also refuses while any activity is linked to a lead or any contact
-  records a merge, naming what must be decided first (it never deletes those silently). The 0089
+  after that timing); it also refuses while any activity is linked to a lead, any contact
+  records a merge or any record grant names a `leads.attribution.*` permission, naming what must
+  be decided first (it never deletes those silently), and it locks the tables those checks read
+  before checking them. The 0089
   application code reads these tables, columns and permissions — roll the application back with
   it. It needs Nani's explicit approval and a run-record entry.
 
@@ -609,7 +611,7 @@ re-apply.
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
 | 86  | `0087_org_admin_setup_email` | 1791602728057 | `d295bbaa7b135d728a5951259ab0cbb51ca1abad3554750214be125afebbee73` |
 | 87  | `0088_crm_import_decisions` | 1791603728057 | `7274424fe91442381379791f5600941e84b4d044fa806efa118dd3d03b90fa5c` |
-| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `df6e05c8d4cae1747f268b8ff216cc188a832ab3b26822eda7b56299927188ee` |
+| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `752f9f4582ff163c591cf08a4615168d6b89b92b41efee91cc337ea2c10cfe27` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

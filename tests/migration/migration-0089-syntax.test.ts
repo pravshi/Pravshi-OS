@@ -161,7 +161,13 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       expect(M0089, t).toContain(
         `create trigger ${t}_identity_pin\n  before insert or update or delete on public.${t}\n  for each row execute function public.crm_assert_statement_identity();`,
       );
+      // Also after each row, so a change made in RETURNING never reaches an AFTER trigger.
+      expect(M0089, t).toContain(
+        `create trigger ${t}_identity_pin_after\n  after insert or update or delete on public.${t}\n  for each row execute function public.crm_assert_statement_identity();`,
+      );
     }
+    // The capture refuses to replace an identity already recorded for the transaction.
+    expect(M0089).toContain("raise exception 'The caller identity changed within the transaction'");
     expect(M0089).toMatch(
       /revoke all on public\.crm_statement_identity\s+from public, app_user, app_admin, app_worker, app_auth, app_platform;/,
     );

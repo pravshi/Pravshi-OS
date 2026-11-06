@@ -61,8 +61,14 @@ const statements = splitStatements(ROLLBACK)
 describe('0089 does what its rollback undoes', () => {
   it('refuses missing, empty or inconsistent history metadata, any other revision, and data it would lose', () => {
     const e0089 = JOURNAL.entries.find((e) => e.tag === '0089_crm_leads_and_lineage')!;
-    const guard = statements[2]!;
+    // What the refusals inspect is locked before it is inspected, so it cannot change between
+    // the check and the drop.
+    expect(statements[2]).toBe(
+      'lock table public.contacts, public.activities, public.record_grants, public.role_permissions in exclusive mode;',
+    );
+    const guard = statements[3]!;
     expect(guard).toMatch(/^do \$\$/);
+    expect(guard).toContain('from public.record_grants g join public.permissions p');
     // Every comparison is NULL-safe: a NULL must never let a check pass.
     expect(guard).not.toMatch(/\s<>\s/);
     expect(guard).toContain('v_count is distinct from 89');

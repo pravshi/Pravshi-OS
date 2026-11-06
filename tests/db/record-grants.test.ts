@@ -1171,8 +1171,9 @@ describe('record_grants.manage', () => {
     // (ai.use/ai.usage.view/ai.usage.manage) from migration 0055, plus the one
     // new Phase 10 integration permission (integrations.view) from migration
     // 0057 (integrations.manage was already in the catalogue from migration
-    // 0008; 0057 re-homes and grants it), plus crm.import from migration 0081.
-    expect(Number(rows[0]!.total)).toBe(128);
+    // 0008; 0057 re-homes and grants it), plus crm.import from migration 0081, plus the three
+    // leads.attribution.* permissions from migration 0089.
+    expect(Number(rows[0]!.total)).toBe(131);
     expect(Number(rows[0]!.rg)).toBe(1);
     const view = await owner.query(
       `select 1 from public.permissions where key='record_grants.view'`,
