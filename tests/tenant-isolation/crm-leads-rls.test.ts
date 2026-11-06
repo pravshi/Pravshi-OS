@@ -22,7 +22,9 @@ import {
  *  - public.crm_lead_tasks
  *  - public.crm_dedup_candidates
  *  - public.crm_lead_attribution_corrections
- *  - public.re_lead_preferences
+ *
+ * (The Real Estate extension table left 0089 under founder decision AD-6; the integrity
+ * controls — guards, actor binding, per-lead scope, audit — are in crm-leads-integrity.test.ts.)
  *
  * Verifies that:
  *  1. Every table has RLS enabled and forced.
@@ -49,14 +51,13 @@ let teamA = '';
 
 describe.skipIf(!ready)('PR-P1-01: CRM leads & lineage tenant isolation (live DB)', () => {
   beforeAll(async () => {
-    // 1. Force RLS check across all 7 new tables
+    // 1. Force RLS check across all 6 new tables
     await assertForceRls(owner, 'crm_leads');
     await assertForceRls(owner, 'crm_lead_assignment_history');
     await assertForceRls(owner, 'crm_assignment_cursors');
     await assertForceRls(owner, 'crm_lead_tasks');
     await assertForceRls(owner, 'crm_dedup_candidates');
     await assertForceRls(owner, 'crm_lead_attribution_corrections');
-    await assertForceRls(owner, 're_lead_preferences');
 
     // 2. Setup Org A and Org B
     orgA = await mkOrg(owner, `leads-a-${CODE.toLowerCase()}`);
@@ -313,40 +314,6 @@ describe.skipIf(!ready)('PR-P1-01: CRM leads & lineage tenant isolation (live DB
            (org_id, lead_id, field_name, old_value, new_value, reason, requested_by_person_id)
          values ($1, $2, 'source', 'manual', 'website', 'Attribution cross org hack attempt', $3)`,
         [orgA, leadA, bob],
-      ),
-    );
-    expect(badInsertState).toBe('42501');
-  });
-
-  it('isolates re_lead_preferences across tenants', async () => {
-    // Insert real estate lead preferences for Org A
-    await inContext(
-      asUser,
-      ctxFor(alice, orgA),
-      `insert into public.re_lead_preferences
-         (org_id, lead_id, budget_min_paise, budget_max_paise, property_types, bhk_preferences)
-       values ($1, $2, 500000000, 1000000000, array['APARTMENT'], array['3BHK'])`,
-      [orgA, leadA],
-    );
-
-    // Org B cannot see Org A preference
-    const seenByBob = await inContext<{ id: string }>(
-      asUser,
-      ctxFor(bob, orgB),
-      `select id from public.re_lead_preferences where lead_id = $1`,
-      [leadA],
-    );
-    expect(seenByBob).toHaveLength(0);
-
-    // Cross-org insert is rejected
-    const badInsertState = await sqlstateOf(
-      inContext(
-        asUser,
-        ctxFor(bob, orgB),
-        `insert into public.re_lead_preferences
-           (org_id, lead_id, budget_min_paise, budget_max_paise, property_types, bhk_preferences)
-         values ($1, $2, 100000000, 200000000, array['VILLA'], array['4BHK'])`,
-        [orgA, leadA],
       ),
     );
     expect(badInsertState).toBe('42501');

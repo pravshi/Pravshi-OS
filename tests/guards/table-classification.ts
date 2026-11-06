@@ -347,14 +347,6 @@ export const TABLES: Readonly<Record<string, Classification>> = {
       title: 'returns zero rows across tenants',
     },
   },
-  'public.re_lead_preferences': {
-    class: 'tenant',
-    org: 'org_id',
-    isolationTest: {
-      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
-      title: 'isolates re_lead_preferences across tenants',
-    },
-  },
   'public.roles': {
     class: 'tenant',
     org: 'org_id',

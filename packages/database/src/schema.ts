@@ -1,5 +1,4 @@
 import {
-  bigint,
   customType,
   integer,
   jsonb,
@@ -171,28 +170,4 @@ export const crmLeadAttributionCorrections = pgTable(
     metadata: jsonb('metadata').notNull().default({}),
   },
   (table) => [unique('crm_lead_attr_corr_id_org_unique').on(table.id, table.orgId)],
-);
-
-/**
- * public.re_lead_preferences — Real Estate property vertical preference extension.
- */
-export const reLeadPreferences = pgTable(
-  're_lead_preferences',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    orgId: uuid('org_id').notNull(),
-    leadId: uuid('lead_id').notNull(),
-    propertyTypes: text('property_types').array().notNull().default([]),
-    budgetMinPaise: bigint('budget_min_paise', { mode: 'bigint' }),
-    budgetMaxPaise: bigint('budget_max_paise', { mode: 'bigint' }),
-    preferredLocalities: text('preferred_localities').array().notNull().default([]),
-    possessionTimeline: text('possession_timeline'),
-    bhkPreferences: text('bhk_preferences').array().notNull().default([]),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    unique('re_lead_pref_id_org_unique').on(table.id, table.orgId),
-    unique('re_lead_pref_lead_unique').on(table.orgId, table.leadId),
-  ],
 );

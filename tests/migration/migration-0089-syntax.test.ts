@@ -7,7 +7,7 @@ const read = (...p: string[]) =>
 const M0089 = read('drizzle', '0089_crm_leads_and_lineage.sql');
 
 describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () => {
-  it('creates all 7 canonical P1 tables with composite organization constraints', () => {
+  it('creates the 6 shared CRM tables with composite organization constraints, and no product table', () => {
     const createdTables = [...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1]);
     expect(createdTables).toEqual([
       'public.crm_leads',
@@ -16,8 +16,9 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'public.crm_lead_tasks',
       'public.crm_dedup_candidates',
       'public.crm_lead_attribution_corrections',
-      'public.re_lead_preferences',
     ]);
+    // Founder decision AD-6: the Real Estate extension belongs to the Real Estate stage.
+    expect(M0089).not.toMatch(/create table public\.re_/);
 
     // Verify composite unique (id, org_id) constraints on all applicable tables
     expect(M0089).toContain('constraint crm_leads_id_org_unique unique (id, org_id)');
@@ -26,7 +27,17 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     expect(M0089).toContain('constraint crm_lead_tasks_id_org_unique unique (id, org_id)');
     expect(M0089).toContain('constraint crm_dedup_candidates_id_org_unique unique (id, org_id)');
     expect(M0089).toContain('constraint crm_lead_attr_corr_id_org_unique unique (id, org_id)');
-    expect(M0089).toContain('constraint re_lead_pref_id_org_unique unique (id, org_id)');
+
+    // Actor columns: no single-column reference to people (it could name another org's person).
+    expect(M0089).not.toMatch(/(created_by|updated_by) uuid references public\.people \(id\)/);
+    for (const c of [
+      'crm_leads_created_by_same_org',
+      'crm_leads_updated_by_same_org',
+      'crm_lead_tasks_created_by_same_org',
+      'crm_lead_tasks_updated_by_same_org',
+    ]) {
+      expect(M0089).toContain(`add constraint ${c}`);
+    }
   });
 
   it('enforces task polymorphic XOR constraint in DDL', () => {
@@ -49,10 +60,49 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     expect(M0089).toContain("check (entity_type in ('company', 'contact', 'deal', 'lead'))");
   });
 
-  it('implements attribution trigger defense asserting CURRENT_USER = app_owner', () => {
-    expect(M0089).toContain('create or replace function public.guard_crm_lead_attribution()');
-    expect(M0089).toContain("if current_user <> 'app_owner' then");
+  it('implements the attribution and owner guards as SECURITY INVOKER triggers', () => {
+    // A SECURITY DEFINER trigger sees current_user = its owner (app_owner), so a definer guard
+    // testing current_user never fires. The behaviour is proven against the database in
+    // tests/tenant-isolation/crm-leads-integrity.test.ts; this pins the text.
+    const fn = (name: string) => {
+      const m = M0089.match(
+        new RegExp(`create or replace function public\\.${name}\\(\\)[\\s\\S]*?\\$\\$;`),
+      );
+      expect(m, name).not.toBeNull();
+      return m![0];
+    };
+    for (const name of [
+      'guard_crm_lead_attribution',
+      'guard_crm_lead_owner_change',
+      'crm_stamp_actor',
+    ]) {
+      expect(fn(name), name).toContain('security invoker');
+      expect(fn(name), name).not.toContain('security definer');
+    }
+    expect(fn('guard_crm_lead_attribution')).toContain("and current_user <> 'app_owner' then");
     expect(M0089).toContain('create trigger crm_leads_attribution_guard');
+    expect(M0089).toContain('create trigger crm_leads_owner_guard');
+    expect(M0089).toContain('create trigger crm_leads_actor_stamp');
+    expect(M0089).toContain('create trigger crm_lead_tasks_actor_stamp');
+  });
+
+  it('never queries crm_leads from a crm_leads policy (Postgres rejects it with 42P17)', () => {
+    const leadPolicies = [
+      ...M0089.matchAll(/create policy (crm_leads_\w+) on public\.crm_leads\b[\s\S]*?\);\n/g),
+    ];
+    expect(leadPolicies.map((m) => m[1])).toEqual([
+      'crm_leads_owner_all',
+      'crm_leads_select',
+      'crm_leads_insert',
+      'crm_leads_update',
+    ]);
+    for (const m of leadPolicies) expect(m[0], m[1]).not.toMatch(/from public\.crm_leads/);
+  });
+
+  it('binds every caller-supplied principal column to authz.person_id()', () => {
+    expect(M0089).toContain('and requested_by_person_id = (select authz.person_id())');
+    expect(M0089).toContain('and reassigned_by_person_id = (select authz.person_id())');
+    expect(M0089).toContain('or reviewed_by_person_id = (select authz.person_id())');
   });
 
   it('implements security definer attribution mutator with empty search_path and in-transaction audit log', () => {
@@ -73,7 +123,16 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'public.crm_lead_tasks',
       'public.crm_dedup_candidates',
       'public.crm_lead_attribution_corrections',
-      'public.re_lead_preferences',
+    ]);
+
+    // Every new table carries the row audit trigger.
+    expect([...M0089.matchAll(/^create trigger (\w+_audit)$/gm)].map((m) => m[1])).toEqual([
+      'crm_leads_audit',
+      'crm_lead_assignment_history_audit',
+      'crm_assignment_cursors_audit',
+      'crm_lead_tasks_audit',
+      'crm_dedup_candidates_audit',
+      'crm_lead_attribution_corrections_audit',
     ]);
 
     // Verify Unassigned Pond scoping in crm_leads policy

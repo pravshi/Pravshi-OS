@@ -517,11 +517,12 @@ tenant data, only Better Auth's own self-service endpoints);
   rows): let it finish, or cancel it, first. The 0088 application code reads both tables — roll
   the application back with it. It refuses unless the database is at 0088, and needs Nani's
   explicit approval and a run-record entry.
-- `packages/database/scripts/db/rollback/0089_crm_leads_and_lineage.down.sql` drops the tables and types 0089 adds
+- `packages/database/scripts/db/rollback/0089_crm_leads_and_lineage.down.sql` drops the tables 0089 adds
   (`crm_leads`, `crm_lead_assignment_history`, `crm_assignment_cursors`, `crm_lead_tasks`,
-  `crm_dedup_candidates`, `crm_lead_attribution_corrections`, `re_lead_preferences`) and restores
-  the `activities` entity_type check. It refuses unless the database is at 0089, and needs
-  Nani's explicit approval and a run-record entry.
+  `crm_dedup_candidates`, `crm_lead_attribution_corrections`) with their triggers and the 0089
+  functions, removes the `contacts` merge columns and `activities.logged_at`, and restores the
+  `activities` entity_type check. Audit entries already written stay (append-only). It refuses
+  unless the database is at 0089, and needs Nani's explicit approval and a run-record entry.
 
 ## Abort criteria (any step)
 
@@ -599,7 +600,7 @@ re-apply.
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
 | 86  | `0087_org_admin_setup_email` | 1791602728057 | `d295bbaa7b135d728a5951259ab0cbb51ca1abad3554750214be125afebbee73` |
 | 87  | `0088_crm_import_decisions` | 1791603728057 | `7274424fe91442381379791f5600941e84b4d044fa806efa118dd3d03b90fa5c` |
-| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `fffb9a1ccae31e5b05a07a4c108d8b433c7589bb673e177678f1575964bad195` |
+| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `2bb5595deddf379dae7ad9e3684341eebce39e782ca04644da04adae7d5fe6a4` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

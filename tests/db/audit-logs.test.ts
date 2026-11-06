@@ -961,7 +961,7 @@ describe('the rest of the model is untouched', () => {
     // integration_webhook_deliveries, select/insert/update on each of
     // integration_inbound_events and integration_sync_checkpoints —
     // none of them scope-driven, so with_scope stays at twenty-two.
-    expect(Number(rows[0]!.n)).toBe(136); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds nineteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections, re_lead_preferences)
+    expect(Number(rows[0]!.n)).toBe(133); // 0077 drops deal_stage_history_insert (MT-L6); 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds sixteen policies (crm_leads, crm_lead_assignment_history, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections; the Real Estate table left 0089, AD-6)
     expect(Number(rows[0]!.with_scope)).toBe(32); // 0081 adds four scope-driven crm_imports(/_rows) select/update policies; 0088: the two scope-driven select policies on crm_import_decisions and crm_import_row_plans; 0089 adds four scope-driven select/update policies on crm_leads and crm_lead_tasks
   });
 
@@ -1034,7 +1034,8 @@ describe('the rest of the model is untouched', () => {
     // contact_links (0035) — closing the set at fourteen. The Phase 3 sales-pipeline
     // migration (0037) adds pipelines, pipeline_stages and deal_stage_history —
     // closing the set at seventeen. The Phase 5 workflow-engine migration (0044)
-    // adds workflows and workflow_executions — closing the set at twenty-three.
+    // adds workflows and workflow_executions — closing the set at twenty-three. The P1 CRM
+    // leads migration (0089) adds its six tables — closing the set at twenty-nine.
     // (workflow_execution_steps carry no audit trigger by design.)
     // Matched on the trigger FUNCTION, not the trigger name: audit_logs and its partitions
     // carry append-only triggers whose names also contain "audit", and they are a different
@@ -1054,6 +1055,12 @@ describe('the rest of the model is untouched', () => {
       'company_links',
       'contact_links',
       'contacts',
+      'crm_assignment_cursors',
+      'crm_dedup_candidates',
+      'crm_lead_assignment_history',
+      'crm_lead_attribution_corrections',
+      'crm_lead_tasks',
+      'crm_leads',
       'deal_stage_history',
       'deals',
       'engagements',

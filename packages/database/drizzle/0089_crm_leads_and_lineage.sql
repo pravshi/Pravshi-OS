@@ -9,11 +9,15 @@
 --   - public.crm_lead_tasks (follow-up worklist with polymorphic XOR target constraint)
 --   - public.crm_dedup_candidates (duplicate entity pairs awaiting human resolution)
 --   - public.crm_lead_attribution_corrections (governed two-person correction requests)
---   - public.re_lead_preferences (Real Estate property vertical extension)
 --   - public.contacts alteration (multi-hop merge pointers and lineage)
 --   - public.activities alteration (logged_at timestamp backfill; polymorphic 'lead' support)
 --   - Attribution trigger defense (guard_crm_lead_attribution against table-level roles.sql re-grant)
+--   - Owner-change guard, actor stamping and the lead edit-scope helper
 --   - Privileged attribution mutator procedure (apply_lead_attribution_correction)
+--   - Row audit triggers on every new table
+--
+-- Shared CRM only: the Real Estate extension table (re_lead_preferences) is NOT here. It belongs
+-- to the first Real Estate migration, under that stage's ADR (founder decision AD-6, 2026-11-06).
 --
 -- Conforms to ADR-006, ADR-007, ADR-008 and P1 Specification Freeze.
 -- ————————————————————————————————————————————————————————————————————————————
@@ -52,8 +56,10 @@ create table public.crm_leads (
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  created_by uuid references public.people (id),
-  updated_by uuid references public.people (id),
+  -- Stamped from the transaction identity by crm_stamp_actor() (section 10); never trusted
+  -- from input. Composite foreign keys below keep them inside the row's organization.
+  created_by uuid,
+  updated_by uuid,
   deleted_at timestamptz,
 
   constraint crm_leads_id_org_unique unique (id, org_id),
@@ -92,6 +98,14 @@ alter table public.crm_leads
 alter table public.crm_leads
   add constraint crm_leads_import_batch_same_org
   foreign key (import_batch_id, org_id) references public.crm_imports (id, org_id) on delete restrict;
+
+alter table public.crm_leads
+  add constraint crm_leads_created_by_same_org
+  foreign key (created_by, org_id) references public.people (id, org_id);
+
+alter table public.crm_leads
+  add constraint crm_leads_updated_by_same_org
+  foreign key (updated_by, org_id) references public.people (id, org_id);
 
 create index crm_leads_org_stage_idx on public.crm_leads (org_id, stage) where deleted_at is null;
 create index crm_leads_org_owner_idx on public.crm_leads (org_id, owner_person_id) where deleted_at is null;
@@ -205,8 +219,9 @@ create table public.crm_lead_tasks (
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  created_by uuid references public.people (id),
-  updated_by uuid references public.people (id),
+  -- Stamped by crm_stamp_actor() (section 10); composite foreign keys below.
+  created_by uuid,
+  updated_by uuid,
   deleted_at timestamptz,
 
   constraint crm_lead_tasks_id_org_unique unique (id, org_id),
@@ -237,6 +252,14 @@ alter table public.crm_lead_tasks
 alter table public.crm_lead_tasks
   add constraint crm_lead_tasks_assignee_same_org
   foreign key (assignee_person_id, org_id) references public.people (id, org_id);
+
+alter table public.crm_lead_tasks
+  add constraint crm_lead_tasks_created_by_same_org
+  foreign key (created_by, org_id) references public.people (id, org_id);
+
+alter table public.crm_lead_tasks
+  add constraint crm_lead_tasks_updated_by_same_org
+  foreign key (updated_by, org_id) references public.people (id, org_id);
 
 create index crm_lead_tasks_org_assignee_idx on public.crm_lead_tasks (org_id, assignee_person_id, due_at)
   where deleted_at is null and status in ('PENDING', 'IN_PROGRESS');
@@ -332,44 +355,7 @@ comment on table public.crm_lead_attribution_corrections is
   'Governed attribution correction ledger (0089). Tracks two-person approval workflows before marketing origin data can be mutated.';
 
 
--- 7. Table: public.re_lead_preferences
-create table public.re_lead_preferences (
-  id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references public.organizations (id),
-  lead_id uuid not null,
-
-  property_types text[] not null default '{}',
-  budget_min_paise bigint,
-  budget_max_paise bigint,
-  preferred_localities text[] not null default '{}',
-  possession_timeline text,
-  bhk_preferences text[] not null default '{}',
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-
-  constraint re_lead_pref_id_org_unique unique (id, org_id),
-  constraint re_lead_pref_lead_unique unique (org_id, lead_id),
-  constraint re_lead_pref_budget_order check (
-    budget_min_paise is null or budget_max_paise is null or budget_min_paise <= budget_max_paise
-  ),
-  constraint re_lead_pref_budget_positive check (
-    (budget_min_paise is null or budget_min_paise >= 0) and
-    (budget_max_paise is null or budget_max_paise >= 0)
-  )
-);
-
-alter table public.re_lead_preferences
-  add constraint re_lead_pref_lead_same_org
-  foreign key (lead_id, org_id) references public.crm_leads (id, org_id) on delete cascade;
-
-create index re_lead_pref_budget_idx on public.re_lead_preferences (org_id, budget_min_paise, budget_max_paise);
-
-comment on table public.re_lead_preferences is
-  'Real Estate property vertical preferences (0089). Extends generic lead identity with localized real estate parameters.';
-
-
--- 8. Alter public.contacts
+-- 7. Alter public.contacts
 alter table public.contacts
   add column if not exists merged_into_contact_id uuid,
   add column if not exists merged_at timestamptz,
@@ -388,7 +374,7 @@ create index if not exists contacts_org_merge_idx
   where merged_into_contact_id is not null;
 
 
--- 9. Alter public.activities
+-- 8. Alter public.activities
 alter table public.activities
   add column if not exists logged_at timestamptz;
 
@@ -412,21 +398,28 @@ create index if not exists activities_org_lead_timeline_idx
   where entity_type = 'lead' and deleted_at is null;
 
 
--- 10. Attribution Security Functions & Triggers
+-- 9. Integrity, scope and attribution functions and triggers
+-- 9a. Attribution guard.
+--
+-- SECURITY INVOKER on purpose. Inside a SECURITY DEFINER function current_user is the
+-- function's OWNER — app_owner, which runs the migrations — so a definer guard testing
+-- current_user can never fire. As an invoker trigger, current_user is the role whose statement
+-- fired it: app_user for a direct UPDATE (refused), app_owner only inside the definer path
+-- apply_lead_attribution_correction() (allowed). app_user holds table-level UPDATE on
+-- crm_leads (roles.sql default privileges), so this trigger is the control, not a backstop.
 create or replace function public.guard_crm_lead_attribution()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 begin
   if (old.source is distinct from new.source or
       old.source_subcategory is distinct from new.source_subcategory or
-      old.campaign_id is distinct from new.campaign_id) then
-    if current_user <> 'app_owner' then
-      raise exception 'Direct modification of lead attribution is prohibited. Mutations must execute via apply_lead_attribution_correction().'
-        using errcode = '42501';
-    end if;
+      old.campaign_id is distinct from new.campaign_id)
+     and current_user <> 'app_owner' then
+    raise exception 'Direct modification of lead attribution is prohibited. Mutations must execute via apply_lead_attribution_correction().'
+      using errcode = '42501';
   end if;
   return new;
 end;
@@ -439,8 +432,138 @@ create trigger crm_leads_attribution_guard
   for each row execute function public.guard_crm_lead_attribution();
 
 comment on function public.guard_crm_lead_attribution() is
-  'BEFORE UPDATE on crm_leads (0089). Durably prevents direct modification of attribution columns by app_user, even if roles.sql re-grants table-level UPDATE.';
+  'BEFORE UPDATE on crm_leads (0089). SECURITY INVOKER: refuses a change to source, source_subcategory or campaign_id unless the statement runs as app_owner, which only apply_lead_attribution_correction() does at runtime. Holds even if roles.sql re-grants table-level UPDATE.';
 
+-- 9b. Owner-change guard.
+--
+-- Changing who owns a lead needs leads.assign. A policy cannot express this: comparing the new
+-- owner with the stored one needs a subquery on crm_leads inside a crm_leads policy, which
+-- Postgres rejects on every UPDATE ("infinite recursion detected in policy", 42P17). The
+-- trigger sees OLD and NEW directly. Invoker rights, for the same reason as 9a.
+create or replace function public.guard_crm_lead_owner_change()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.owner_person_id is distinct from old.owner_person_id
+     and current_user <> 'app_owner'
+     and not coalesce(authz.has('leads.assign'), false) then
+    raise exception 'Changing the owner of a lead requires leads.assign'
+      using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_crm_lead_owner_change() from public;
+
+create trigger crm_leads_owner_guard
+  before update on public.crm_leads
+  for each row execute function public.guard_crm_lead_owner_change();
+
+comment on function public.guard_crm_lead_owner_change() is
+  'BEFORE UPDATE on crm_leads (0089). A change of owner_person_id needs leads.assign (app_owner excepted). Replaces a self-referencing WITH CHECK that made every app_user UPDATE fail with 42P17.';
+
+-- 9c. Actor stamping.
+--
+-- created_by / updated_by name the person who made the change. They are taken from the
+-- transaction identity, never from the statement: on INSERT both are stamped, on UPDATE
+-- created_by keeps its stored value and updated_by is stamped. With no person identity
+-- (migrations, owner-side seeds) — or a non-UUID worker-plane identity — the row is left as
+-- written; app_user cannot reach these tables without an identity (RLS needs authz.is_active()).
+create or replace function public.crm_stamp_actor()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_setting text := nullif(current_setting('app.person_id', true), '');
+  v_person uuid;
+begin
+  if v_setting is null
+     or v_setting !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    return new;
+  end if;
+  v_person := authz.person_id();
+  if tg_op = 'INSERT' then
+    new.created_by := v_person;
+    new.updated_by := v_person;
+  else
+    new.created_by := old.created_by;
+    new.updated_by := v_person;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.crm_stamp_actor() from public;
+
+create trigger crm_leads_actor_stamp
+  before insert or update on public.crm_leads
+  for each row execute function public.crm_stamp_actor();
+
+create trigger crm_lead_tasks_actor_stamp
+  before insert or update on public.crm_lead_tasks
+  for each row execute function public.crm_stamp_actor();
+
+comment on function public.crm_stamp_actor() is
+  'BEFORE INSERT OR UPDATE on crm_leads and crm_lead_tasks (0089). Stamps created_by/updated_by from the transaction identity; a value supplied by the caller never survives.';
+
+-- 9d. Lead edit scope.
+--
+-- True when the caller's leads.edit scope covers a lead with this owner and team — the same
+-- answer as the USING clause of crm_leads_update, written so it gives that answer in BOTH
+-- contexts it is used in: as app_user (the corrections policies) and inside the definer
+-- function below, where current_user is app_owner and table RLS would otherwise admit every
+-- team. The pond (no owner) DEPARTMENT case therefore spells out what app_user can see of
+-- teams (teams_select_member: a team the caller is an active member of, in the caller's org).
+-- Every input is a stored value the caller already holds; the function reveals nothing.
+create or replace function public.crm_lead_in_edit_scope(p_owner_person_id uuid, p_team_id uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select coalesce(
+    case authz.scope_for('leads.edit')
+      when 'GLOBAL' then true
+      when 'DEPARTMENT' then
+        case
+          when p_owner_person_id is null then
+            p_team_id is not null and exists (
+              select 1
+              from public.teams t
+              join public.team_members tm on tm.team_id = t.id
+              where t.id = p_team_id
+                and t.org_id = authz.org_id()
+                and t.deleted_at is null
+                and tm.person_id = authz.person_id()
+                and tm.deleted_at is null
+                and t.department_id = any (authz.my_departments()::uuid[])
+            )
+          else
+            authz.in_my_departments(p_owner_person_id) or authz.reports_to_me(p_owner_person_id)
+        end
+      when 'TEAM' then
+        p_owner_person_id is not null
+        and (p_owner_person_id = authz.person_id() or authz.reports_to_me(p_owner_person_id))
+      when 'SELF' then p_owner_person_id = authz.person_id()
+      else false
+    end,
+    false);
+$$;
+
+revoke all on function public.crm_lead_in_edit_scope(uuid, uuid) from public;
+grant execute on function public.crm_lead_in_edit_scope(uuid, uuid) to app_user;
+
+comment on function public.crm_lead_in_edit_scope(uuid, uuid) is
+  'Is a lead with this owner/team inside the caller''s leads.edit scope? Mirrors crm_leads_update USING, identically for app_user and inside definer functions (0089).';
+
+-- 9e. Governed attribution correction.
 create or replace function public.apply_lead_attribution_correction(
   p_correction_id uuid
 ) returns void
@@ -452,8 +575,13 @@ declare
   v_person uuid := authz.person_id();
   v_org uuid := authz.org_id();
   v_corr public.crm_lead_attribution_corrections;
+  v_owner uuid;
+  v_team uuid;
+  v_source text;
+  v_source_subcategory text;
+  v_campaign_id text;
+  v_current text;
   v_policy text;
-  v_org_settings jsonb;
 begin
   if v_person is null or v_org is null then
     raise exception 'Unauthenticated caller' using errcode = '42501';
@@ -463,7 +591,7 @@ begin
     raise exception 'Inactive user' using errcode = '42501';
   end if;
 
-  if not (authz.has('leads.assign') or authz.has('leads.edit')) then
+  if not authz.has('leads.edit') then
     raise exception 'Insufficient permissions to apply attribution correction' using errcode = '42501';
   end if;
 
@@ -473,41 +601,64 @@ begin
   for update;
 
   if not found then
-    raise exception 'Correction request not found' using errcode = '02000';
+    raise exception 'Attribution correction request not found' using errcode = 'P0002';
+  end if;
+
+  -- The lead, locked, and inside the approver's leads.edit scope. This function bypasses
+  -- crm_leads RLS (definer), so the scope is checked here; a correction on a lead the approver
+  -- may not edit is reported exactly like a missing one — no existence or status leak.
+  select l.owner_person_id, l.team_id, l.source, l.source_subcategory, l.campaign_id
+    into v_owner, v_team, v_source, v_source_subcategory, v_campaign_id
+  from public.crm_leads l
+  where l.id = v_corr.lead_id and l.org_id = v_org and l.deleted_at is null
+  for update;
+
+  if not found or not public.crm_lead_in_edit_scope(v_owner, v_team) then
+    raise exception 'Attribution correction request not found' using errcode = 'P0002';
   end if;
 
   if v_corr.status <> 'PENDING' then
     raise exception 'Correction request is already decided' using errcode = '23514';
   end if;
 
-  select settings into v_org_settings
-  from public.organizations
-  where id = v_org;
+  select coalesce(o.settings->'attribution'->>'policy', 'TWO_PERSON') into v_policy
+  from public.organizations o
+  where o.id = v_org;
 
-  v_policy := coalesce(v_org_settings->'attribution'->>'policy', 'TWO_PERSON');
-
+  -- requested_by_person_id is bound to the requester by crm_lead_attr_corr_insert, so this
+  -- comparison is between two verified identities.
   if v_policy = 'TWO_PERSON' and v_corr.requested_by_person_id = v_person then
     raise exception 'Two-person policy violation: requester cannot approve their own correction'
       using errcode = '42501';
   end if;
 
+  v_current := case v_corr.field_name
+    when 'source' then v_source
+    when 'source_subcategory' then v_source_subcategory
+    when 'campaign_id' then v_campaign_id
+  end;
+
+  -- The audit entry records old_value as the value replaced; a request made against a value
+  -- that has since changed would record a falsehood, so it is refused.
+  if v_corr.old_value is distinct from v_current then
+    raise exception 'Attribution correction is stale: the lead''s % changed after the request', v_corr.field_name
+      using errcode = '23514';
+  end if;
+
   if v_corr.field_name = 'source' then
     update public.crm_leads
     set source = v_corr.new_value,
-        updated_at = clock_timestamp(),
-        updated_by = v_person
+        updated_at = clock_timestamp()
     where id = v_corr.lead_id and org_id = v_org;
   elsif v_corr.field_name = 'source_subcategory' then
     update public.crm_leads
     set source_subcategory = v_corr.new_value,
-        updated_at = clock_timestamp(),
-        updated_by = v_person
+        updated_at = clock_timestamp()
     where id = v_corr.lead_id and org_id = v_org;
   elsif v_corr.field_name = 'campaign_id' then
     update public.crm_leads
     set campaign_id = v_corr.new_value,
-        updated_at = clock_timestamp(),
-        updated_by = v_person
+        updated_at = clock_timestamp()
     where id = v_corr.lead_id and org_id = v_org;
   else
     raise exception 'Invalid attribution field: %', v_corr.field_name using errcode = '23514';
@@ -519,19 +670,20 @@ begin
       decided_at = clock_timestamp()
   where id = p_correction_id and org_id = v_org;
 
+  -- Named arguments: write_audit_log (0011) derives actor and organization itself.
   perform public.write_audit_log(
-    'crm_leads',
-    v_corr.lead_id,
-    'UPDATE',
-    jsonb_build_object(
-      'field', v_corr.field_name,
-      'old_value', v_corr.old_value,
-      'new_value', v_corr.new_value,
-      'reason', v_corr.reason,
+    p_action := 'crm_lead.attribution_corrected',
+    p_entity_type := 'crm_lead',
+    p_entity_id := v_corr.lead_id,
+    p_severity := 'HIGH',
+    p_before := jsonb_build_object(v_corr.field_name, v_corr.old_value),
+    p_after := jsonb_build_object(v_corr.field_name, v_corr.new_value),
+    p_metadata := jsonb_build_object(
       'correction_id', v_corr.id,
+      'requested_by_person_id', v_corr.requested_by_person_id,
+      'reason', v_corr.reason,
       'policy', v_policy
-    ),
-    'HIGH'
+    )
   );
 end;
 $$;
@@ -540,10 +692,10 @@ revoke all on function public.apply_lead_attribution_correction(uuid) from publi
 grant execute on function public.apply_lead_attribution_correction(uuid) to app_user;
 
 comment on function public.apply_lead_attribution_correction(uuid) is
-  'Privileged mutator executing governed lead attribution corrections (0089). Enforces two-person approval and writes atomic audit logs.';
+  'Privileged mutator executing governed lead attribution corrections (0089). Requires leads.edit and the lead inside the approver''s edit scope; enforces two-person approval against a bound requester; refuses stale requests; writes the audit entry in the same transaction.';
 
 
--- 11. Row-Level Security Configuration
+-- 10. Row-Level Security Configuration
 
 alter table public.crm_leads enable row level security;
 alter table public.crm_leads force row level security;
@@ -651,16 +803,12 @@ create policy crm_leads_update on public.crm_leads
       end
     )
   )
+  -- An owner change additionally needs leads.assign: enforced by guard_crm_lead_owner_change()
+  -- (section 9b), because a crm_leads policy may not query crm_leads (42P17).
   with check (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
-    and (
-      (owner_person_id is not distinct from (
-        select l.owner_person_id from public.crm_leads l where l.id = crm_leads.id and l.org_id = crm_leads.org_id
-      ))
-      or (select authz.has('leads.assign'))
-    )
   );
 
 -- Lead assignment history RLS
@@ -682,6 +830,8 @@ create policy crm_lead_assign_hist_select on public.crm_lead_assignment_history
     )
   );
 
+-- The reassigner is the caller (as 0076 binds jobs.enqueued_by), and the lead must be one the
+-- caller can see: this is an append-only ledger, so a forged row could never be corrected.
 create policy crm_lead_assign_hist_insert on public.crm_lead_assignment_history
   for insert to app_user
   with check (
@@ -691,6 +841,12 @@ create policy crm_lead_assign_hist_insert on public.crm_lead_assignment_history
       (select authz.has('leads.create'))
       or (select authz.has('leads.assign'))
       or (select authz.has('leads.edit'))
+    )
+    and reassigned_by_person_id = (select authz.person_id())
+    and exists (
+      select 1 from public.crm_leads l
+      where l.id = crm_lead_assignment_history.lead_id
+        and l.org_id = crm_lead_assignment_history.org_id
     )
   );
 
@@ -755,12 +911,28 @@ create policy crm_lead_tasks_select on public.crm_lead_tasks
     )
   );
 
+-- A task may only be attached to a lead or contact the caller can see (each subquery runs
+-- under that table's own RLS), so a task cannot be planted on another agent's lead.
 create policy crm_lead_tasks_insert on public.crm_lead_tasks
   for insert to app_user
   with check (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
+    and (
+      crm_lead_tasks.lead_id is null or exists (
+        select 1 from public.crm_leads l
+        where l.id = crm_lead_tasks.lead_id
+          and l.org_id = crm_lead_tasks.org_id
+      )
+    )
+    and (
+      crm_lead_tasks.contact_id is null or exists (
+        select 1 from public.contacts c
+        where c.id = crm_lead_tasks.contact_id
+          and c.org_id = crm_lead_tasks.org_id
+      )
+    )
   );
 
 create policy crm_lead_tasks_update on public.crm_lead_tasks
@@ -801,12 +973,15 @@ create policy crm_dedup_candidates_select on public.crm_dedup_candidates
     and (select authz.has('leads.view'))
   );
 
+-- A candidate is created unreviewed; whoever records a review is the caller.
 create policy crm_dedup_candidates_insert on public.crm_dedup_candidates
   for insert to app_user
   with check (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
+    and reviewed_by_person_id is null
+    and reviewed_at is null
   );
 
 create policy crm_dedup_candidates_update on public.crm_dedup_candidates
@@ -815,6 +990,15 @@ create policy crm_dedup_candidates_update on public.crm_dedup_candidates
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
+  )
+  with check (
+    org_id = (select authz.org_id())
+    and (select authz.is_active())
+    and (select authz.has('leads.edit'))
+    and (
+      reviewed_by_person_id is null
+      or reviewed_by_person_id = (select authz.person_id())
+    )
   );
 
 -- Attribution corrections RLS
@@ -824,55 +1008,41 @@ alter table public.crm_lead_attribution_corrections force row level security;
 create policy crm_lead_attr_corr_owner_all on public.crm_lead_attribution_corrections
   for all to app_owner using (true) with check (true);
 
+-- A correction is visible only with its lead: the subquery runs under crm_leads RLS, so an
+-- agent scoped to their own leads does not read the attribution history of anyone else's.
 create policy crm_lead_attr_corr_select on public.crm_lead_attribution_corrections
   for select to app_user
   using (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.view'))
+    and exists (
+      select 1 from public.crm_leads l
+      where l.id = crm_lead_attribution_corrections.lead_id
+        and l.org_id = crm_lead_attribution_corrections.org_id
+    )
   );
 
+-- The requester is the caller (the two-person rule compares it with the approver, so it must
+-- be a verified identity); a request starts PENDING and undecided; and it may only name a lead
+-- inside the caller's leads.edit scope.
 create policy crm_lead_attr_corr_insert on public.crm_lead_attribution_corrections
   for insert to app_user
   with check (
     org_id = (select authz.org_id())
     and (select authz.is_active())
     and (select authz.has('leads.edit'))
-  );
-
--- Real Estate preferences RLS
-alter table public.re_lead_preferences enable row level security;
-alter table public.re_lead_preferences force row level security;
-
-create policy re_lead_pref_owner_all on public.re_lead_preferences
-  for all to app_owner using (true) with check (true);
-
-create policy re_lead_pref_select on public.re_lead_preferences
-  for select to app_user
-  using (
-    org_id = (select authz.org_id())
-    and (select authz.is_active())
+    and requested_by_person_id = (select authz.person_id())
+    and status = 'PENDING'
+    and approved_by_person_id is null
+    and decided_at is null
+    and rejection_reason is null
     and exists (
       select 1 from public.crm_leads l
-      where l.id = re_lead_preferences.lead_id
-        and l.org_id = re_lead_preferences.org_id
+      where l.id = crm_lead_attribution_corrections.lead_id
+        and l.org_id = crm_lead_attribution_corrections.org_id
+        and public.crm_lead_in_edit_scope(l.owner_person_id, l.team_id)
     )
-  );
-
-create policy re_lead_pref_insert on public.re_lead_preferences
-  for insert to app_user
-  with check (
-    org_id = (select authz.org_id())
-    and (select authz.is_active())
-    and (select authz.has('leads.create'))
-  );
-
-create policy re_lead_pref_update on public.re_lead_preferences
-  for update to app_user
-  using (
-    org_id = (select authz.org_id())
-    and (select authz.is_active())
-    and (select authz.has('leads.edit'))
   );
 
 -- Revoke dangerous table privileges from runtime roles
@@ -885,6 +1055,36 @@ revoke update, delete on public.crm_lead_assignment_history from app_user;
 
 revoke all on public.crm_leads, public.crm_lead_assignment_history,
   public.crm_assignment_cursors, public.crm_lead_tasks, public.crm_dedup_candidates,
-  public.crm_lead_attribution_corrections, public.re_lead_preferences
+  public.crm_lead_attribution_corrections
   from app_admin, app_worker, app_auth, app_platform;
+
+
+-- 11. Row audit
+--
+-- Every new table records its changes in audit_logs through the same trigger as the CRM core
+-- tables (0012/0033): AFTER INSERT OR UPDATE OR DELETE, actor and organization derived from the
+-- transaction identity, skipped silently when there is none (migrations, seeds).
+create trigger crm_leads_audit
+  after insert or update or delete on public.crm_leads
+  for each row execute function public.audit_row_change('crm_lead', 'HIGH', 'id');
+
+create trigger crm_lead_assignment_history_audit
+  after insert or update or delete on public.crm_lead_assignment_history
+  for each row execute function public.audit_row_change('crm_lead_assignment', 'HIGH', 'id');
+
+create trigger crm_assignment_cursors_audit
+  after insert or update or delete on public.crm_assignment_cursors
+  for each row execute function public.audit_row_change('crm_assignment_cursor', 'MEDIUM', 'id');
+
+create trigger crm_lead_tasks_audit
+  after insert or update or delete on public.crm_lead_tasks
+  for each row execute function public.audit_row_change('crm_lead_task', 'MEDIUM', 'id');
+
+create trigger crm_dedup_candidates_audit
+  after insert or update or delete on public.crm_dedup_candidates
+  for each row execute function public.audit_row_change('crm_dedup_candidate', 'MEDIUM', 'id');
+
+create trigger crm_lead_attribution_corrections_audit
+  after insert or update or delete on public.crm_lead_attribution_corrections
+  for each row execute function public.audit_row_change('crm_lead_attribution_correction', 'HIGH', 'id');
 
