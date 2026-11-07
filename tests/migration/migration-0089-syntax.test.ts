@@ -7,7 +7,7 @@ const read = (...p: string[]) =>
 const M0089 = read('drizzle', '0089_crm_leads_and_lineage.sql');
 
 describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () => {
-  it('creates the 6 shared CRM tables (plus the operational identity pin), and no product table', () => {
+  it('creates the 6 shared CRM tables (plus the identity pin and the policy ledger), and no product table', () => {
     const createdTables = [...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1]);
     expect(createdTables).toEqual([
       'public.crm_leads',
@@ -17,6 +17,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'public.crm_dedup_candidates',
       'public.crm_lead_attribution_corrections',
       'public.crm_statement_identity',
+      'public.crm_attribution_policy_changes',
     ]);
     // Founder decision AD-6: the Real Estate extension belongs to the Real Estate stage.
     expect(M0089).not.toMatch(/create table public\.re_/);
@@ -154,6 +155,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
       'crm_lead_tasks',
       'crm_dedup_candidates',
       'crm_lead_attribution_corrections',
+      'crm_attribution_policy_changes',
     ]) {
       expect(M0089, t).toContain(
         `create trigger ${t}_identity_capture\n  before insert or update or delete on public.${t}\n  for each statement execute function public.crm_capture_statement_identity();`,
@@ -207,12 +209,26 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     ]) {
       expect(M0089).toContain(`('${key}', 'leads.attribution', '${action}', 'sales',`);
     }
+    expect(M0089).toContain(
+      "('settings.manage_attribution_policy', 'settings', 'manage_attribution_policy', 'settings',",
+    );
     expect(M0089).toContain("(select authz.has('leads.attribution.request'))");
     expect(M0089).toContain("if not authz.has('leads.attribution.approve') then");
     expect(M0089).toContain(
       "if p_policy is null or p_policy not in ('TWO_PERSON', 'SINGLE_MANAGER') then",
     );
-    expect(M0089).toContain("if not authz.has('settings.manage') then");
+    // F-SEC-13: the policy belongs to its own permission (SUPER_ADMIN, not ADMIN) with step-up MFA,
+    // never to the broad settings.manage.
+    expect(M0089).toContain("if not authz.has('settings.manage_attribution_policy') then");
+    expect(M0089).not.toContain("authz.has('settings.manage')");
+    expect(M0089.match(/if authz\.aal\(\) is distinct from 'aal2' then/g)).toHaveLength(2);
+    // F-SEC-12: SUPER_ADMIN is never given the exception, at migration time or for a new org.
+    expect(M0089).toContain(
+      "and p.key not in ('users.impersonate', 'leads.attribution.single_manager')",
+    );
+    expect(M0089).toContain(
+      "and (requested_policy = 'TWO_PERSON' or decided_by_person_id <> requested_by_person_id))",
+    );
     expect(M0089).toContain("p_action := 'crm_lead.attribution_single_manager_exception_used'");
     expect(M0089).toContain("p_action := 'crm_lead.attribution_correction_rejected'");
   });
@@ -231,6 +247,8 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     expect(forcedTables).toEqual([
       // section 9f, created with its functions
       'public.crm_statement_identity',
+      // section 9j, the attribution policy ledger
+      'public.crm_attribution_policy_changes',
       // section 10
       'public.crm_leads',
       'public.crm_lead_assignment_history',
@@ -242,6 +260,7 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
 
     // Every new CRM table carries the row audit trigger (the operational identity pin does not).
     expect([...M0089.matchAll(/^create trigger (\w+_audit)$/gm)].map((m) => m[1])).toEqual([
+      'crm_attribution_policy_changes_audit',
       'crm_leads_audit',
       'crm_lead_assignment_history_audit',
       'crm_assignment_cursors_audit',

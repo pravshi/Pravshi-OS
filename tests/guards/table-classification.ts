@@ -159,6 +159,14 @@ export const TABLES: Readonly<Record<string, Classification>> = {
       title: 'isolates crm_lead_assignment_history across tenants',
     },
   },
+  'public.crm_attribution_policy_changes': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_attribution_policy_changes across tenants',
+    },
+  },
   'public.crm_lead_attribution_corrections': {
     class: 'tenant',
     org: 'org_id',

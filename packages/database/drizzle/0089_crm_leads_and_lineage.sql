@@ -15,6 +15,8 @@
 --   - Owner-change guard, actor stamping and the lead edit-scope helper
 --   - Privileged attribution mutator procedure (apply_lead_attribution_correction)
 --   - Row audit triggers on every new table
+--   - Attribution permissions, the governed attribution-policy workflow (two administrators, step-up
+--     MFA, CRITICAL audit) and a re-issued seed_system_roles() (founder decisions of 2026-11-06)
 --
 -- Shared CRM only: the Real Estate extension table (re_lead_preferences) is NOT here. It belongs
 -- to the first Real Estate migration, under that stage's ADR (founder decision AD-6, 2026-11-06).
@@ -721,7 +723,8 @@ comment on function public.guard_crm_dedup_candidate_identity() is
 
 -- 9f. Statement identity pin.
 --
--- The caller's identity (app.person_id, app.org_id) is set by withAuthorizedDb() once per
+-- The caller's identity (app.person_id, app.org_id, and the MFA claim app.aal) is set by
+-- withAuthorizedDb() once per
 -- transaction, and every RLS policy, guard and audit entry reads it. Because set_config() can be
 -- called from inside an expression, a statement could otherwise change the identity part-way:
 -- after RLS admitted a row under one identity, the triggers, the WITH CHECK, the RETURNING list or
@@ -748,7 +751,9 @@ create table public.crm_statement_identity (
   backend_pid integer primary key,
   xact xid8 not null,
   person_id text,
-  org_id text
+  org_id text,
+  -- The MFA claim (app.aal) is part of the identity: step-up must not be claimed part-way either.
+  aal text
 );
 
 alter table public.crm_statement_identity enable row level security;
@@ -779,15 +784,18 @@ begin
   select * into v_pin from public.crm_statement_identity where backend_pid = pg_backend_pid();
   if found and v_pin.xact = pg_current_xact_id()
      and (v_pin.person_id is distinct from current_setting('app.person_id', true)
-          or v_pin.org_id is distinct from current_setting('app.org_id', true)) then
+          or v_pin.org_id is distinct from current_setting('app.org_id', true)
+          or v_pin.aal is distinct from current_setting('app.aal', true)) then
     raise exception 'The caller identity changed within the transaction'
       using errcode = '42501';
   end if;
-  insert into public.crm_statement_identity (backend_pid, xact, person_id, org_id)
+  insert into public.crm_statement_identity (backend_pid, xact, person_id, org_id, aal)
   values (pg_backend_pid(), pg_current_xact_id(),
-          current_setting('app.person_id', true), current_setting('app.org_id', true))
+          current_setting('app.person_id', true), current_setting('app.org_id', true),
+          current_setting('app.aal', true))
   on conflict (backend_pid) do update
-    set xact = excluded.xact, person_id = excluded.person_id, org_id = excluded.org_id;
+    set xact = excluded.xact, person_id = excluded.person_id, org_id = excluded.org_id,
+        aal = excluded.aal;
   return null;
 end;
 $$;
@@ -805,7 +813,8 @@ begin
   if not found
      or v_pin.xact is distinct from pg_current_xact_id()
      or v_pin.person_id is distinct from current_setting('app.person_id', true)
-     or v_pin.org_id is distinct from current_setting('app.org_id', true) then
+     or v_pin.org_id is distinct from current_setting('app.org_id', true)
+     or v_pin.aal is distinct from current_setting('app.aal', true) then
     raise exception 'The caller identity changed during the statement'
       using errcode = '42501';
   end if;
@@ -990,16 +999,19 @@ grant execute on function public.crm_lead_in_scope(text, uuid, uuid) to app_user
 comment on function public.crm_lead_in_scope(text, uuid, uuid) is
   'Is a lead with this owner/team inside the caller''s scope for the permission? For leads.edit it mirrors crm_leads_update USING; identical for app_user and inside definer functions (0089).';
 
--- 9i. Attribution correction permissions (founder decision, 2026-11-06).
+-- 9i. Attribution permissions (founder decisions of 2026-11-06, F-SEC-12 and F-SEC-13).
 --
---   leads.attribution.request          ask for a correction of a lead's source/campaign
---   leads.attribution.approve          decide (approve or reject) a correction request
---   leads.attribution.single_manager   use the SINGLE_MANAGER exception: decide one's own request,
---                                      only where the organization has enabled that policy
--- SUPER_ADMIN holds the whole catalogue (seed_system_roles, 0081 cross join), so new organizations
--- receive these through it; existing organizations' SUPER_ADMIN roles are backfilled below (the
--- 0081 PART 8 pattern). No other role is granted them here: which roles hold them is the
--- organization administrator's decision.
+--   leads.attribution.request           ask for a correction of a lead's source/campaign
+--   leads.attribution.approve           decide (approve or reject) a correction request
+--   leads.attribution.single_manager    use the SINGLE_MANAGER exception: decide one's own request,
+--                                       only where the organization has enabled that policy
+--   settings.manage_attribution_policy  request, approve or reject a change of the organization's
+--                                       attribution policy
+-- SUPER_ADMIN holds the catalogue through seed_system_roles' cross join — EXCEPT
+-- leads.attribution.single_manager, which no role receives automatically (re-issued below): an
+-- organization grants it to a role deliberately. ADMIN's grants are an explicit list and receive
+-- none of these, so ADMIN cannot change the policy. Existing organizations' SUPER_ADMIN roles are
+-- backfilled with the same set (the 0081 PART 8 pattern).
 insert into public.permissions (key, resource, action, module, description, is_sensitive)
 values
   ('leads.attribution.request', 'leads.attribution', 'request', 'sales',
@@ -1007,7 +1019,9 @@ values
   ('leads.attribution.approve', 'leads.attribution', 'approve', 'sales',
    'Approve or reject a lead attribution correction requested by someone else', true),
   ('leads.attribution.single_manager', 'leads.attribution', 'single_manager', 'sales',
-   'Decide one''s own attribution correction where the organization enabled SINGLE_MANAGER', true);
+   'Decide one''s own attribution correction where the organization enabled SINGLE_MANAGER (never granted automatically)', true),
+  ('settings.manage_attribution_policy', 'settings', 'manage_attribution_policy', 'settings',
+   'Request, approve or reject a change of the organization''s attribution policy (two administrators, step-up MFA)', true);
 
 do $$
 begin
@@ -1027,7 +1041,7 @@ from public.roles r
 cross join public.permissions p
 where r.key = 'SUPER_ADMIN'
   and p.key in ('leads.attribution.request', 'leads.attribution.approve',
-                'leads.attribution.single_manager')
+                'settings.manage_attribution_policy')
 on conflict do nothing;
 
 do $$
@@ -1042,13 +1056,368 @@ begin
 end
 $$;
 
--- 9j. The organization's attribution policy.
+-- 9i2. seed_system_roles(): the 0081 body, verbatim, except that the SUPER_ADMIN cross join also
+-- leaves out leads.attribution.single_manager. Migration 0081 itself is never edited.
+create or replace function public.seed_system_roles(p_org_id uuid) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.roles (org_id, key, name, description, is_system, is_protected)
+  values
+    -- is_protected is true for SUPER_ADMIN alone, and it is not a judgement about
+    -- seniority: it is the mechanical consequence of blueprint 6.2, which defines a
+    -- protected role as one carrying roles.manage or permissions.manage. The matrix
+    -- grants those to SUPER_ADMIN and to nobody else.
+    (p_org_id, 'SUPER_ADMIN',     'Super Administrator', 'Full access, including role and permission management and security settings', true, true),
+    (p_org_id, 'ADMIN',           'Administrator',       'Operational administration. Deliberately NOT a superset of HR: no identity documents, no compensation', true, false),
+    (p_org_id, 'HR_ADMIN',        'HR Administrator',    'Full people, HR and hiring administration. No sales pipeline and no audit log', true, false),
+    (p_org_id, 'HR_MANAGER',      'HR Manager',          'People and HR administration within their own departments', true, false),
+    (p_org_id, 'MANAGER',         'Manager',             'Line management. No permissions are seeded: the architecture defines no matrix column for this role', true, false),
+    (p_org_id, 'SALES_MANAGER',   'Sales Manager',       'Sales and delivery leadership across their departments', true, false),
+    (p_org_id, 'SALES',           'Sales',               'Own leads, own clients, own tasks', true, false),
+    (p_org_id, 'PROJECT_MANAGER', 'Project Manager',     'Projects, tasks and delivery within their departments', true, false),
+    (p_org_id, 'DEVELOPER',       'Developer',           'The projects they are assigned to, and their own profile', true, false),
+    (p_org_id, 'VIBECODER',       'Vibecoder',           'The projects they are assigned to, and nothing wider', true, false),
+    (p_org_id, 'FINANCE',         'Finance',             'Commercial and compensation data. A separate boundary from HR, not a subset of it', true, false),
+    (p_org_id, 'MARKETING',       'Marketing',           'No permissions are seeded: the architecture defines no matrix column for this role', true, false),
+    (p_org_id, 'INTERN',          'Intern',              'Self and assigned projects only. The legal classification lives on the engagement, never here', true, false),
+    (p_org_id, 'EMPLOYEE',        'Employee',            'The baseline every active engagement receives. Self-service only', true, false)
+  on conflict do nothing;
+
+  -- SUPER_ADMIN: the whole catalogue at GLOBAL, minus the one permission V1 does not
+  -- implement.
+  insert into public.role_permissions (role_id, permission_id, scope)
+  select r.id, p.id, 'GLOBAL'::public.access_scope
+  from public.roles r
+  cross join public.permissions p
+  where r.org_id = p_org_id
+    and r.key = 'SUPER_ADMIN'
+    -- 0089: the SINGLE_MANAGER exception is never part of the automatic grant (founder decision
+    -- F-SEC-12, 2026-11-06): an organization grants it to a role deliberately.
+    and p.key not in ('users.impersonate', 'leads.attribution.single_manager')
+  on conflict do nothing;
+
+  insert into public.role_permissions (role_id, permission_id, scope)
+  select r.id, p.id, m.scope::public.access_scope
+  from (values
+    -- ADMIN
+    ('ADMIN','users.view','GLOBAL'),('ADMIN','users.create','GLOBAL'),
+    ('ADMIN','users.suspend','GLOBAL'),('ADMIN','sessions.revoke','GLOBAL'),
+    ('ADMIN','departments.manage','GLOBAL'),
+    ('ADMIN','people.view','GLOBAL'),('ADMIN','people.edit','GLOBAL'),('ADMIN','people.export','GLOBAL'),
+    ('ADMIN','engagements.transition','GLOBAL'),
+    ('ADMIN','candidates.view','GLOBAL'),('ADMIN','offers.approve','GLOBAL'),
+    ('ADMIN','onboarding.manage','GLOBAL'),('ADMIN','offboarding.initiate','GLOBAL'),
+    ('ADMIN','projects.view','GLOBAL'),('ADMIN','projects.create','GLOBAL'),
+    ('ADMIN','projects.edit','GLOBAL'),('ADMIN','projects.manage_members','GLOBAL'),
+    ('ADMIN','tasks.view','GLOBAL'),('ADMIN','tasks.edit','GLOBAL'),('ADMIN','tasks.assign','GLOBAL'),
+    ('ADMIN','documents.view','GLOBAL'),('ADMIN','documents.upload','GLOBAL'),('ADMIN','documents.download','GLOBAL'),
+    ('ADMIN','policies.manage','GLOBAL'),('ADMIN','policies.acknowledge','SELF'),
+    ('ADMIN','policies.view_compliance','GLOBAL'),
+    ('ADMIN','reports.view','GLOBAL'),('ADMIN','audit_logs.view','GLOBAL'),('ADMIN','settings.manage','GLOBAL'),
+    -- ADMIN (Phase 5): the full workflow sextet at GLOBAL. workflows.delete
+    -- is granted to ADMIN alone outside the SUPER_ADMIN cross join.
+    ('ADMIN','workflows.view','GLOBAL'),('ADMIN','workflows.create','GLOBAL'),
+    ('ADMIN','workflows.edit','GLOBAL'),('ADMIN','workflows.delete','GLOBAL'),
+    ('ADMIN','workflows.activate','GLOBAL'),('ADMIN','workflows.execute','GLOBAL'),
+    -- ADMIN (Phase 6): the full jobs quintet at GLOBAL. jobs.delete is
+    -- granted to ADMIN alone outside the SUPER_ADMIN cross join — the
+    -- 0008 projects.delete / 0044 workflows.delete precedent.
+    ('ADMIN','jobs.view','GLOBAL'),('ADMIN','jobs.create','GLOBAL'),
+    ('ADMIN','jobs.retry','GLOBAL'),('ADMIN','jobs.cancel','GLOBAL'),
+    ('ADMIN','jobs.delete','GLOBAL'),
+
+    -- HR_ADMIN
+    ('HR_ADMIN','users.view','GLOBAL'),('HR_ADMIN','users.create','GLOBAL'),
+    ('HR_ADMIN','users.suspend','DEPARTMENT'),('HR_ADMIN','sessions.revoke','DEPARTMENT'),
+    ('HR_ADMIN','departments.manage','GLOBAL'),
+    ('HR_ADMIN','people.view','GLOBAL'),('HR_ADMIN','people.edit','GLOBAL'),('HR_ADMIN','people.export','GLOBAL'),
+    ('HR_ADMIN','hr.sensitive.view','GLOBAL'),('HR_ADMIN','compensation.view','GLOBAL'),
+    ('HR_ADMIN','engagements.transition','GLOBAL'),
+    ('HR_ADMIN','candidates.view','GLOBAL'),('HR_ADMIN','scorecards.view_all','GLOBAL'),
+    ('HR_ADMIN','offers.approve','GLOBAL'),
+    ('HR_ADMIN','onboarding.manage','GLOBAL'),('HR_ADMIN','offboarding.initiate','GLOBAL'),
+    ('HR_ADMIN','documents.view','GLOBAL'),('HR_ADMIN','documents.upload','GLOBAL'),
+    ('HR_ADMIN','documents.download','GLOBAL'),('HR_ADMIN','documents.verify','GLOBAL'),
+    ('HR_ADMIN','policies.manage','GLOBAL'),('HR_ADMIN','policies.acknowledge','SELF'),
+    ('HR_ADMIN','policies.view_compliance','GLOBAL'),('HR_ADMIN','reports.view','GLOBAL'),
+
+    -- HR_MANAGER
+    ('HR_MANAGER','users.view','DEPARTMENT'),
+    ('HR_MANAGER','people.view','DEPARTMENT'),('HR_MANAGER','people.edit','DEPARTMENT'),
+    ('HR_MANAGER','hr.sensitive.view','DEPARTMENT'),
+    ('HR_MANAGER','engagements.transition','DEPARTMENT'),
+    ('HR_MANAGER','candidates.view','GLOBAL'),('HR_MANAGER','scorecards.view_all','GLOBAL'),
+    ('HR_MANAGER','onboarding.manage','DEPARTMENT'),('HR_MANAGER','offboarding.initiate','DEPARTMENT'),
+    ('HR_MANAGER','documents.view','DEPARTMENT'),('HR_MANAGER','documents.upload','DEPARTMENT'),
+    ('HR_MANAGER','documents.download','DEPARTMENT'),('HR_MANAGER','documents.verify','DEPARTMENT'),
+    ('HR_MANAGER','policies.acknowledge','SELF'),('HR_MANAGER','policies.view_compliance','DEPARTMENT'),
+    ('HR_MANAGER','reports.view','DEPARTMENT'),
+
+    -- SALES_MANAGER
+    ('SALES_MANAGER','people.view','DEPARTMENT'),
+    ('SALES_MANAGER','candidates.view','DEPARTMENT'),('SALES_MANAGER','scorecards.view_all','DEPARTMENT'),
+    ('SALES_MANAGER','onboarding.manage','DEPARTMENT'),('SALES_MANAGER','offboarding.initiate','DEPARTMENT'),
+    ('SALES_MANAGER','projects.view','DEPARTMENT'),('SALES_MANAGER','projects.create','DEPARTMENT'),
+    ('SALES_MANAGER','projects.edit','DEPARTMENT'),('SALES_MANAGER','projects.manage_members','DEPARTMENT'),
+    ('SALES_MANAGER','tasks.view','DEPARTMENT'),('SALES_MANAGER','tasks.edit','DEPARTMENT'),
+    ('SALES_MANAGER','tasks.assign','DEPARTMENT'),
+    ('SALES_MANAGER','documents.view','DEPARTMENT'),('SALES_MANAGER','documents.upload','DEPARTMENT'),
+    ('SALES_MANAGER','documents.download','DEPARTMENT'),
+    ('SALES_MANAGER','policies.acknowledge','SELF'),('SALES_MANAGER','policies.view_compliance','DEPARTMENT'),
+    ('SALES_MANAGER','reports.view','DEPARTMENT'),
+
+    -- SALES. tasks.view / tasks.edit are the matrix S+P cells; see the note above.
+    ('SALES','people.view','SELF'),('SALES','people.edit','SELF'),
+    ('SALES','projects.view','SELF'),
+    ('SALES','tasks.view','SELF'),('SALES','tasks.edit','SELF'),
+    ('SALES','documents.view','SELF'),('SALES','documents.upload','SELF'),('SALES','documents.download','SELF'),
+    ('SALES','policies.acknowledge','SELF'),('SALES','reports.view','SELF'),
+
+    -- PROJECT_MANAGER
+    ('PROJECT_MANAGER','people.view','DEPARTMENT'),
+    ('PROJECT_MANAGER','candidates.view','DEPARTMENT'),('PROJECT_MANAGER','scorecards.view_all','DEPARTMENT'),
+    ('PROJECT_MANAGER','onboarding.manage','DEPARTMENT'),('PROJECT_MANAGER','offboarding.initiate','DEPARTMENT'),
+    ('PROJECT_MANAGER','clients.view','DEPARTMENT'),('PROJECT_MANAGER','clients.edit','DEPARTMENT'),
+    ('PROJECT_MANAGER','projects.view','DEPARTMENT'),('PROJECT_MANAGER','projects.create','DEPARTMENT'),
+    ('PROJECT_MANAGER','projects.edit','DEPARTMENT'),('PROJECT_MANAGER','projects.manage_members','DEPARTMENT'),
+    ('PROJECT_MANAGER','tasks.view','DEPARTMENT'),('PROJECT_MANAGER','tasks.edit','DEPARTMENT'),
+    ('PROJECT_MANAGER','tasks.assign','DEPARTMENT'),
+    ('PROJECT_MANAGER','documents.view','DEPARTMENT'),('PROJECT_MANAGER','documents.upload','DEPARTMENT'),
+    ('PROJECT_MANAGER','documents.download','DEPARTMENT'),
+    ('PROJECT_MANAGER','policies.acknowledge','SELF'),('PROJECT_MANAGER','policies.view_compliance','DEPARTMENT'),
+    ('PROJECT_MANAGER','reports.view','DEPARTMENT'),
+    -- PROJECT_MANAGER (Phase 5): build and run automations inside their
+    -- departments. No workflows.delete — deletion stays on the admin path.
+    ('PROJECT_MANAGER','workflows.view','DEPARTMENT'),
+    ('PROJECT_MANAGER','workflows.create','DEPARTMENT'),
+    ('PROJECT_MANAGER','workflows.edit','DEPARTMENT'),
+    ('PROJECT_MANAGER','workflows.activate','DEPARTMENT'),
+    ('PROJECT_MANAGER','workflows.execute','DEPARTMENT'),
+    -- PROJECT_MANAGER (Phase 6): operate the job queue inside their
+    -- departments. No jobs.delete — purges stay on the admin path.
+    ('PROJECT_MANAGER','jobs.view','DEPARTMENT'),
+    ('PROJECT_MANAGER','jobs.create','DEPARTMENT'),
+    ('PROJECT_MANAGER','jobs.retry','DEPARTMENT'),
+    ('PROJECT_MANAGER','jobs.cancel','DEPARTMENT'),
+
+    -- DEVELOPER
+    ('DEVELOPER','people.view','SELF'),('DEVELOPER','people.edit','SELF'),
+    ('DEVELOPER','clients.view','PROJECT'),
+    ('DEVELOPER','projects.view','PROJECT'),('DEVELOPER','projects.edit','PROJECT'),
+    ('DEVELOPER','tasks.view','PROJECT'),('DEVELOPER','tasks.edit','PROJECT'),('DEVELOPER','tasks.assign','PROJECT'),
+    ('DEVELOPER','documents.view','SELF'),('DEVELOPER','documents.upload','SELF'),('DEVELOPER','documents.download','SELF'),
+    ('DEVELOPER','policies.acknowledge','SELF'),('DEVELOPER','reports.view','PROJECT'),
+
+    -- VIBECODER
+    ('VIBECODER','people.view','SELF'),('VIBECODER','people.edit','SELF'),
+    ('VIBECODER','clients.view','PROJECT'),('VIBECODER','projects.view','PROJECT'),
+    ('VIBECODER','tasks.view','PROJECT'),('VIBECODER','tasks.edit','PROJECT'),
+    ('VIBECODER','documents.view','SELF'),('VIBECODER','documents.upload','SELF'),('VIBECODER','documents.download','SELF'),
+    ('VIBECODER','policies.acknowledge','SELF'),
+
+    -- INTERN
+    ('INTERN','people.view','SELF'),('INTERN','people.edit','SELF'),
+    ('INTERN','hr.sensitive.view','SELF'),
+    ('INTERN','clients.view','PROJECT'),('INTERN','projects.view','PROJECT'),
+    ('INTERN','tasks.view','SELF'),('INTERN','tasks.edit','SELF'),
+    ('INTERN','documents.view','SELF'),('INTERN','documents.upload','SELF'),('INTERN','documents.download','SELF'),
+    ('INTERN','policies.acknowledge','SELF'),
+
+    -- FINANCE
+    ('FINANCE','people.view','SELF'),('FINANCE','people.edit','SELF'),
+    ('FINANCE','compensation.view','GLOBAL'),
+    ('FINANCE','clients.view','GLOBAL'),('FINANCE','projects.view','GLOBAL'),
+    ('FINANCE','documents.view','GLOBAL'),('FINANCE','documents.upload','GLOBAL'),('FINANCE','documents.download','GLOBAL'),
+    ('FINANCE','policies.acknowledge','SELF'),('FINANCE','reports.view','GLOBAL'),
+
+    -- EMPLOYEE
+    ('EMPLOYEE','people.view','SELF'),('EMPLOYEE','people.edit','SELF'),
+    ('EMPLOYEE','hr.sensitive.view','SELF'),('EMPLOYEE','compensation.view','SELF'),
+    ('EMPLOYEE','tasks.view','SELF'),('EMPLOYEE','tasks.edit','SELF'),
+    ('EMPLOYEE','documents.view','SELF'),('EMPLOYEE','documents.upload','SELF'),('EMPLOYEE','documents.download','SELF'),
+    ('EMPLOYEE','policies.acknowledge','SELF'),
+
+    -- ── Phase 2 CRM Core (migration 0033): the crm module replaces the legacy
+    -- sales vocabulary. ADMIN/SALES_MANAGER/SALES get the new keys at the same
+    -- scopes the matrix already uses for leads.* / clients.*.
+    -- ADMIN
+    ('ADMIN','companies.view','GLOBAL'),('ADMIN','companies.create','GLOBAL'),
+    ('ADMIN','companies.edit','GLOBAL'),('ADMIN','companies.delete','GLOBAL'),
+    ('ADMIN','contacts.view','GLOBAL'),('ADMIN','contacts.create','GLOBAL'),
+    ('ADMIN','contacts.edit','GLOBAL'),('ADMIN','contacts.delete','GLOBAL'),
+    ('ADMIN','contacts.export','GLOBAL'),
+    ('ADMIN','deals.view','GLOBAL'),('ADMIN','deals.create','GLOBAL'),
+    ('ADMIN','deals.edit','GLOBAL'),('ADMIN','deals.delete','GLOBAL'),
+    ('ADMIN','deals.export','GLOBAL'),
+    -- SALES_MANAGER
+    ('SALES_MANAGER','companies.view','DEPARTMENT'),('SALES_MANAGER','companies.create','DEPARTMENT'),
+    ('SALES_MANAGER','companies.edit','DEPARTMENT'),('SALES_MANAGER','companies.delete','DEPARTMENT'),
+    ('SALES_MANAGER','contacts.view','DEPARTMENT'),('SALES_MANAGER','contacts.create','DEPARTMENT'),
+    ('SALES_MANAGER','contacts.edit','DEPARTMENT'),('SALES_MANAGER','contacts.delete','DEPARTMENT'),
+    ('SALES_MANAGER','contacts.export','DEPARTMENT'),
+    ('SALES_MANAGER','deals.view','DEPARTMENT'),('SALES_MANAGER','deals.create','DEPARTMENT'),
+    ('SALES_MANAGER','deals.edit','DEPARTMENT'),('SALES_MANAGER','deals.delete','DEPARTMENT'),
+    ('SALES_MANAGER','deals.export','DEPARTMENT'),
+    -- SALES (SELF on view/create/edit only — mirrors the leads.* SELF column:
+    -- no delete, no export, no assign)
+    ('SALES','companies.view','SELF'),('SALES','companies.create','SELF'),
+    ('SALES','companies.edit','SELF'),
+    ('SALES','contacts.view','SELF'),('SALES','contacts.create','SELF'),
+    ('SALES','contacts.edit','SELF'),
+    ('SALES','deals.view','SELF'),('SALES','deals.create','SELF'),
+    ('SALES','deals.edit','SELF'),
+    -- ── Track B: activities + relationships (migration 0034). The catalogue keys are
+    -- seeded above; the matrix below grants them at the same scopes as the CRM
+    -- Core rows: ADMIN at GLOBAL, SALES_MANAGER at DEPARTMENT, SALES at SELF on
+    -- view/create/edit only (mirroring the leads.* SELF column: no delete).
+    -- ADMIN
+    ('ADMIN','activities.view','GLOBAL'),('ADMIN','activities.create','GLOBAL'),
+    ('ADMIN','activities.edit','GLOBAL'),('ADMIN','activities.delete','GLOBAL'),
+    ('ADMIN','relationships.view','GLOBAL'),('ADMIN','relationships.create','GLOBAL'),
+    ('ADMIN','relationships.edit','GLOBAL'),('ADMIN','relationships.delete','GLOBAL'),
+    -- SALES_MANAGER
+    ('SALES_MANAGER','activities.view','DEPARTMENT'),('SALES_MANAGER','activities.create','DEPARTMENT'),
+    ('SALES_MANAGER','activities.edit','DEPARTMENT'),('SALES_MANAGER','activities.delete','DEPARTMENT'),
+    ('SALES_MANAGER','relationships.view','DEPARTMENT'),('SALES_MANAGER','relationships.create','DEPARTMENT'),
+    ('SALES_MANAGER','relationships.edit','DEPARTMENT'),('SALES_MANAGER','relationships.delete','DEPARTMENT'),
+    -- SALES (SELF on view/create/edit only — mirrors the leads.* SELF column)
+    ('SALES','activities.view','SELF'),('SALES','activities.create','SELF'),
+    ('SALES','activities.edit','SELF'),
+    ('SALES','relationships.view','SELF'),('SALES','relationships.create','SELF'),
+    ('SALES','relationships.edit','SELF'),
+    -- ── Phase 3 sales pipeline (migration 0037): pipeline configuration is an
+    -- admin surface. ADMIN holds the five keys at GLOBAL; SUPER_ADMIN gets them
+    -- through the whole-catalogue cross join above. No other role is granted
+    -- pipeline keys.
+    -- ADMIN
+    ('ADMIN','pipelines.view','GLOBAL'),('ADMIN','pipelines.create','GLOBAL'),
+    ('ADMIN','pipelines.edit','GLOBAL'),('ADMIN','pipelines.delete','GLOBAL'),
+    ('ADMIN','pipeline_stages.manage','GLOBAL'),
+    -- ── Phase 4 work management (migration 0042): the work tables are an
+    -- operational surface, not an admin surface like pipelines. MANAGER gains
+    -- the project and task keys at DEPARTMENT (line management — the 0008
+    -- matrix seeded MANAGER no permissions at all); ADMIN gains
+    -- projects.delete and tasks.delete at GLOBAL; tasks.create rides with
+    -- tasks.view at each role's existing scope, so no role gains task
+    -- visibility it did not already hold. tasks.delete is deliberately NOT
+    -- seeded to non-admin roles: creators delete through the work_tasks
+    -- DELETE RLS policy, not through a seed grant. tasks.comment stays
+    -- ungranted (fail closed) until the comments feature lands.
+    -- MANAGER
+    ('MANAGER','projects.view','DEPARTMENT'),('MANAGER','projects.create','DEPARTMENT'),
+    ('MANAGER','projects.edit','DEPARTMENT'),
+    ('MANAGER','tasks.view','DEPARTMENT'),('MANAGER','tasks.create','DEPARTMENT'),
+    ('MANAGER','tasks.edit','DEPARTMENT'),
+    ('MANAGER','policies.acknowledge','SELF'),
+    -- ADMIN
+    ('ADMIN','projects.delete','GLOBAL'),
+    ('ADMIN','tasks.create','GLOBAL'),('ADMIN','tasks.delete','GLOBAL'),
+    -- tasks.create rides alongside tasks.view at each role's existing scope
+    ('SALES_MANAGER','tasks.create','DEPARTMENT'),
+    ('PROJECT_MANAGER','tasks.create','DEPARTMENT'),
+    ('DEVELOPER','tasks.create','PROJECT'),
+    ('VIBECODER','tasks.create','PROJECT'),
+    ('INTERN','tasks.create','SELF'),
+    ('SALES','tasks.create','SELF'),
+    ('EMPLOYEE','tasks.create','SELF'),
+    -- Phase 8 (0052): notification permissions. notifications.view lets every
+    -- employee role read its own notifications (SUPER_ADMIN/ADMIN at GLOBAL,
+    -- everyone else SELF); notifications.preferences.manage is the universal
+    -- self-service preference permission (SELF for every role — SUPER_ADMIN
+    -- keeps the GLOBAL it already holds from the whole-catalogue cross join
+    -- above via on-conflict-do-nothing, mirroring the policies.acknowledge
+    -- precedent); notifications.send is the admin-broadcast capability
+    -- (GLOBAL for SUPER_ADMIN/ADMIN only).
+    ('SUPER_ADMIN','notifications.view','GLOBAL'),
+    ('ADMIN','notifications.view','GLOBAL'),
+    ('HR_ADMIN','notifications.view','SELF'),
+    ('HR_MANAGER','notifications.view','SELF'),
+    ('MANAGER','notifications.view','SELF'),
+    ('SALES_MANAGER','notifications.view','SELF'),
+    ('SALES','notifications.view','SELF'),
+    ('PROJECT_MANAGER','notifications.view','SELF'),
+    ('DEVELOPER','notifications.view','SELF'),
+    ('VIBECODER','notifications.view','SELF'),
+    ('INTERN','notifications.view','SELF'),
+    ('FINANCE','notifications.view','SELF'),
+    ('EMPLOYEE','notifications.view','SELF'),
+    ('SUPER_ADMIN','notifications.preferences.manage','SELF'),
+    ('ADMIN','notifications.preferences.manage','SELF'),
+    ('HR_ADMIN','notifications.preferences.manage','SELF'),
+    ('HR_MANAGER','notifications.preferences.manage','SELF'),
+    ('MANAGER','notifications.preferences.manage','SELF'),
+    ('SALES_MANAGER','notifications.preferences.manage','SELF'),
+    ('SALES','notifications.preferences.manage','SELF'),
+    ('PROJECT_MANAGER','notifications.preferences.manage','SELF'),
+    ('DEVELOPER','notifications.preferences.manage','SELF'),
+    ('VIBECODER','notifications.preferences.manage','SELF'),
+    ('INTERN','notifications.preferences.manage','SELF'),
+    ('FINANCE','notifications.preferences.manage','SELF'),
+    ('EMPLOYEE','notifications.preferences.manage','SELF'),
+    ('SUPER_ADMIN','notifications.send','GLOBAL'),
+    ('ADMIN','notifications.send','GLOBAL'),
+    -- Phase 9 (0055): AI Foundation permissions (contract §2.2). ai.use goes
+    -- to every role holding CRM or work record access, at the scope of that
+    -- role's widest record-view grant; it never widens record access — the
+    -- entity permission + RLS decide every record. HR_ADMIN / HR_MANAGER hold
+    -- no CRM/work record access and MARKETING holds nothing, so none of them
+    -- are granted. ai.usage.view / ai.usage.manage are SUPER_ADMIN + ADMIN at
+    -- GLOBAL only (the notifications.send precedent); SUPER_ADMIN's rows also
+    -- arrive via the whole-catalogue cross join above.
+    ('SUPER_ADMIN','ai.use','GLOBAL'),
+    ('ADMIN','ai.use','GLOBAL'),
+    ('SALES_MANAGER','ai.use','DEPARTMENT'),
+    ('SALES','ai.use','SELF'),
+    ('PROJECT_MANAGER','ai.use','DEPARTMENT'),
+    ('MANAGER','ai.use','DEPARTMENT'),
+    ('DEVELOPER','ai.use','PROJECT'),
+    ('VIBECODER','ai.use','PROJECT'),
+    ('INTERN','ai.use','SELF'),
+    ('EMPLOYEE','ai.use','SELF'),
+    ('FINANCE','ai.use','SELF'),
+    ('SUPER_ADMIN','ai.usage.view','GLOBAL'),
+    ('ADMIN','ai.usage.view','GLOBAL'),
+    ('SUPER_ADMIN','ai.usage.manage','GLOBAL'),
+    ('ADMIN','ai.usage.manage','GLOBAL'),
+    -- Phase 10 (0057): Integrations Platform permissions (contract §4.2).
+    -- Connections hold org-wide credentials, so — unlike ai.use — there is
+    -- no broad integrations.use grant: view and manage are SUPER_ADMIN +
+    -- ADMIN at GLOBAL only (the ai.usage.* / notifications.send admin
+    -- precedent). SUPER_ADMIN's rows also arrive via the whole-catalogue
+    -- cross join above.
+    ('SUPER_ADMIN','integrations.view','GLOBAL'),
+    ('ADMIN','integrations.view','GLOBAL'),
+    ('SUPER_ADMIN','integrations.manage','GLOBAL'),
+    ('ADMIN','integrations.manage','GLOBAL'),
+    -- Sales Sheet import (0081, BP-06): SUPER_ADMIN and ADMIN at GLOBAL only (AC-S4,
+    -- proposed; founder Q8). SUPER_ADMIN's row also arrives via the cross join above.
+    ('SUPER_ADMIN','crm.import','GLOBAL'),
+    ('ADMIN','crm.import','GLOBAL')
+  ) as m(role_key, permission_key, scope)
+  join public.roles r on r.org_id = p_org_id and r.key = m.role_key
+  join public.permissions p on p.key = m.permission_key
+  on conflict do nothing;
+end;
+$$;
+
+-- 9j. The organization's attribution policy and its governed changes.
 --
 -- settings.attribution.policy is TWO_PERSON (the default, also when absent) or SINGLE_MANAGER
 -- (an explicit organization-level exception). There is no OFF value: any other stored value is
--- read as TWO_PERSON. app_user has no UPDATE on organizations; this function is the only tenant
--- path that changes the policy. It needs settings.manage, records the change in the audit log, and
--- accepts only the two values.
+-- read as TWO_PERSON. app_user has no UPDATE on organizations; the three functions below are the
+-- only tenant path that changes the policy (founder decision F-SEC-13, 2026-11-06):
+--   * every step needs settings.manage_attribution_policy (SUPER_ADMIN; not ADMIN) and step-up MFA
+--     (authz.aal() = 'aal2': the session's MFA claim AND a verified second factor on the login);
+--   * enabling SINGLE_MANAGER is a request that a SECOND, different authorised administrator must
+--     approve (founder decision F-SEC-12) — the requester can never approve their own change;
+--   * returning to TWO_PERSON (the stricter state) applies at once, by one authorised
+--     administrator, so the exception can always be switched off quickly;
+--   * activation and deactivation each write a CRITICAL audit entry (actor, organization, previous
+--     and new value, reason, request and approval, time); requests and rejections write HIGH.
+-- The change ledger is append-only for runtime logins: app_user can read it, never write it.
 create or replace function public.crm_attribution_policy()
 returns text
 language sql
@@ -1070,52 +1439,306 @@ grant execute on function public.crm_attribution_policy() to app_user;
 comment on function public.crm_attribution_policy() is
   'The caller organization''s attribution policy: SINGLE_MANAGER when explicitly enabled, otherwise TWO_PERSON (absent or unknown values never disable the two-person rule) (0089).';
 
-create or replace function public.set_lead_attribution_policy(p_policy text)
-returns void
+create table public.crm_attribution_policy_changes (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.organizations (id),
+  previous_policy text not null,
+  requested_policy text not null,
+  reason text not null,
+  status text not null default 'PENDING',
+  requested_by_person_id uuid not null,
+  requested_at timestamptz not null default now(),
+  decided_by_person_id uuid,
+  decided_at timestamptz,
+  decision_reason text,
+
+  constraint crm_attr_policy_chg_id_org_unique unique (id, org_id),
+  constraint crm_attr_policy_chg_values check (
+    previous_policy in ('TWO_PERSON', 'SINGLE_MANAGER')
+    and requested_policy in ('TWO_PERSON', 'SINGLE_MANAGER')
+    and previous_policy <> requested_policy
+  ),
+  constraint crm_attr_policy_chg_reason_len check (length(btrim(reason)) >= 10),
+  constraint crm_attr_policy_chg_status check (status in ('PENDING', 'APPLIED', 'REJECTED')),
+  -- A decision is recorded exactly once; enabling SINGLE_MANAGER is always decided by someone other
+  -- than the requester; a rejection carries its reason.
+  constraint crm_attr_policy_chg_decision_consistent check (
+    (status = 'PENDING'
+       and decided_by_person_id is null and decided_at is null and decision_reason is null)
+    or (status = 'APPLIED'
+       and decided_by_person_id is not null and decided_at is not null
+       and (requested_policy = 'TWO_PERSON' or decided_by_person_id <> requested_by_person_id))
+    or (status = 'REJECTED'
+       and decided_by_person_id is not null and decided_at is not null
+       and length(btrim(decision_reason)) >= 5)
+  )
+);
+
+alter table public.crm_attribution_policy_changes
+  add constraint crm_attr_policy_chg_requester_same_org
+  foreign key (requested_by_person_id, org_id) references public.people (id, org_id);
+
+alter table public.crm_attribution_policy_changes
+  add constraint crm_attr_policy_chg_decider_same_org
+  foreign key (decided_by_person_id, org_id) references public.people (id, org_id);
+
+-- At most one pending change per organization.
+create unique index crm_attr_policy_chg_one_pending
+  on public.crm_attribution_policy_changes (org_id) where status = 'PENDING';
+
+comment on table public.crm_attribution_policy_changes is
+  'Governed changes of the organization attribution policy (0089): requests, two-administrator approvals of SINGLE_MANAGER, immediate returns to TWO_PERSON, rejections. Written only by the 0089 policy functions.';
+
+alter table public.crm_attribution_policy_changes enable row level security;
+alter table public.crm_attribution_policy_changes force row level security;
+
+create policy crm_attr_policy_chg_owner_all on public.crm_attribution_policy_changes
+  for all to app_owner using (true) with check (true);
+
+create policy crm_attr_policy_chg_select on public.crm_attribution_policy_changes
+  for select to app_user
+  using (
+    org_id = (select authz.org_id())
+    and (select authz.is_active())
+    and (select authz.has('settings.manage_attribution_policy'))
+  );
+
+revoke insert, update, delete on public.crm_attribution_policy_changes from app_user;
+revoke all on public.crm_attribution_policy_changes
+  from app_admin, app_worker, app_auth, app_platform;
+
+create trigger crm_attribution_policy_changes_identity_capture
+  before insert or update or delete on public.crm_attribution_policy_changes
+  for each statement execute function public.crm_capture_statement_identity();
+create trigger crm_attribution_policy_changes_identity_pin
+  before insert or update or delete on public.crm_attribution_policy_changes
+  for each row execute function public.crm_assert_statement_identity();
+create trigger crm_attribution_policy_changes_identity_pin_after
+  after insert or update or delete on public.crm_attribution_policy_changes
+  for each row execute function public.crm_assert_statement_identity();
+
+create trigger crm_attribution_policy_changes_audit
+  after insert or update or delete on public.crm_attribution_policy_changes
+  for each row execute function public.audit_row_change('crm_attribution_policy_change', 'HIGH', 'id');
+
+-- The common preconditions of every policy step: an authenticated, active caller holding
+-- settings.manage_attribution_policy with step-up MFA. Returns the caller's organization.
+create or replace function public.crm_assert_policy_administrator()
+returns uuid
 language plpgsql
+stable
 security definer
 set search_path = ''
 as $$
 declare
   v_person uuid := authz.person_id();
   v_org uuid := authz.org_id();
-  v_before text;
 begin
   if v_person is null or v_org is null or not authz.is_active() then
     raise exception 'Unauthenticated caller' using errcode = '42501';
   end if;
-  if not authz.has('settings.manage') then
-    raise exception 'Changing the attribution policy requires settings.manage' using errcode = '42501';
+  if not authz.has('settings.manage_attribution_policy') then
+    raise exception 'Changing the attribution policy requires settings.manage_attribution_policy'
+      using errcode = '42501';
   end if;
-  if p_policy is null or p_policy not in ('TWO_PERSON', 'SINGLE_MANAGER') then
-    raise exception 'Attribution policy must be TWO_PERSON or SINGLE_MANAGER' using errcode = '22023';
+  if authz.aal() is distinct from 'aal2' then
+    raise exception 'Changing the attribution policy requires step-up MFA (aal2)'
+      using errcode = '42501';
   end if;
+  return v_org;
+end;
+$$;
 
-  select public.crm_attribution_policy() into v_before;
+revoke all on function public.crm_assert_policy_administrator() from public;
 
+-- Applies a policy value to the caller's organization and writes the CRITICAL audit entry.
+create or replace function public.crm_apply_attribution_policy(
+  p_change public.crm_attribution_policy_changes
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
   update public.organizations
   set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{attribution}',
                            coalesce(settings->'attribution', '{}'::jsonb)
-                             || jsonb_build_object('policy', p_policy), true),
+                             || jsonb_build_object('policy', p_change.requested_policy), true),
       updated_at = clock_timestamp()
-  where id = v_org;
+  where id = p_change.org_id;
 
   perform public.write_audit_log(
-    p_action := 'organization.attribution_policy_changed',
+    p_action := case p_change.requested_policy
+                  when 'SINGLE_MANAGER' then 'organization.attribution_policy_activated'
+                  else 'organization.attribution_policy_deactivated'
+                end,
     p_entity_type := 'organization',
-    p_entity_id := v_org,
-    p_severity := 'HIGH',
-    p_before := jsonb_build_object('policy', v_before),
-    p_after := jsonb_build_object('policy', p_policy)
+    p_entity_id := p_change.org_id,
+    p_severity := 'CRITICAL',
+    p_before := jsonb_build_object('policy', p_change.previous_policy),
+    p_after := jsonb_build_object('policy', p_change.requested_policy),
+    p_metadata := jsonb_build_object(
+      'change_id', p_change.id,
+      'reason', p_change.reason,
+      'requested_by_person_id', p_change.requested_by_person_id,
+      'approved_by_person_id', authz.person_id(),
+      'aal', authz.aal()
+    )
   );
 end;
 $$;
 
-revoke all on function public.set_lead_attribution_policy(text) from public;
-grant execute on function public.set_lead_attribution_policy(text) to app_user;
+revoke all on function public.crm_apply_attribution_policy(public.crm_attribution_policy_changes) from public;
 
-comment on function public.set_lead_attribution_policy(text) is
-  'Sets the caller organization''s attribution policy to TWO_PERSON or SINGLE_MANAGER. Needs settings.manage; audited (0089).';
+create or replace function public.request_attribution_policy_change(
+  p_policy text, p_reason text
+) returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid := public.crm_assert_policy_administrator();
+  v_person uuid := authz.person_id();
+  v_current text := coalesce(public.crm_attribution_policy(), 'TWO_PERSON');
+  v_reason text := nullif(btrim(p_reason), '');
+  v_change public.crm_attribution_policy_changes;
+begin
+  if p_policy is null or p_policy not in ('TWO_PERSON', 'SINGLE_MANAGER') then
+    raise exception 'Attribution policy must be TWO_PERSON or SINGLE_MANAGER' using errcode = '22023';
+  end if;
+  if p_policy = v_current then
+    raise exception 'The attribution policy is already %', v_current using errcode = '22023';
+  end if;
+  if v_reason is null or length(v_reason) < 10 then
+    raise exception 'A policy change needs a reason (at least 10 characters)' using errcode = '22023';
+  end if;
+
+  if p_policy = 'TWO_PERSON' then
+    -- Returning to the stricter rule: applied at once, recorded as decided by the requester.
+    insert into public.crm_attribution_policy_changes
+      (org_id, previous_policy, requested_policy, reason, status, requested_by_person_id,
+       decided_by_person_id, decided_at)
+    values (v_org, v_current, p_policy, v_reason, 'APPLIED', v_person, v_person, clock_timestamp())
+    returning * into v_change;
+    perform public.crm_apply_attribution_policy(v_change);
+  else
+    -- Enabling the exception: pending until a second administrator approves.
+    insert into public.crm_attribution_policy_changes
+      (org_id, previous_policy, requested_policy, reason, requested_by_person_id)
+    values (v_org, v_current, p_policy, v_reason, v_person)
+    returning * into v_change;
+    perform public.write_audit_log(
+      p_action := 'organization.attribution_policy_change_requested',
+      p_entity_type := 'organization',
+      p_entity_id := v_org,
+      p_severity := 'HIGH',
+      p_before := jsonb_build_object('policy', v_current),
+      p_after := jsonb_build_object('policy', p_policy),
+      p_metadata := jsonb_build_object('change_id', v_change.id, 'reason', v_reason, 'aal', authz.aal())
+    );
+  end if;
+  return v_change.id;
+end;
+$$;
+
+create or replace function public.approve_attribution_policy_change(p_change_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid := public.crm_assert_policy_administrator();
+  v_person uuid := authz.person_id();
+  v_change public.crm_attribution_policy_changes;
+begin
+  select * into v_change from public.crm_attribution_policy_changes
+  where id = p_change_id and org_id = v_org
+  for update;
+  if not found then
+    raise exception 'Attribution policy change not found' using errcode = 'P0002';
+  end if;
+  if v_change.status <> 'PENDING' then
+    raise exception 'The policy change is already decided' using errcode = '23514';
+  end if;
+  if v_change.requested_by_person_id = v_person then
+    raise exception 'A policy change must be approved by a different administrator'
+      using errcode = '42501';
+  end if;
+  if coalesce(public.crm_attribution_policy(), 'TWO_PERSON') is distinct from v_change.previous_policy then
+    raise exception 'The policy changed after this request was made' using errcode = '23514';
+  end if;
+
+  update public.crm_attribution_policy_changes
+  set status = 'APPLIED', decided_by_person_id = v_person, decided_at = clock_timestamp()
+  where id = p_change_id and org_id = v_org
+  returning * into v_change;
+  perform public.crm_apply_attribution_policy(v_change);
+end;
+$$;
+
+create or replace function public.reject_attribution_policy_change(
+  p_change_id uuid, p_reason text
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid := public.crm_assert_policy_administrator();
+  v_person uuid := authz.person_id();
+  v_reason text := nullif(btrim(p_reason), '');
+  v_change public.crm_attribution_policy_changes;
+begin
+  if v_reason is null or length(v_reason) < 5 then
+    raise exception 'Rejecting a policy change needs a reason (at least 5 characters)'
+      using errcode = '22023';
+  end if;
+  select * into v_change from public.crm_attribution_policy_changes
+  where id = p_change_id and org_id = v_org
+  for update;
+  if not found then
+    raise exception 'Attribution policy change not found' using errcode = 'P0002';
+  end if;
+  if v_change.status <> 'PENDING' then
+    raise exception 'The policy change is already decided' using errcode = '23514';
+  end if;
+
+  update public.crm_attribution_policy_changes
+  set status = 'REJECTED', decided_by_person_id = v_person, decided_at = clock_timestamp(),
+      decision_reason = v_reason
+  where id = p_change_id and org_id = v_org;
+
+  perform public.write_audit_log(
+    p_action := 'organization.attribution_policy_change_rejected',
+    p_entity_type := 'organization',
+    p_entity_id := v_org,
+    p_severity := 'HIGH',
+    p_metadata := jsonb_build_object(
+      'change_id', p_change_id,
+      'requested_policy', v_change.requested_policy,
+      'requested_by_person_id', v_change.requested_by_person_id,
+      'rejection_reason', v_reason,
+      'aal', authz.aal()
+    )
+  );
+end;
+$$;
+
+revoke all on function public.request_attribution_policy_change(text, text) from public;
+revoke all on function public.approve_attribution_policy_change(uuid) from public;
+revoke all on function public.reject_attribution_policy_change(uuid, text) from public;
+grant execute on function public.request_attribution_policy_change(text, text) to app_user;
+grant execute on function public.approve_attribution_policy_change(uuid) to app_user;
+grant execute on function public.reject_attribution_policy_change(uuid, text) to app_user;
+
+comment on function public.request_attribution_policy_change(text, text) is
+  'Requests a change of the caller organization''s attribution policy (0089). Needs settings.manage_attribution_policy and aal2. SINGLE_MANAGER waits for a second administrator; TWO_PERSON applies at once. Audited.';
+comment on function public.approve_attribution_policy_change(uuid) is
+  'Approves and applies a pending attribution-policy change (0089). Needs settings.manage_attribution_policy, aal2 and a different administrator from the requester. CRITICAL audit.';
+comment on function public.reject_attribution_policy_change(uuid, text) is
+  'Rejects a pending attribution-policy change with a reason (0089). Needs settings.manage_attribution_policy and aal2. Audited.';
 
 -- 9k. Governed attribution correction: approve or reject.
 --
@@ -1186,6 +1809,11 @@ begin
        or not authz.has('leads.attribution.single_manager')
        or not public.crm_lead_in_scope('leads.attribution.single_manager', v_owner, v_team) then
       raise exception 'Two-person policy violation: the requester cannot decide their own correction'
+        using errcode = '42501';
+    end if;
+    -- Using the exception is high-risk: step-up MFA (founder decision, 2026-11-06).
+    if authz.aal() is distinct from 'aal2' then
+      raise exception 'Using the SINGLE_MANAGER exception requires step-up MFA (aal2)'
         using errcode = '42501';
     end if;
     v_exception := true;
@@ -1274,7 +1902,9 @@ begin
       p_severity := 'CRITICAL',
       p_metadata := jsonb_build_object(
         'correction_id', v_corr.id,
-        'decision', case when p_approve then 'APPROVED' else 'REJECTED' end
+        'decision', case when p_approve then 'APPROVED' else 'REJECTED' end,
+        'policy', v_policy,
+        'aal', authz.aal()
       )
     );
   end if;

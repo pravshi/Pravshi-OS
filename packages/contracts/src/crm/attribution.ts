@@ -6,6 +6,10 @@
  *   - permissions: leads.attribution.request to ask, leads.attribution.approve to decide (approve
  *     or reject), leads.attribution.single_manager for the single-manager exception;
  *   - organization policy: TWO_PERSON (default) or SINGLE_MANAGER — there is no OFF value;
+ *   - founder decisions F-SEC-12/F-SEC-13 (2026-11-07): the policy is changed only through
+ *     settings.manage_attribution_policy (SUPER_ADMIN, not ADMIN) with step-up MFA; enabling
+ *     SINGLE_MANAGER needs a second administrator's approval; returning to TWO_PERSON applies at
+ *     once; using the exception also needs step-up MFA; every step is audited;
  *   - a rejection needs a reason and never changes the lead's attribution.
  */
 import { z } from 'zod';
@@ -28,6 +32,7 @@ export const ATTRIBUTION_PERMISSIONS = {
   request: 'leads.attribution.request',
   approve: 'leads.attribution.approve',
   singleManager: 'leads.attribution.single_manager',
+  managePolicy: 'settings.manage_attribution_policy',
 } as const;
 
 /** Minimum length of a rejection reason (the database enforces the same rule). */
@@ -78,7 +83,29 @@ export type ReviewAttributionCorrectionInput = z.infer<
   typeof ReviewAttributionCorrectionInputSchema
 >;
 
-export const SetAttributionPolicyInputSchema = z.object({
+/** Minimum length of a policy-change reason (the database enforces the same rule). */
+export const ATTRIBUTION_POLICY_REASON_MIN = 10;
+
+/** request_attribution_policy_change(policy, reason). */
+export const RequestAttributionPolicyChangeInputSchema = z.object({
   policy: AttributionPolicyEnum,
+  reason: z.string().trim().min(ATTRIBUTION_POLICY_REASON_MIN),
 });
-export type SetAttributionPolicyInput = z.infer<typeof SetAttributionPolicyInputSchema>;
+export type RequestAttributionPolicyChangeInput = z.infer<
+  typeof RequestAttributionPolicyChangeInputSchema
+>;
+
+/** approve_ / reject_attribution_policy_change: by an administrator other than the requester. */
+export const DecideAttributionPolicyChangeInputSchema = z
+  .object({
+    changeId: UuidSchema,
+    decision: z.enum(['APPROVE', 'REJECT']),
+    rejectionReason: z.string().trim().min(ATTRIBUTION_REJECTION_REASON_MIN).optional(),
+  })
+  .refine((v) => v.decision !== 'REJECT' || v.rejectionReason !== undefined, {
+    message: 'A rejection requires a reason',
+    path: ['rejectionReason'],
+  });
+export type DecideAttributionPolicyChangeInput = z.infer<
+  typeof DecideAttributionPolicyChangeInputSchema
+>;

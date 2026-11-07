@@ -14,7 +14,8 @@ import {
   ATTRIBUTION_STATUSES,
   ATTRIBUTION_POLICIES,
   ATTRIBUTION_PERMISSIONS,
-  SetAttributionPolicyInputSchema,
+  RequestAttributionPolicyChangeInputSchema,
+  DecideAttributionPolicyChangeInputSchema,
 } from '@pravshi/contracts';
 
 describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
@@ -305,12 +306,44 @@ describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
 
     it('allows exactly the two founder-approved policies (no OFF value)', () => {
       expect([...ATTRIBUTION_POLICIES]).toEqual(['TWO_PERSON', 'SINGLE_MANAGER']);
+      const reason = 'Two-person team: one approver available';
       for (const policy of ['TWO_PERSON', 'SINGLE_MANAGER']) {
-        expect(SetAttributionPolicyInputSchema.safeParse({ policy }).success).toBe(true);
+        expect(
+          RequestAttributionPolicyChangeInputSchema.safeParse({ policy, reason }).success,
+        ).toBe(true);
       }
       for (const policy of ['OFF', 'DISABLED', 'NONE', 'single_manager', '']) {
-        expect(SetAttributionPolicyInputSchema.safeParse({ policy }).success, policy).toBe(false);
+        expect(
+          RequestAttributionPolicyChangeInputSchema.safeParse({ policy, reason }).success,
+          policy,
+        ).toBe(false);
       }
+      expect(
+        RequestAttributionPolicyChangeInputSchema.safeParse({
+          policy: 'SINGLE_MANAGER',
+          reason: '   short   ',
+        }).success,
+        'a policy change needs a reason',
+      ).toBe(false);
+    });
+
+    it('requires a reason to reject a policy change', () => {
+      const changeId = correctionId;
+      expect(
+        DecideAttributionPolicyChangeInputSchema.safeParse({ changeId, decision: 'APPROVE' })
+          .success,
+      ).toBe(true);
+      expect(
+        DecideAttributionPolicyChangeInputSchema.safeParse({ changeId, decision: 'REJECT' })
+          .success,
+      ).toBe(false);
+      expect(
+        DecideAttributionPolicyChangeInputSchema.safeParse({
+          changeId,
+          decision: 'REJECT',
+          rejectionReason: 'Not justified',
+        }).success,
+      ).toBe(true);
     });
 
     it('names the dedicated permission keys', () => {
@@ -318,6 +351,7 @@ describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
         request: 'leads.attribution.request',
         approve: 'leads.attribution.approve',
         singleManager: 'leads.attribution.single_manager',
+        managePolicy: 'settings.manage_attribution_policy',
       });
     });
 

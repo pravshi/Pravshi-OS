@@ -24,6 +24,7 @@ const TABLES = [
   'public.crm_dedup_candidates',
   'public.crm_lead_attribution_corrections',
   'public.crm_statement_identity',
+  'public.crm_attribution_policy_changes',
 ];
 
 const FUNCTIONS = [
@@ -38,7 +39,11 @@ const FUNCTIONS = [
   'public.crm_record_lead_assignment',
   'public.crm_lead_in_scope',
   'public.crm_attribution_policy',
-  'public.set_lead_attribution_policy',
+  'public.crm_assert_policy_administrator',
+  'public.crm_apply_attribution_policy',
+  'public.request_attribution_policy_change',
+  'public.approve_attribution_policy_change',
+  'public.reject_attribution_policy_change',
   'public.crm_decide_lead_attribution_correction',
   'public.apply_lead_attribution_correction',
   'public.reject_lead_attribution_correction',
@@ -48,7 +53,20 @@ const PERMISSIONS = [
   'leads.attribution.request',
   'leads.attribution.approve',
   'leads.attribution.single_manager',
+  'settings.manage_attribution_policy',
 ];
+
+/** The one function 0089 re-issues rather than creates: the rollback restores the 0081 body. */
+const SEED = 'public.seed_system_roles';
+const M0081 = read('drizzle', '0081_crm_imports.sql');
+const seedBody = (sql: string) =>
+  squash(
+    stripComments(
+      sql.match(
+        /create or replace function public\.seed_system_roles\(p_org_id uuid\)[\s\S]*?\n\$\$;/,
+      )![0],
+    ),
+  );
 
 const JOURNAL = JSON.parse(read('drizzle', 'meta', '_journal.json')) as {
   entries: Array<{ idx: number; tag: string; when: number; hash: string }>;
@@ -86,9 +104,11 @@ describe('0089 does what its rollback undoes', () => {
 
   it('drops exactly the tables and functions 0089 creates, without CASCADE, tables first', () => {
     expect([...M0089.matchAll(/^create table (\S+) \(/gm)].map((m) => m[1])).toEqual(TABLES);
-    expect([...M0089.matchAll(/^create or replace function (\S+)\(/gm)].map((m) => m[1])).toEqual(
-      FUNCTIONS,
-    );
+    expect(
+      [...M0089.matchAll(/^create or replace function (\S+)\(/gm)]
+        .map((m) => m[1])
+        .filter((f) => f !== SEED),
+    ).toEqual(FUNCTIONS);
 
     expect(statements[0]).toBe('begin;');
     expect(statements[1]).toBe("set local lock_timeout = '5s';");
@@ -105,15 +125,40 @@ describe('0089 does what its rollback undoes', () => {
       .filter(Boolean);
     expect([...droppedFunctions].sort()).toEqual([...FUNCTIONS].sort());
 
-    // Policies and triggers refer to the functions, so every table goes before any function.
+    // Policies and triggers refer to the functions, so every table goes before any function —
+    // except crm_apply_attribution_policy, whose argument is the policy ledger's row type: it must
+    // go before that table (DROP TABLE without CASCADE refuses while it exists).
+    const dropApply = 'drop function if exists public.crm_apply_attribution_policy(';
+    expect(statements.findIndex((s) => s.startsWith(dropApply))).toBeLessThan(
+      statements.indexOf('drop table if exists public.crm_attribution_policy_changes;'),
+    );
     const lastTable = Math.max(
       ...TABLES.map((t) => statements.indexOf(`drop table if exists ${t};`)),
     );
-    const firstFunction = statements.findIndex((s) => s.startsWith('drop function if exists'));
-    expect(lastTable).toBeLessThan(firstFunction);
+    const firstOtherFunction = statements.findIndex(
+      (s) => s.startsWith('drop function if exists') && !s.startsWith(dropApply),
+    );
+    expect(lastTable).toBeLessThan(firstOtherFunction);
   });
 
-  it('removes the three attribution permissions and every grant of them', () => {
+  it('restores the 0081 seed_system_roles exactly, after the permissions are gone', () => {
+    // 0089 re-issues it, excluding only the single-manager exception from SUPER_ADMIN.
+    expect(seedBody(M0089)).toBe(
+      seedBody(M0081).replace(
+        "and p.key <> 'users.impersonate'",
+        "and p.key not in ('users.impersonate', 'leads.attribution.single_manager')",
+      ),
+    );
+    expect(seedBody(ROLLBACK)).toBe(seedBody(M0081));
+    const restore = statements.findIndex((s) =>
+      s.startsWith('create or replace function public.seed_system_roles('),
+    );
+    expect(restore).toBeGreaterThan(
+      statements.findIndex((s) => s.startsWith('delete from public.permissions')),
+    );
+  });
+
+  it('removes the attribution permissions and every grant of them', () => {
     for (const key of PERMISSIONS) {
       expect(M0089).toContain(`'${key}'`);
       expect(ROLLBACK).toContain(`'${key}'`);

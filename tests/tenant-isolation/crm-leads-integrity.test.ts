@@ -41,7 +41,11 @@ const DEFINER = [
   'crm_assert_statement_identity',
   'crm_record_lead_assignment',
   'crm_attribution_policy',
-  'set_lead_attribution_policy',
+  'crm_assert_policy_administrator',
+  'crm_apply_attribution_policy',
+  'request_attribution_policy_change',
+  'approve_attribution_policy_change',
+  'reject_attribution_policy_change',
   'crm_decide_lead_attribution_correction',
   'apply_lead_attribution_correction',
   'reject_lead_attribution_correction',
@@ -286,7 +290,9 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
           'crm_attribution_policy',
           'crm_lead_in_scope',
           'reject_lead_attribution_correction',
-          'set_lead_attribution_policy',
+          'request_attribution_policy_change',
+          'approve_attribution_policy_change',
+          'reject_attribution_policy_change',
         ].sort(),
       );
     });
@@ -1037,94 +1043,305 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
       expect(await sqlstateOf(approve(at(alice, orgA), corr!.id)), 'decided once').toBe('23514');
     });
 
-    describe('attribution policy (TWO_PERSON default, SINGLE_MANAGER exception)', () => {
+    describe('attribution policy governance (founder decisions F-SEC-12 / F-SEC-13)', () => {
       let orgS = '';
-      let sam = ''; // settings.manage + request/approve, no exception permission
-      let tess = ''; // request/approve + leads.attribution.single_manager, no settings.manage
+      let deptS = '';
+      let adminOne = ''; // seeded SUPER_ADMIN role, MFA enrolled
+      let adminTwo = ''; // seeded SUPER_ADMIN role, MFA enrolled
+      let opsAdmin = ''; // seeded ADMIN role, MFA enrolled
+      let tess = ''; // request/approve + leads.attribution.single_manager (granted deliberately), MFA
+      let sam = ''; // request/approve, no exception permission, MFA
       let leadS = '';
+      let pendingTess = '';
+
+      /** A login with a verified second factor, linked to the person: the aal2 precondition. */
+      async function enrolMfa(person: string) {
+        const login = (
+          await owner.query<{ id: string }>(
+            `insert into auth.auth_users (name, email, two_factor_enabled)
+             values ('MFA', $1, true) returning id`,
+            [`mfa.${person}.${RUN}@example.test`],
+          )
+        ).rows[0]!.id;
+        await owner.query(
+          `insert into auth.auth_two_factors (user_id, secret, backup_codes, verified)
+           values ($1, 'fixture-encrypted-seed', 'fixture-encrypted-codes', true)`,
+          [login],
+        );
+        await owner.query(`update public.people set auth_user_id = $2 where id = $1`, [
+          person,
+          login,
+        ]);
+      }
+
+      /**
+       * Assigns a seeded role. A protected role (SUPER_ADMIN) is assigned on the genesis branch
+       * when `by` is omitted (no roles.manage holder yet), otherwise by an existing holder.
+       */
+      async function assignSeededRole(person: string, roleKey: string, by?: string) {
+        const c = await owner.connect();
+        try {
+          await c.query('begin');
+          if (by) {
+            await c.query(
+              `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
+              [by, orgS],
+            );
+          }
+          await c.query(
+            `insert into public.person_roles (person_id, role_id, org_id)
+             select $1, r.id, r.org_id from public.roles r where r.org_id = $2 and r.key = $3`,
+            [person, orgS, roleKey],
+          );
+          await c.query('commit');
+        } catch (error) {
+          await c.query('rollback').catch(() => undefined);
+          throw error;
+        } finally {
+          c.release();
+        }
+      }
+
+      /** Runs `sql` as `person` with the session MFA claim `aal`, committing. */
+      async function asAal(person: string, aal: 'aal1' | 'aal2', sql: string, params: unknown[]) {
+        const c = await asUser.connect();
+        try {
+          await c.query('begin');
+          await c.query(
+            `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true),
+                    set_config('app.aal',$3,true)`,
+            [person, orgS, aal],
+          );
+          const r = await c.query(sql, params);
+          await c.query('commit');
+          return r.rows;
+        } catch (error) {
+          await c.query('rollback').catch(() => undefined);
+          throw error;
+        } finally {
+          c.release();
+        }
+      }
+
+      const requestPolicy = (
+        person: string,
+        aal: 'aal1' | 'aal2',
+        policy: string,
+        reason: string,
+      ) =>
+        asAal(person, aal, `select public.request_attribution_policy_change($1, $2) as id`, [
+          policy,
+          reason,
+        ]).then((rows) => (rows[0] as { id: string }).id);
+      const approvePolicy = (person: string, aal: 'aal1' | 'aal2', change: string) =>
+        asAal(person, aal, `select public.approve_attribution_policy_change($1)`, [change]);
+      const decide = (person: string, aal: 'aal1' | 'aal2', correction: string) =>
+        asAal(person, aal, `select public.apply_lead_attribution_correction($1)`, [correction]);
+      const policyOf = async () =>
+        (
+          await owner.query<{ p: string | null }>(
+            `select settings->'attribution'->>'policy' as p from public.organizations where id = $1`,
+            [orgS],
+          )
+        ).rows[0]!.p;
 
       beforeAll(async () => {
         orgS = await mkOrg(owner, `leads-int-s-${CODE.toLowerCase()}`);
-        const deptS = await mkDept(orgS);
-        sam = await mkPersonIn(orgS, deptS, 'Sam');
+        deptS = await mkDept(orgS);
+        adminOne = await mkPersonIn(orgS, deptS, 'AdminOne');
+        adminTwo = await mkPersonIn(orgS, deptS, 'AdminTwo');
+        opsAdmin = await mkPersonIn(orgS, deptS, 'OpsAdmin');
         tess = await mkPersonIn(orgS, deptS, 'Tess');
-        await grant(orgS, sam, 'GLOBAL', [...VIEW_EDIT, ...ATTRIBUTION, 'settings.manage']);
+        sam = await mkPersonIn(orgS, deptS, 'Sam');
+        for (const p of [adminOne, adminTwo, opsAdmin, tess, sam]) await enrolMfa(p);
+        await assignSeededRole(adminOne, 'SUPER_ADMIN');
+        await assignSeededRole(adminTwo, 'SUPER_ADMIN', adminOne);
+        await assignSeededRole(opsAdmin, 'ADMIN');
         await grant(orgS, tess, 'GLOBAL', [
           ...VIEW_EDIT,
           ...ATTRIBUTION,
           'leads.attribution.single_manager',
         ]);
+        await grant(orgS, sam, 'GLOBAL', [...VIEW_EDIT, ...ATTRIBUTION]);
         leadS = await seedLead(orgS, tess, null);
       });
 
-      const setPolicy = (ctx: Ctx, policy: string) =>
-        inContext(asUser, ctx, `select public.set_lead_attribution_policy($1)`, [policy]);
-
-      it('defaults to TWO_PERSON: even the exception holder cannot decide their own request', async () => {
-        const [corr] = await requestCorrection(at(tess, orgS), leadS, 'manual', 'website');
-        expect(await sqlstateOf(approve(at(tess, orgS), corr!.id))).toBe('42501');
-      });
-
-      it('changes only through settings.manage, only to the two allowed values, and audits the change', async () => {
-        expect(
-          await sqlstateOf(setPolicy(at(tess, orgS), 'SINGLE_MANAGER')),
-          'no settings.manage',
-        ).toBe('42501');
-        for (const bad of ['OFF', 'DISABLED', 'single_manager', '']) {
-          expect(await sqlstateOf(setPolicy(at(sam, orgS), bad)), bad).toBe('22023');
-        }
-        await setPolicy(at(sam, orgS), 'SINGLE_MANAGER');
-        const audit = await owner.query<{
-          actor_person_id: string;
-          before: unknown;
-          after: unknown;
-        }>(
-          `select actor_person_id, before, after from public.audit_logs
-           where entity_id = $1 and action = 'organization.attribution_policy_changed'`,
+      it('seeds settings.manage_attribution_policy to SUPER_ADMIN only, and the exception to no role', async () => {
+        const { rows } = await owner.query<{ role: string; key: string }>(
+          `select r.key as role, p.key from public.role_permissions rp
+           join public.roles r on r.id = rp.role_id
+           join public.permissions p on p.id = rp.permission_id
+           where r.org_id = $1 and r.is_system
+             and p.key in ('settings.manage_attribution_policy', 'leads.attribution.single_manager')
+           order by 1, 2`,
           [orgS],
         );
-        expect(audit.rows).toEqual([
-          {
-            actor_person_id: sam,
-            before: { policy: 'TWO_PERSON' },
-            after: { policy: 'SINGLE_MANAGER' },
-          },
-        ]);
+        expect(rows).toEqual([{ role: 'SUPER_ADMIN', key: 'settings.manage_attribution_policy' }]);
       });
 
-      it('under SINGLE_MANAGER, self-decision needs the exception permission and every use is audited', async () => {
-        const [own] = await requestCorrection(at(sam, orgS), leadS, 'manual', 'campaign');
-        expect(await sqlstateOf(approve(at(sam, orgS), own!.id)), 'no exception permission').toBe(
+      it('TWO_PERSON is the default: even the exception holder, with MFA, cannot decide their own request', async () => {
+        expect(await policyOf()).toBeNull();
+        const [corr] = await requestCorrection(at(tess, orgS), leadS, 'manual', 'website');
+        pendingTess = corr!.id;
+        expect(await sqlstateOf(decide(tess, 'aal2', pendingTess))).toBe('42501');
+      });
+
+      it('ADMIN cannot change the attribution policy', async () => {
+        expect(
+          await sqlstateOf(
+            requestPolicy(opsAdmin, 'aal2', 'SINGLE_MANAGER', 'Small team, single approver'),
+          ),
+        ).toBe('42501');
+      });
+
+      it('policy changes require step-up MFA: an aal1 session, or an aal2 claim without a verified factor, is refused', async () => {
+        expect(
+          await sqlstateOf(
+            requestPolicy(adminOne, 'aal1', 'SINGLE_MANAGER', 'Small team, single approver'),
+          ),
+          'aal1 session',
+        ).toBe('42501');
+        await owner.query(
+          `update auth.auth_two_factors set verified = false
+           where user_id = (select auth_user_id from public.people where id = $1)`,
+          [adminOne],
+        );
+        expect(
+          await sqlstateOf(
+            requestPolicy(adminOne, 'aal2', 'SINGLE_MANAGER', 'Small team, single approver'),
+          ),
+          'claim without a verified factor',
+        ).toBe('42501');
+        await owner.query(
+          `update auth.auth_two_factors set verified = true
+           where user_id = (select auth_user_id from public.people where id = $1)`,
+          [adminOne],
+        );
+      });
+
+      it('allows only TWO_PERSON or SINGLE_MANAGER, with a reason', async () => {
+        for (const bad of ['OFF', 'DISABLED', 'single_manager', '']) {
+          expect(
+            await sqlstateOf(requestPolicy(adminOne, 'aal2', bad, 'Trying an invalid value')),
+            bad,
+          ).toBe('22023');
+        }
+        expect(
+          await sqlstateOf(requestPolicy(adminOne, 'aal2', 'SINGLE_MANAGER', 'short')),
+          'reason',
+        ).toBe('22023');
+      });
+
+      it('one administrator cannot enable SINGLE_MANAGER and approve that change; a second one can, with MFA', async () => {
+        const change = await requestPolicy(
+          adminOne,
+          'aal2',
+          'SINGLE_MANAGER',
+          'Two-person team: one approver available',
+        );
+        expect(await policyOf()).toBeNull(); // pending, not applied
+        expect(await sqlstateOf(approvePolicy(adminOne, 'aal2', change)), 'own request').toBe(
           '42501',
         );
+        expect(await sqlstateOf(approvePolicy(adminTwo, 'aal1', change)), 'no MFA').toBe('42501');
+        expect(await sqlstateOf(approvePolicy(opsAdmin, 'aal2', change)), 'ADMIN').toBe('42501');
+        await approvePolicy(adminTwo, 'aal2', change);
+        expect(await policyOf()).toBe('SINGLE_MANAGER');
 
-        const pending = await owner.query<{ id: string }>(
-          `select id from public.crm_lead_attribution_corrections
-           where lead_id = $1 and requested_by_person_id = $2 and status = 'PENDING'`,
-          [leadS, tess],
+        const audit = await owner.query<{
+          actor_person_id: string;
+          org_id: string;
+          severity: string;
+          before: unknown;
+          after: unknown;
+          metadata: Record<string, unknown>;
+          occurred_at: Date;
+        }>(
+          `select actor_person_id, org_id, severity, before, after, metadata, occurred_at
+           from public.audit_logs
+           where entity_id = $1 and action = 'organization.attribution_policy_activated'`,
+          [orgS],
         );
-        await approve(at(tess, orgS), pending.rows[0]!.id);
+        expect(audit.rows).toHaveLength(1);
+        const e = audit.rows[0]!;
+        expect(e).toMatchObject({
+          actor_person_id: adminTwo,
+          org_id: orgS,
+          severity: 'CRITICAL',
+          before: { policy: 'TWO_PERSON' },
+          after: { policy: 'SINGLE_MANAGER' },
+        });
+        expect(e.metadata).toMatchObject({
+          change_id: change,
+          reason: 'Two-person team: one approver available',
+          requested_by_person_id: adminOne,
+          approved_by_person_id: adminTwo,
+          aal: 'aal2',
+        });
+        expect(e.occurred_at).toBeInstanceOf(Date);
+        const row = (
+          await owner.query<{
+            status: string;
+            requested_by_person_id: string;
+            decided_by_person_id: string;
+          }>(
+            `select status, requested_by_person_id, decided_by_person_id
+             from public.crm_attribution_policy_changes where id = $1`,
+            [change],
+          )
+        ).rows[0]!;
+        expect(row).toEqual({
+          status: 'APPLIED',
+          requested_by_person_id: adminOne,
+          decided_by_person_id: adminTwo,
+        });
+      });
+
+      it('under SINGLE_MANAGER only an authorised exception holder with MFA may decide their own request, and each use is CRITICAL-audited', async () => {
+        const [own] = await requestCorrection(at(sam, orgS), leadS, 'manual', 'campaign');
+        expect(await sqlstateOf(decide(sam, 'aal2', own!.id)), 'no exception permission').toBe(
+          '42501',
+        );
+        expect(await sqlstateOf(decide(tess, 'aal1', pendingTess)), 'exception without MFA').toBe(
+          '42501',
+        );
+        await decide(tess, 'aal2', pendingTess);
         expect(await sourceOf(leadS)).toBe('website');
-        const exceptions = await owner.query<{
+        const used = await owner.query<{
           actor_person_id: string;
           severity: string;
-          metadata: unknown;
+          metadata: Record<string, unknown>;
         }>(
           `select actor_person_id, severity, metadata from public.audit_logs
            where entity_id = $1 and action = 'crm_lead.attribution_single_manager_exception_used'`,
           [leadS],
         );
-        expect(exceptions.rows).toHaveLength(1);
-        expect(exceptions.rows[0]).toMatchObject({ actor_person_id: tess, severity: 'CRITICAL' });
-        const corrected = await owner.query<{ metadata: Record<string, unknown> }>(
-          `select metadata from public.audit_logs
-           where entity_id = $1 and action = 'crm_lead.attribution_corrected'`,
-          [leadS],
-        );
-        expect(corrected.rows[0]!.metadata).toMatchObject({
+        expect(used.rows).toHaveLength(1);
+        expect(used.rows[0]).toMatchObject({ actor_person_id: tess, severity: 'CRITICAL' });
+        expect(used.rows[0]!.metadata).toMatchObject({
           policy: 'SINGLE_MANAGER',
-          single_manager_exception: true,
+          aal: 'aal2',
+          decision: 'APPROVED',
         });
+      });
+
+      it('returning to TWO_PERSON applies at once and is CRITICAL-audited; the exception then stops working', async () => {
+        await requestPolicy(adminOne, 'aal2', 'TWO_PERSON', 'Second approver hired, back to two');
+        expect(await policyOf()).toBe('TWO_PERSON');
+        const audit = await owner.query<{
+          actor_person_id: string;
+          severity: string;
+          after: unknown;
+        }>(
+          `select actor_person_id, severity, after from public.audit_logs
+           where entity_id = $1 and action = 'organization.attribution_policy_deactivated'`,
+          [orgS],
+        );
+        expect(audit.rows).toEqual([
+          { actor_person_id: adminOne, severity: 'CRITICAL', after: { policy: 'TWO_PERSON' } },
+        ]);
+        const [corr] = await requestCorrection(at(tess, orgS), leadS, 'website', 'referral');
+        expect(await sqlstateOf(decide(tess, 'aal2', corr!.id))).toBe('42501');
       });
 
       it('reads any other stored value as TWO_PERSON: there is no OFF switch', async () => {
@@ -1132,8 +1349,64 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
           `update public.organizations set settings = jsonb_set(coalesce(settings, '{}'), '{attribution}', '{"policy":"OFF"}') where id = $1`,
           [orgS],
         );
-        const [corr] = await requestCorrection(at(tess, orgS), leadS, 'website', 'referral');
-        expect(await sqlstateOf(approve(at(tess, orgS), corr!.id))).toBe('42501');
+        const [corr] = await requestCorrection(at(tess, orgS), leadS, 'website', 'walk_in');
+        expect(await sqlstateOf(decide(tess, 'aal2', corr!.id))).toBe('42501');
+        await owner.query(
+          `update public.organizations set settings = settings - 'attribution' where id = $1`,
+          [orgS],
+        );
+      });
+
+      it('keeps the policy ledger and audit trail immutable for every runtime login', async () => {
+        const write = await sqlstateOf(
+          asAal(
+            adminOne,
+            'aal2',
+            `insert into public.crm_attribution_policy_changes
+               (org_id, previous_policy, requested_policy, reason, requested_by_person_id)
+             values ($1, 'TWO_PERSON', 'SINGLE_MANAGER', 'Forged direct insert', $2)`,
+            [orgS, adminOne],
+          ),
+        );
+        expect(write, 'direct insert into the policy ledger').toBe('42501');
+        const tamper = await sqlstateOf(
+          asAal(
+            adminOne,
+            'aal2',
+            `update public.audit_logs set severity = 'LOW' where entity_id = $1`,
+            [orgS],
+          ),
+        );
+        expect(tamper, 'app_user rewriting the audit log').toBe('42501');
+        const ownerTamper = await sqlstateOf(
+          owner.query(
+            `update public.audit_logs set severity = 'LOW'
+             where entity_id = $1 and action = 'organization.attribution_policy_activated'`,
+            [orgS],
+          ),
+        );
+        // 0011 revokes UPDATE/DELETE on audit_logs from app_owner too (and triggers refuse both).
+        expect(ownerTamper, 'even the owner cannot rewrite an audit entry').toBe('42501');
+      });
+
+      it('grants no other login (platform, worker, auth, admin) any path to the policy or the decisions', async () => {
+        const { rows } = await owner.query<{ login: string; fn: string; can: boolean }>(
+          `select l as login, f as fn, has_function_privilege(l, f, 'execute') as can
+           from unnest(array['app_platform','app_worker','app_auth','app_admin']) l,
+                unnest(array[
+                  'public.request_attribution_policy_change(text, text)',
+                  'public.approve_attribution_policy_change(uuid)',
+                  'public.reject_attribution_policy_change(uuid, text)',
+                  'public.apply_lead_attribution_correction(uuid)',
+                  'public.reject_lead_attribution_correction(uuid, text)']) f`,
+        );
+        expect(rows.filter((r) => r.can)).toEqual([]);
+        const tables = await owner.query<{ login: string; can: boolean }>(
+          `select l as login,
+                  has_table_privilege(l, 'public.crm_attribution_policy_changes', 'select,insert,update,delete') as can
+           from unnest(array['app_platform','app_worker','app_auth','app_admin']) l`,
+        );
+        expect(tables.rows.filter((r) => r.can)).toEqual([]);
       });
     });
   });

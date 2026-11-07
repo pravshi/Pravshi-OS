@@ -22,6 +22,7 @@ import {
  *  - public.crm_lead_tasks
  *  - public.crm_dedup_candidates
  *  - public.crm_lead_attribution_corrections
+ *  - public.crm_attribution_policy_changes
  *
  * (The Real Estate extension table left 0089 under founder decision AD-6; the integrity
  * controls — guards, actor binding, per-lead scope, audit — are in crm-leads-integrity.test.ts.)
@@ -64,6 +65,7 @@ describe.skipIf(!ready)('PR-P1-01: CRM leads & lineage tenant isolation (live DB
     await assertForceRls(owner, 'crm_lead_tasks');
     await assertForceRls(owner, 'crm_dedup_candidates');
     await assertForceRls(owner, 'crm_lead_attribution_corrections');
+    await assertForceRls(owner, 'crm_attribution_policy_changes');
 
     // 2. Setup Org A and Org B
     orgA = await mkOrg(owner, `leads-a-${CODE.toLowerCase()}`);
@@ -323,5 +325,61 @@ describe.skipIf(!ready)('PR-P1-01: CRM leads & lineage tenant isolation (live DB
       ),
     );
     expect(badInsertState).toBe('42501');
+  });
+
+  it('isolates crm_attribution_policy_changes across tenants', async () => {
+    // Both administrators hold the policy permission in their own organization.
+    await mkRoleFor(owner, orgA, alice, `POLICY_ADMIN_${CODE}`, [
+      'settings.manage_attribution_policy',
+    ]);
+    await mkRoleFor(owner, orgB, bob, `POLICY_ADMIN_${CODE}`, [
+      'settings.manage_attribution_policy',
+    ]);
+    // The ledger is written only by the policy functions; the fixture row is seeded as the owner.
+    const change = (
+      await owner.query<{ id: string }>(
+        `insert into public.crm_attribution_policy_changes
+           (org_id, previous_policy, requested_policy, reason, requested_by_person_id)
+         values ($1, 'TWO_PERSON', 'SINGLE_MANAGER', 'Isolation fixture: org A request', $2)
+         returning id`,
+        [orgA, alice],
+      )
+    ).rows[0]!.id;
+
+    const read = (who: string, org: string) =>
+      inContext<{ id: string }>(
+        asUser,
+        ctxFor(who, org),
+        `select id from public.crm_attribution_policy_changes where id = $1`,
+        [change],
+      );
+    expect(await read(alice, orgA), 'own organization').toHaveLength(1);
+    expect(await read(bob, orgB), 'other organization').toHaveLength(0);
+    // Claiming org A's identity without belonging to it reveals nothing either.
+    expect(await read(bob, orgA), 'forged org claim').toHaveLength(0);
+
+    // No runtime write path at all: app_user holds no INSERT/UPDATE/DELETE privilege.
+    expect(
+      await sqlstateOf(
+        inContext(
+          asUser,
+          ctxFor(bob, orgB),
+          `insert into public.crm_attribution_policy_changes
+             (org_id, previous_policy, requested_policy, reason, requested_by_person_id)
+           values ($1, 'TWO_PERSON', 'SINGLE_MANAGER', 'Cross-org forged request', $2)`,
+          [orgA, bob],
+        ),
+      ),
+    ).toBe('42501');
+    expect(
+      await sqlstateOf(
+        inContext(
+          asUser,
+          ctxFor(bob, orgB),
+          `delete from public.crm_attribution_policy_changes where id = $1`,
+          [change],
+        ),
+      ),
+    ).toBe('42501');
   });
 });
