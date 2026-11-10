@@ -100,7 +100,11 @@ export type ReviewAttributionCorrectionInput = z.infer<
 /** Minimum length of a policy-change reason (the database enforces the same rule). */
 export const ATTRIBUTION_POLICY_REASON_MIN = 10;
 
-/** request_attribution_policy_change(policy, reason). */
+/**
+ * The client input of request_attribution_policy_change(policy, reason, session_token_sha256). The
+ * third argument — the step-up proof — is added by the server from the verified session, never
+ * taken from the client.
+ */
 export const RequestAttributionPolicyChangeInputSchema = z.object({
   policy: AttributionPolicyEnum,
   reason: z.string().trim().min(ATTRIBUTION_POLICY_REASON_MIN),
@@ -109,7 +113,11 @@ export type RequestAttributionPolicyChangeInput = z.infer<
   typeof RequestAttributionPolicyChangeInputSchema
 >;
 
-/** approve_ / reject_attribution_policy_change: by an administrator other than the requester. */
+/**
+ * The client input of approve_attribution_policy_change(change_id, session_token_sha256) and
+ * reject_attribution_policy_change(change_id, reason, session_token_sha256): by an independent
+ * administrator other than the requester. The step-up proof is added by the server.
+ */
 export const DecideAttributionPolicyChangeInputSchema = z
   .object({
     changeId: UuidSchema,

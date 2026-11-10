@@ -233,7 +233,9 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     expect(M0089).toContain('perform public.crm_assert_recent_mfa(p_session_token_sha256);');
     expect(M0089).toContain('v_login := public.crm_assert_recent_mfa(p_session_token_sha256);');
     // F-SEC-23: the organization row serialises policy steps and correction decisions.
-    expect(M0089).toContain('perform 1 from public.organizations where id = v_org for update;');
+    expect(M0089).toContain(
+      'perform 1 from public.organizations where id = v_org for no key update;',
+    );
     expect(M0089).toContain('perform 1 from public.organizations where id = v_org for share;');
     // F-SEC-20: 7-day expiry, and a correction request's time is always the database's.
     expect(M0089.match(/interval '7 days'/g)!.length).toBeGreaterThanOrEqual(3);

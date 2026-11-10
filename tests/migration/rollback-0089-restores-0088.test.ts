@@ -146,6 +146,21 @@ describe('0089 does what its rollback undoes', () => {
     expect(lastTable).toBeLessThan(firstOtherFunction);
   });
 
+  it('refuses to commit while any 0089 function remains under any signature', () => {
+    // `drop function if exists` with a wrong argument list succeeds silently; the rollback checks
+    // pg_proc by name after its drops, so a signature mistake fails the rollback instead.
+    const check = statements.find((s) => s.includes('0089 rollback incomplete: functions remain'));
+    expect(check, 'completeness check').toBeDefined();
+    const named = [...check!.matchAll(/'([a-z_]+)'/g)]
+      .map((m) => `public.${m[1]}`)
+      .filter((n) => FUNCTIONS.includes(n));
+    expect([...named].sort()).toEqual([...FUNCTIONS].sort());
+    const lastDrop = Math.max(
+      ...statements.map((s, i) => (s.startsWith('drop function if exists') ? i : -1)),
+    );
+    expect(statements.indexOf(check!)).toBeGreaterThan(lastDrop);
+  });
+
   it('restores the 0081 seed_system_roles exactly, after the permissions are gone', () => {
     // 0089 re-issues it, excluding only the single-manager exception from SUPER_ADMIN.
     expect(seedBody(M0089)).toBe(

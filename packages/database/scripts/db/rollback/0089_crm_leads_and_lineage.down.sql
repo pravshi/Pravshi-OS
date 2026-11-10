@@ -73,7 +73,7 @@ begin
 
   select hash, created_at into v_last_hash, v_last_created_at
   from drizzle.__drizzle_migrations order by id desc limit 1;
-  if v_last_hash is distinct from '60285b84c11fb69885dc83912eda32c2a44b7a6b4a0777d2663e0bafd51d92fd'
+  if v_last_hash is distinct from 'a5ed4109d94bc08c4ecfbe063f878bd742b3545c9d60b995067800913b63d015'
      or v_last_created_at is distinct from 1791604728057 then
     raise exception '0089 rollback refused: the applied 0089 is not the revision this script undoes (checksum or timing differs)';
   end if;
@@ -139,6 +139,47 @@ drop function if exists public.guard_crm_lead_owner_change();
 drop function if exists public.guard_crm_lead_server_fields();
 drop function if exists public.guard_crm_lead_attribution();
 drop function if exists public.guard_crm_lead_assignment_history();
+
+-- A drop with a wrong signature succeeds silently ("if exists") and would leave the function behind:
+-- refuse to commit unless none of the 24 functions remains, under any signature.
+do $$
+declare
+  v_left text;
+begin
+  select string_agg(p.oid::regprocedure::text, ', ' order by 1) into v_left
+  from pg_proc p
+  where p.pronamespace = 'public'::regnamespace
+    and p.proname in (
+      'guard_crm_lead_assignment_history',
+      'guard_crm_lead_attribution',
+      'guard_crm_lead_server_fields',
+      'guard_crm_lead_owner_change',
+      'crm_stamp_actor',
+      'guard_crm_dedup_candidate_identity',
+      'crm_capture_statement_identity',
+      'crm_assert_statement_identity',
+      'crm_record_lead_assignment',
+      'crm_lead_reachable',
+      'crm_lead_in_scope',
+      'crm_assert_recent_mfa',
+      'crm_requester_still_authorised',
+      'crm_independent_scope',
+      'crm_attribution_policy',
+      'crm_assert_policy_administrator',
+      'crm_apply_attribution_policy',
+      'request_attribution_policy_change',
+      'approve_attribution_policy_change',
+      'reject_attribution_policy_change',
+      'crm_decide_lead_attribution_correction',
+      'apply_lead_attribution_correction',
+      'reject_lead_attribution_correction',
+      'stamp_crm_lead_attribution_request'
+    );
+  if v_left is not null then
+    raise exception '0089 rollback incomplete: functions remain: %', v_left;
+  end if;
+end;
+$$;
 
 -- The attribution permissions and their grants (SUPER_ADMIN is a protected role: its grants are
 -- changed with the protection trigger off, exactly as 0089 and 0081 add them).

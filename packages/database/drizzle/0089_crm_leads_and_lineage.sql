@@ -1719,7 +1719,8 @@ create trigger crm_attribution_policy_changes_audit
 -- The common preconditions of every policy step (F-SEC-13, F-SEC-19, F-SEC-22): an authenticated,
 -- active caller holding settings.manage_attribution_policy at GLOBAL scope — a department- or
 -- self-scoped grant never administers organization-wide governance — with step-up MFA completed
--- within the last 5 minutes on the caller's own session. Locks the organization row (F-SEC-23), so
+-- within the last 5 minutes on the caller's own session. Locks the organization row FOR NO KEY
+-- UPDATE (F-SEC-23), so
 -- every policy step, and every correction decision (which share-locks the same row before it reads
 -- the policy), is serialised against the others. Returns the caller's organization.
 create or replace function public.crm_assert_policy_administrator(p_session_token_sha256 text)
@@ -1741,7 +1742,9 @@ begin
       using errcode = '42501';
   end if;
   perform public.crm_assert_recent_mfa(p_session_token_sha256);
-  perform 1 from public.organizations where id = v_org for update;
+  -- FOR NO KEY UPDATE, not FOR UPDATE: it still conflicts with the decision path's FOR SHARE, but
+  -- not with the FOR KEY SHARE that every foreign-key-checked insert of this tenant takes.
+  perform 1 from public.organizations where id = v_org for no key update;
   return v_org;
 end;
 $$;
@@ -2024,7 +2027,7 @@ comment on function public.reject_attribution_policy_change(uuid, text, text) is
 --     (crm_requester_still_authorised); a request older than 7 days has expired and can never
 --     change attribution (it can still be rejected);
 --   * the organization row is share-locked BEFORE the policy is read, so a policy change (which
---     locks the row for update) and a decision are serialised: a decision never acts on a policy
+--     locks the row FOR NO KEY UPDATE) and a decision are serialised: a decision never acts on a policy
 --     that a concurrent, committed switch has already replaced.
 create or replace function public.crm_decide_lead_attribution_correction(
   p_correction_id uuid, p_approve boolean, p_rejection_reason text, p_session_token_sha256 text

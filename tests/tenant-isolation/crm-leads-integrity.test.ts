@@ -1136,6 +1136,8 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
       let lateAdmin = ''; // SUPER_ADMIN granted by adminTwo only AFTER the request
       let opsAdmin = ''; //  seeded ADMIN (settings.manage, not the policy permission)
       let deptAdmin = ''; // the policy permission at DEPARTMENT scope only
+      let upgraded = ''; //  held it at DEPARTMENT before the request; upgraded to GLOBAL after it
+      let upgradedRole = '';
       // Attribution personas:
       let tess = ''; //  request/approve + leads.attribution.single_manager (granted deliberately)
       let sam = ''; //   request/approve, no exception
@@ -1329,6 +1331,7 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
           'Sela',
           'Vic',
           'LateVic',
+          'Upgraded',
         ]) {
           names[n] = await mkPersonIn(orgS, deptS, n);
           await mfaLogin(names[n]!);
@@ -1348,6 +1351,7 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
         sela = n('Sela');
         vic = n('Vic');
         lateVic = n('LateVic');
+        upgraded = n('Upgraded');
 
         await assign(adminTwo, superRole); // genesis
         await assign(adminOne, superRole, { actor: adminTwo });
@@ -1362,6 +1366,8 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
         await assign(delegate2, await roleWith(['settings.manage_attribution_policy'], 'GLOBAL'), {
           grantedBy: adminOne,
         });
+        upgradedRole = await roleWith(['settings.manage_attribution_policy'], 'DEPARTMENT');
+        await assign(upgraded, upgradedRole);
         const adminRole = (
           await owner.query<{ id: string }>(
             `select id from public.roles where org_id = $1 and key = 'ADMIN'`,
@@ -1528,6 +1534,27 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
         await refused('granted by another administrator only after the request', lateAdmin);
         await refused('ADMIN', opsAdmin);
         await refused('department-scoped holder', deptAdmin);
+        // The grant's scope is raised to GLOBAL after the request, by someone else: a later scope
+        // change counts as a new grant (role_permissions.updated_at), so it is not independent.
+        const c = await owner.connect();
+        try {
+          await c.query('begin');
+          await c.query(
+            `select set_config('app.person_id',$1,true), set_config('app.org_id',$2,true)`,
+            [adminTwo, orgS],
+          );
+          await c.query(
+            `update public.role_permissions set scope = 'GLOBAL'
+             where role_id = $1
+               and permission_id = (select id from public.permissions
+                                    where key = 'settings.manage_attribution_policy')`,
+            [upgradedRole],
+          );
+          await c.query('commit');
+        } finally {
+          c.release();
+        }
+        await refused('scope raised to GLOBAL only after the request', upgraded);
         await refused(
           'independent, but stepped up 6 minutes ago',
           adminTwo,
@@ -1669,6 +1696,21 @@ describe.skipIf(!DB_READY)('PR-P1-01: 0089 integrity controls (live DB, app_user
             if (!waiting) await new Promise((r) => setTimeout(r, 100));
           }
           expect(waiting, 'the decision waits for the policy switch').toBe(true);
+          // The policy step's FOR NO KEY UPDATE must not block the tenant's ordinary inserts (their
+          // foreign-key check takes FOR KEY SHARE on the organization row).
+          const other = await owner.connect();
+          try {
+            await other.query('begin');
+            await other.query(`set local lock_timeout = '3s'`);
+            await other.query(
+              `insert into public.crm_leads (org_id, full_name, primary_phone, source, sla_due_at)
+               values ($1, 'Inserted during a policy step', '+919800000002', 'manual', now() + interval '1 hour')`,
+              [orgS],
+            );
+            await other.query('rollback');
+          } finally {
+            other.release();
+          }
           await a.query('commit');
           expect(await decision, 'decided against the committed TWO_PERSON policy').toBe('42501');
           await b.query('rollback');
