@@ -6,7 +6,7 @@
 -- What this removes: the 6 CRM tables (crm_leads, crm_lead_assignment_history,
 -- crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections),
 -- the attribution policy ledger (crm_attribution_policy_changes) and the operational
--- crm_statement_identity table, with their policies and triggers; the 19 functions 0089 creates;
+-- crm_statement_identity table, with their policies and triggers; the 24 functions 0089 creates;
 -- the three leads.attribution.* permissions and settings.manage_attribution_policy, with every
 -- grant of them; the columns 0089 added to contacts (merge pointers) and activities (logged_at).
 -- It restores the 0081 seed_system_roles (which 0089 re-issues to keep the single-manager
@@ -73,7 +73,7 @@ begin
 
   select hash, created_at into v_last_hash, v_last_created_at
   from drizzle.__drizzle_migrations order by id desc limit 1;
-  if v_last_hash is distinct from 'cebd35eec06b4189ded54af47a9ee16b7d611018056087a9ecd3bf4dd3b9aae0'
+  if v_last_hash is distinct from '60285b84c11fb69885dc83912eda32c2a44b7a6b4a0777d2663e0bafd51d92fd'
      or v_last_created_at is distinct from 1791604728057 then
     raise exception '0089 rollback refused: the applied 0089 is not the revision this script undoes (checksum or timing differs)';
   end if;
@@ -116,15 +116,20 @@ drop table if exists public.crm_leads;
 drop table if exists public.crm_statement_identity;
 
 -- The functions, now that no trigger or policy refers to them.
-drop function if exists public.apply_lead_attribution_correction(uuid);
-drop function if exists public.reject_lead_attribution_correction(uuid, text);
-drop function if exists public.crm_decide_lead_attribution_correction(uuid, boolean, text);
-drop function if exists public.request_attribution_policy_change(text, text);
-drop function if exists public.approve_attribution_policy_change(uuid);
-drop function if exists public.reject_attribution_policy_change(uuid, text);
-drop function if exists public.crm_assert_policy_administrator();
+drop function if exists public.stamp_crm_lead_attribution_request();
+drop function if exists public.apply_lead_attribution_correction(uuid, text);
+drop function if exists public.reject_lead_attribution_correction(uuid, text, text);
+drop function if exists public.crm_decide_lead_attribution_correction(uuid, boolean, text, text);
+drop function if exists public.request_attribution_policy_change(text, text, text);
+drop function if exists public.approve_attribution_policy_change(uuid, text);
+drop function if exists public.reject_attribution_policy_change(uuid, text, text);
+drop function if exists public.crm_assert_policy_administrator(text);
 drop function if exists public.crm_attribution_policy();
+drop function if exists public.crm_independent_scope(text, uuid, timestamptz);
+drop function if exists public.crm_requester_still_authorised(uuid, text, uuid, uuid, boolean);
+drop function if exists public.crm_assert_recent_mfa(text);
 drop function if exists public.crm_lead_in_scope(text, uuid, uuid);
+drop function if exists public.crm_lead_reachable(public.access_scope, uuid, uuid);
 drop function if exists public.crm_record_lead_assignment();
 drop function if exists public.crm_assert_statement_identity();
 drop function if exists public.crm_capture_statement_identity();

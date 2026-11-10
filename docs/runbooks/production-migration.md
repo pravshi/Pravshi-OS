@@ -522,7 +522,7 @@ tenant data, only Better Auth's own self-service endpoints);
   `crm_dedup_candidates`, `crm_lead_attribution_corrections`) — **with every lead, task,
   candidate, assignment entry and correction in them** — the attribution policy ledger
   `crm_attribution_policy_changes` (with every policy change request in it) and the operational
-  `crm_statement_identity` table, together with their triggers and the 19 functions 0089 creates;
+  `crm_statement_identity` table, together with their triggers and the 24 functions 0089 creates;
   deletes the three `leads.attribution.*` permissions and `settings.manage_attribution_policy`
   with every grant of them; restores the 0081 `seed_system_roles` (0089 re-issues it so that
   SUPER_ADMIN never receives the single-manager exception); removes the `contacts` merge columns
@@ -537,6 +537,79 @@ tenant data, only Better Auth's own self-service endpoints);
   before checking them. The 0089
   application code reads these tables, columns and permissions — roll the application back with
   it. It needs Nani's explicit approval and a run-record entry.
+
+  **Before running the 0089 rollback — record every organization on SINGLE_MANAGER.** The
+  rollback drops the policy ledger but leaves `organizations.settings.attribution.policy` in
+  place (0088 never reads it). If a later migration ever reads that value again, an organization
+  would find SINGLE_MANAGER active with no surviving ledger row or approval; the evidence would be
+  only in `audit_logs`. So, in the same approved session and before the rollback, run this
+  read-only query as the migration owner and paste the complete output (or "0 rows") into the run
+  record, with the time it was taken:
+
+  ```sql
+  select o.id, o.name,
+         o.settings -> 'attribution' ->> 'policy' as attribution_policy,
+         (select max(c.decided_at) from public.crm_attribution_policy_changes c
+           where c.org_id = o.id and c.status = 'APPLIED'
+             and c.requested_policy = 'SINGLE_MANAGER') as enabled_at,
+         (select c.requested_by_person_id || ' / ' || c.decided_by_person_id
+            from public.crm_attribution_policy_changes c
+           where c.org_id = o.id and c.status = 'APPLIED'
+             and c.requested_policy = 'SINGLE_MANAGER'
+           order by c.decided_at desc limit 1) as requested_by_approved_by
+  from public.organizations o
+  where o.settings -> 'attribution' ->> 'policy' = 'SINGLE_MANAGER'
+  order by o.id;
+  ```
+
+  Any migration that later reintroduces the attribution policy must reset each listed
+  organization to TWO_PERSON or re-govern it through the two-administrator workflow; it must not
+  inherit the stored value silently.
+
+## 0089 — open review items and their acceptance criteria
+
+Three findings of the independent migration reviews of 0089 remain open. None blocks a merge; each
+must be closed, or explicitly accepted by Nani, before 0089 is applied to a persistent database.
+
+- **F-MIG-2 (Medium) — upgrade lock duration on `contacts` and `activities`.**
+  - Evidence: 0089 alters both existing tables inside the migration transaction — `contacts` gains
+    the merge columns, constraints and an index (0089 §7), `activities` gains `logged_at`, a
+    replaced entity-type check and an index, and is backfilled with `update public.activities`
+    while its five row triggers are disabled (0089 §8). Each `alter table` takes an ACCESS
+    EXCLUSIVE lock held until commit, and the backfill rewrites every `activities` row, so
+    reads and writes of both tables wait for as long as the backfill runs — proportional to the
+    size of `activities`. The upgrade rehearsals ran only on small local disposable databases.
+  - Acceptance: (1) with separate approval per database, the read-only size check
+    `select relname, n_live_tup, pg_total_relation_size(oid) from pg_stat_user_tables join pg_class using (relname) where relname in ('contacts','activities','organizations','people','roles','role_permissions','permissions','record_grants');`
+    is recorded in the run record; (2) the upgrade is timed on the Step 2 snapshot branch of that
+    database and the measured duration recorded; (3) the apply runs inside the Step 1 freeze, and
+    is postponed to a declared maintenance window if the measured duration exceeds what Nani
+    accepts for the freeze.
+- **R4-1 (Low) — the rollback upgrades its locks on `contacts` and `activities` late.**
+  - Evidence: `0089_crm_leads_and_lineage.down.sql` first takes `lock table public.contacts,
+    public.activities, public.record_grants, public.role_permissions in exclusive mode`, which
+    still admits plain readers (ACCESS SHARE), and only later runs `alter table public.contacts`
+    / `alter table public.activities`, which need ACCESS EXCLUSIVE. A reader that started in
+    between makes the rollback wait; with `lock_timeout = '5s'` it then aborts. Because the
+    rollback is one transaction, an abort leaves the database exactly at 0089 — a clean failure,
+    not a partial one.
+  - Acceptance: the rollback is run only inside the Step 1 freeze (no application traffic), and
+    the run record states that the freeze was in force; if a rollback ever has to run without a
+    freeze, the script must first be changed to take ACCESS EXCLUSIVE on both tables up front,
+    reviewed, and rehearsed with a concurrent reader (expected: the rollback waits, then either
+    completes or aborts cleanly with the database unchanged).
+- **R3-3 (Info) — a `roles.sql` re-run re-grants table privileges on 0089's internal tables.**
+  - Evidence: `scripts/db/roles.sql` runs `grant select, insert, update on all tables in schema
+    public to app_user` (line 126). 0089 revokes app_user's write privileges on
+    `crm_statement_identity` and `crm_attribution_policy_changes` (and all privileges from the
+    other runtime logins). A re-run of `roles.sql` after 0089 would give app_user those grants
+    back. Forced RLS still contains it — neither table has an app_user write policy, so inserts
+    and updates are refused (asserted by `tests/tenant-isolation/crm-leads-rls.test.ts`) — but
+    the privilege state would differ from the reviewed one.
+  - Acceptance: after any `roles.sql` run on a database at 0089 or later, the read-only check
+    `select l, t, has_table_privilege(l, t, 'insert,update,delete') from unnest(array['app_user','app_worker','app_auth','app_platform','app_admin']) l, unnest(array['public.crm_statement_identity','public.crm_attribution_policy_changes']) t;`
+    returns false for every row, or the 0089 revokes are re-applied by the owner and the check
+    repeated; the result is recorded in the run record.
 
 ## Abort criteria (any step)
 
@@ -614,7 +687,7 @@ re-apply.
 | 85  | `0086_platform_console` | 1791601728057 | `1e94338d5427232632750ce539ae5f1ecd4a09c440718a015bfbcdedb05b116a` |
 | 86  | `0087_org_admin_setup_email` | 1791602728057 | `d295bbaa7b135d728a5951259ab0cbb51ca1abad3554750214be125afebbee73` |
 | 87  | `0088_crm_import_decisions` | 1791603728057 | `7274424fe91442381379791f5600941e84b4d044fa806efa118dd3d03b90fa5c` |
-| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `cebd35eec06b4189ded54af47a9ee16b7d611018056087a9ecd3bf4dd3b9aae0` |
+| 88  | `0089_crm_leads_and_lineage` | 1791604728057 | `60285b84c11fb69885dc83912eda32c2a44b7a6b4a0777d2663e0bafd51d92fd` |
 
 (Note the numbering: there is no `0051_*.sql` in the journal — the file that
 once carried that number was a dormant, never-journaled artefact retired in

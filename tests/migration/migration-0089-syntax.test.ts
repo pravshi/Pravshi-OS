@@ -219,9 +219,27 @@ describe('PR-P1-01: Migration 0089 Structure & Constraint Invariant Suite', () =
     );
     // F-SEC-13: the policy belongs to its own permission (SUPER_ADMIN, not ADMIN) with step-up MFA,
     // never to the broad settings.manage.
-    expect(M0089).toContain("if not authz.has('settings.manage_attribution_policy') then");
+    // F-SEC-22: at GLOBAL scope only.
+    expect(M0089).toContain(
+      "if authz.scope_for('settings.manage_attribution_policy') is distinct from 'GLOBAL' then",
+    );
     expect(M0089).not.toContain("authz.has('settings.manage')");
-    expect(M0089.match(/if authz\.aal\(\) is distinct from 'aal2' then/g)).toHaveLength(2);
+    // F-SEC-19: step-up MFA is the caller's own aal2 session minted within 5 minutes, bound by its
+    // token SHA-256 — for every policy step, every correction approval and every exception use.
+    expect(M0089).toContain("and s.created_at > now() - interval '5 minutes'");
+    expect(M0089).toContain(
+      "and encode(sha256(convert_to(s.token, 'UTF8')), 'hex') = p_session_token_sha256",
+    );
+    expect(M0089).toContain('perform public.crm_assert_recent_mfa(p_session_token_sha256);');
+    expect(M0089).toContain('v_login := public.crm_assert_recent_mfa(p_session_token_sha256);');
+    // F-SEC-23: the organization row serialises policy steps and correction decisions.
+    expect(M0089).toContain('perform 1 from public.organizations where id = v_org for update;');
+    expect(M0089).toContain('perform 1 from public.organizations where id = v_org for share;');
+    // F-SEC-20: 7-day expiry, and a correction request's time is always the database's.
+    expect(M0089.match(/interval '7 days'/g)!.length).toBeGreaterThanOrEqual(3);
+    expect(M0089).toMatch(
+      /create trigger crm_lead_attribution_corrections_request_time\s+before insert on public\.crm_lead_attribution_corrections/,
+    );
     // F-SEC-12: SUPER_ADMIN is never given the exception, at migration time or for a new org.
     expect(M0089).toContain(
       "and p.key not in ('users.impersonate', 'leads.attribution.single_manager')",

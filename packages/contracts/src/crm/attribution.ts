@@ -10,6 +10,14 @@
  *     settings.manage_attribution_policy (SUPER_ADMIN, not ADMIN) with step-up MFA; enabling
  *     SINGLE_MANAGER needs a second administrator's approval; returning to TWO_PERSON applies at
  *     once; using the exception also needs step-up MFA; every step is audited;
+ *   - founder decisions F-SEC-19..F-SEC-23 (2026-11-08): step-up MFA means a session minted by a
+ *     second-factor verification within the last ATTRIBUTION_STEP_UP_MAX_AGE_SECONDS, proven to the
+ *     database by the SHA-256 of the caller's own session token — the server supplies it from the
+ *     verified session, never from client input, so it is not part of these input schemas. It is
+ *     required for every policy step, every correction approval and every use of the exception.
+ *     Policy administration needs GLOBAL scope; approvers must be independent of the requester;
+ *     requests expire after ATTRIBUTION_REQUEST_EXPIRY_DAYS and the requester is re-checked at
+ *     approval;
  *   - a rejection needs a reason and never changes the lead's attribution.
  */
 import { z } from 'zod';
@@ -34,6 +42,12 @@ export const ATTRIBUTION_PERMISSIONS = {
   singleManager: 'leads.attribution.single_manager',
   managePolicy: 'settings.manage_attribution_policy',
 } as const;
+
+/** Step-up MFA window: the approving session must have been minted by MFA this recently. */
+export const ATTRIBUTION_STEP_UP_MAX_AGE_SECONDS = 300;
+
+/** A pending correction or policy-change request older than this can never be approved. */
+export const ATTRIBUTION_REQUEST_EXPIRY_DAYS = 7;
 
 /** Minimum length of a rejection reason (the database enforces the same rule). */
 export const ATTRIBUTION_REJECTION_REASON_MIN = 5;

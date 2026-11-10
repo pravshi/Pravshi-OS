@@ -37,7 +37,11 @@ const FUNCTIONS = [
   'public.crm_capture_statement_identity',
   'public.crm_assert_statement_identity',
   'public.crm_record_lead_assignment',
+  'public.crm_lead_reachable',
   'public.crm_lead_in_scope',
+  'public.crm_assert_recent_mfa',
+  'public.crm_requester_still_authorised',
+  'public.crm_independent_scope',
   'public.crm_attribution_policy',
   'public.crm_assert_policy_administrator',
   'public.crm_apply_attribution_policy',
@@ -47,6 +51,7 @@ const FUNCTIONS = [
   'public.crm_decide_lead_attribution_correction',
   'public.apply_lead_attribution_correction',
   'public.reject_lead_attribution_correction',
+  'public.stamp_crm_lead_attribution_request',
 ];
 
 const PERMISSIONS = [

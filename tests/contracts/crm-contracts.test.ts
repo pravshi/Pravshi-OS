@@ -14,6 +14,8 @@ import {
   ATTRIBUTION_STATUSES,
   ATTRIBUTION_POLICIES,
   ATTRIBUTION_PERMISSIONS,
+  ATTRIBUTION_STEP_UP_MAX_AGE_SECONDS,
+  ATTRIBUTION_REQUEST_EXPIRY_DAYS,
   RequestAttributionPolicyChangeInputSchema,
   DecideAttributionPolicyChangeInputSchema,
 } from '@pravshi/contracts';
@@ -344,6 +346,12 @@ describe('PR-P1-01: CRM Shared Contracts Validation Suite', () => {
           rejectionReason: 'Not justified',
         }).success,
       ).toBe(true);
+    });
+
+    it('states the step-up window and the request expiry the database enforces', () => {
+      // 0089: crm_assert_recent_mfa (5 minutes) and the 7-day expiry of pending requests.
+      expect(ATTRIBUTION_STEP_UP_MAX_AGE_SECONDS).toBe(300);
+      expect(ATTRIBUTION_REQUEST_EXPIRY_DAYS).toBe(7);
     });
 
     it('names the dedicated permission keys', () => {

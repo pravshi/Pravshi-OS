@@ -16,7 +16,8 @@
 --   - Privileged attribution mutator procedure (apply_lead_attribution_correction)
 --   - Row audit triggers on every new table
 --   - Attribution permissions, the governed attribution-policy workflow (two administrators, step-up
---     MFA, CRITICAL audit) and a re-issued seed_system_roles() (founder decisions of 2026-11-06)
+--     MFA, CRITICAL audit) and a re-issued seed_system_roles() (founder decisions of 2026-11-06;
+--     F-SEC-12/F-SEC-13 of 2026-11-07; F-SEC-19..F-SEC-23 of 2026-11-08)
 --
 -- Shared CRM only: the Real Estate extension table (re_lead_preferences) is NOT here. It belongs
 -- to the first Real Estate migration, under that stage's ADR (founder decision AD-6, 2026-11-06).
@@ -955,8 +956,12 @@ comment on function public.crm_record_lead_assignment() is
 -- every team. The pond (no owner) DEPARTMENT case therefore spells out what app_user can see of
 -- teams (teams_select_member: a team the caller is an active member of, in the caller's org).
 -- Every input is a stored value the caller already holds or a permission key.
-create or replace function public.crm_lead_in_scope(
-  p_permission text, p_owner_person_id uuid, p_team_id uuid
+--
+-- The scope logic itself is crm_lead_reachable(scope, owner, team), so the one implementation also
+-- answers "would THIS scope reach the lead" for a scope derived another way (the approver's
+-- independent authority, section 9h2) — never a second copy that could drift.
+create or replace function public.crm_lead_reachable(
+  p_scope public.access_scope, p_owner_person_id uuid, p_team_id uuid
 )
 returns boolean
 language sql
@@ -965,7 +970,7 @@ security invoker
 set search_path = ''
 as $$
   select coalesce(
-    case authz.scope_for(p_permission)
+    case p_scope
       when 'GLOBAL' then true
       when 'DEPARTMENT' then
         case
@@ -993,13 +998,199 @@ as $$
     false);
 $$;
 
+revoke all on function public.crm_lead_reachable(public.access_scope, uuid, uuid) from public;
+grant execute on function public.crm_lead_reachable(public.access_scope, uuid, uuid) to app_user;
+
+comment on function public.crm_lead_reachable(public.access_scope, uuid, uuid) is
+  'Would the given scope, held by the caller, reach a lead with this owner/team? The scope logic of crm_lead_in_scope (0089); answers only about the caller''s own departments, teams and reports.';
+
+create or replace function public.crm_lead_in_scope(
+  p_permission text, p_owner_person_id uuid, p_team_id uuid
+)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select public.crm_lead_reachable(authz.scope_for(p_permission), p_owner_person_id, p_team_id);
+$$;
+
 revoke all on function public.crm_lead_in_scope(text, uuid, uuid) from public;
 grant execute on function public.crm_lead_in_scope(text, uuid, uuid) to app_user;
 
 comment on function public.crm_lead_in_scope(text, uuid, uuid) is
   'Is a lead with this owner/team inside the caller''s scope for the permission? For leads.edit it mirrors crm_leads_update USING; identical for app_user and inside definer functions (0089).';
 
--- 9i. Attribution permissions (founder decisions of 2026-11-06, F-SEC-12 and F-SEC-13).
+-- 9h2. Recent step-up MFA, requester revalidation and approver independence (founder decisions
+-- F-SEC-19..F-SEC-23, 2026-11-08). Internal: no EXECUTE grant; only the 0089 definers call them.
+
+-- Recent step-up MFA (F-SEC-19). The evidence is the authentication plane's own session row, never
+-- a client value: Better Auth stamps a session aal2 only when the request that MINTED it was a
+-- second-factor verification (server.ts sessionAssuranceFor; 0014), and never upgrades it after,
+-- so an aal2 session's created_at IS the time that factor was verified. The caller proves which
+-- session is theirs with the SHA-256 of its bearer token (the 0086 platform binding): app_user can
+-- read neither tokens nor auth.auth_sessions, so it cannot name someone else's session. Recent
+-- means created within the last 5 minutes; a session minted by MFA at sign-in hours ago does not
+-- qualify — the user signs in again (password + second factor) to step up, as the platform
+-- console does (platform-session.ts). The session must belong to the transaction's own person and
+-- organization, be live and unrevoked, and the login must still hold a verified factor; the
+-- transaction's aal claim must agree. Returns the session's login (the authenticated principal).
+create or replace function public.crm_assert_recent_mfa(p_session_token_sha256 text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_login uuid;
+begin
+  if p_session_token_sha256 is null or p_session_token_sha256 !~ '^[0-9a-f]{64}$'
+     or authz.aal() is distinct from 'aal2' then
+    raise exception 'This action requires step-up MFA completed within the last 5 minutes'
+      using errcode = '42501';
+  end if;
+  select s.user_id into v_login
+  from public.people p
+  join auth.auth_sessions s on s.user_id = p.auth_user_id
+  join auth.auth_users u on u.id = s.user_id
+  where p.id = authz.person_id()
+    and p.org_id = authz.org_id()
+    and p.deleted_at is null
+    and p.person_status = 'ACTIVE'
+    and encode(sha256(convert_to(s.token, 'UTF8')), 'hex') = p_session_token_sha256
+    and s.aal = 'aal2'
+    and s.expires_at > now()
+    and s.created_at > now() - interval '5 minutes'
+    and (p.sessions_revoked_at is null or s.created_at > p.sessions_revoked_at)
+    and u.two_factor_enabled
+    and exists (select 1 from auth.auth_two_factors f where f.user_id = u.id and f.verified);
+  if v_login is null then
+    raise exception 'This action requires step-up MFA completed within the last 5 minutes'
+      using errcode = '42501';
+  end if;
+  return v_login;
+end;
+$$;
+
+revoke all on function public.crm_assert_recent_mfa(text) from public;
+
+comment on function public.crm_assert_recent_mfa(text) is
+  'Internal (0089): proves the caller''s own live session was minted by a second-factor verification within the last 5 minutes (session token SHA-256, 0086 binding). Returns the login; 42501 otherwise.';
+
+-- Requester revalidation (F-SEC-20): does p_person, NOW, still hold p_permission — at GLOBAL scope
+-- when p_global_only, otherwise with the lead (owner, team) inside its scope — while active in the
+-- caller's organization? The answer comes from the canonical authz helpers, evaluated for p_person
+-- by pointing app.person_id at them for the duration of this read-only check and restoring it
+-- before returning (also on error). Nothing is written meanwhile, so no CRM identity pin observes
+-- the temporary value; the restore is verified.
+create or replace function public.crm_requester_still_authorised(
+  p_person uuid, p_permission text, p_owner_person_id uuid, p_team_id uuid, p_global_only boolean
+) returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_saved text := current_setting('app.person_id', true);
+  v_ok boolean := false;
+begin
+  if p_person is null then
+    return false;
+  end if;
+  perform set_config('app.person_id', p_person::text, true);
+  begin
+    v_ok := authz.person_id() = p_person
+      and authz.is_active()
+      and case when p_global_only
+            then authz.scope_for(p_permission) = 'GLOBAL'
+            else public.crm_lead_in_scope(p_permission, p_owner_person_id, p_team_id)
+          end;
+  exception when others then
+    perform set_config('app.person_id', coalesce(v_saved, ''), true);
+    raise;
+  end;
+  perform set_config('app.person_id', coalesce(v_saved, ''), true);
+  if current_setting('app.person_id', true) is distinct from coalesce(v_saved, '') then
+    raise exception 'Caller identity could not be restored' using errcode = '42501';
+  end if;
+  return coalesce(v_ok, false);
+end;
+$$;
+
+revoke all on function public.crm_requester_still_authorised(uuid, text, uuid, uuid, boolean) from public;
+
+comment on function public.crm_requester_still_authorised(uuid, text, uuid, uuid, boolean) is
+  'Internal (0089): whether a requester still holds the permission (GLOBAL, or for this lead) and is active, evaluated now with the canonical authz helpers.';
+
+-- Approver independence (F-SEC-21). The caller's scope for p_permission counting ONLY the role
+-- paths that
+--   * existed before the request: the assignment (person_roles.granted_at), the role and its
+--     grant of the permission (role_permissions.created_at AND updated_at — a later scope change
+--     counts as a new grant) all predate p_requested_at; and
+--   * were not granted by the requester: the assignment's granted_by is not the requester, and the
+--     append-only audit log holds no entry by the requester creating or changing that assignment
+--     (person_role) or that role's grant of the permission (role_permission).
+-- person_roles is written only by definers that stamp the acting person (set_person_roles,
+-- invitation acceptance, bootstrap: NULL = nobody), and every change by an identified person to
+-- person_roles and role_permissions is in audit_logs with its actor, so this evidence is not
+-- caller-supplied. The current state (expiry, role status, active engagement) applies as in
+-- authz.scope_for. NULL when no independent path exists. LIMITATION: distinct accounts are not
+-- proof of distinct humans, and a grant made by a third person on the requester's behalf is not
+-- detectable here.
+create or replace function public.crm_independent_scope(
+  p_permission text, p_requester uuid, p_requested_at timestamptz
+) returns public.access_scope
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select min(rp.scope)
+  from public.person_roles pr
+  join public.roles r on r.id = pr.role_id and r.org_id = pr.org_id
+  join public.role_permissions rp on rp.role_id = r.id
+  join public.permissions p on p.id = rp.permission_id
+  where pr.person_id = authz.person_id()
+    and pr.org_id = authz.org_id()
+    and (pr.expires_at is null or pr.expires_at > now())
+    and r.deleted_at is null
+    and r.status = 'ACTIVE'
+    and p.key = p_permission
+    and authz.is_active()
+    and p_requested_at is not null
+    and pr.granted_at < p_requested_at
+    and r.created_at < p_requested_at
+    and rp.created_at < p_requested_at
+    and rp.updated_at < p_requested_at
+    and pr.granted_by is distinct from p_requester
+    and not exists (
+      select 1 from public.audit_logs a
+      where a.org_id = pr.org_id
+        and a.entity_type = 'person_role'
+        and a.entity_id = pr.person_id
+        and a.actor_person_id = p_requester
+        and a.after ->> 'role_id' = r.id::text
+    )
+    and not exists (
+      select 1 from public.audit_logs a
+      where a.org_id = pr.org_id
+        and a.entity_type = 'role_permission'
+        and a.entity_id = r.id
+        and a.actor_person_id = p_requester
+        and a.after ->> 'permission_id' = p.id::text
+    )
+$$;
+
+revoke all on function public.crm_independent_scope(text, uuid, timestamptz) from public;
+
+comment on function public.crm_independent_scope(text, uuid, timestamptz) is
+  'Internal (0089): the caller''s scope for a permission from role paths held before p_requested_at and not granted by p_requester (person_roles.granted_by, audit_logs). NULL when none.';
+
+-- 9i. Attribution permissions (founder decisions of 2026-11-06; F-SEC-12 and F-SEC-13 of
+-- 2026-11-07).
 --
 --   leads.attribution.request           ask for a correction of a lead's source/campaign
 --   leads.attribution.approve           decide (approve or reject) a correction request
@@ -1095,7 +1286,7 @@ begin
   where r.org_id = p_org_id
     and r.key = 'SUPER_ADMIN'
     -- 0089: the SINGLE_MANAGER exception is never part of the automatic grant (founder decision
-    -- F-SEC-12, 2026-11-06): an organization grants it to a role deliberately.
+    -- F-SEC-12, 2026-11-07): an organization grants it to a role deliberately.
     and p.key not in ('users.impersonate', 'leads.attribution.single_manager')
   on conflict do nothing;
 
@@ -1408,11 +1599,15 @@ $$;
 -- settings.attribution.policy is TWO_PERSON (the default, also when absent) or SINGLE_MANAGER
 -- (an explicit organization-level exception). There is no OFF value: any other stored value is
 -- read as TWO_PERSON. app_user has no UPDATE on organizations; the three functions below are the
--- only tenant path that changes the policy (founder decision F-SEC-13, 2026-11-06):
---   * every step needs settings.manage_attribution_policy (SUPER_ADMIN; not ADMIN) and step-up MFA
---     (authz.aal() = 'aal2': the session's MFA claim AND a verified second factor on the login);
---   * enabling SINGLE_MANAGER is a request that a SECOND, different authorised administrator must
---     approve (founder decision F-SEC-12) — the requester can never approve their own change;
+-- only tenant path that changes the policy (founder decision F-SEC-13, 2026-11-07; hardened by
+-- F-SEC-19..F-SEC-23, 2026-11-08):
+--   * every step needs settings.manage_attribution_policy at GLOBAL scope (SUPER_ADMIN; not ADMIN)
+--     and step-up MFA completed within the last 5 minutes on the caller's own session
+--     (crm_assert_recent_mfa, section 9h2), and locks the organization row;
+--   * enabling SINGLE_MANAGER is a request that a SECOND, independent authorised administrator must
+--     approve (founder decision F-SEC-12) — the requester can never approve their own change, nor
+--     through another login of theirs, nor through authority they granted (crm_independent_scope);
+--     a request expires after 7 days, and the requester must still be a policy administrator;
 --   * returning to TWO_PERSON (the stricter state) applies at once, by one authorised
 --     administrator, so the exception can always be switched off quickly;
 --   * activation and deactivation each write a CRITICAL audit entry (actor, organization, previous
@@ -1521,12 +1716,16 @@ create trigger crm_attribution_policy_changes_audit
   after insert or update or delete on public.crm_attribution_policy_changes
   for each row execute function public.audit_row_change('crm_attribution_policy_change', 'HIGH', 'id');
 
--- The common preconditions of every policy step: an authenticated, active caller holding
--- settings.manage_attribution_policy with step-up MFA. Returns the caller's organization.
-create or replace function public.crm_assert_policy_administrator()
+-- The common preconditions of every policy step (F-SEC-13, F-SEC-19, F-SEC-22): an authenticated,
+-- active caller holding settings.manage_attribution_policy at GLOBAL scope — a department- or
+-- self-scoped grant never administers organization-wide governance — with step-up MFA completed
+-- within the last 5 minutes on the caller's own session. Locks the organization row (F-SEC-23), so
+-- every policy step, and every correction decision (which share-locks the same row before it reads
+-- the policy), is serialised against the others. Returns the caller's organization.
+create or replace function public.crm_assert_policy_administrator(p_session_token_sha256 text)
 returns uuid
 language plpgsql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -1537,21 +1736,21 @@ begin
   if v_person is null or v_org is null or not authz.is_active() then
     raise exception 'Unauthenticated caller' using errcode = '42501';
   end if;
-  if not authz.has('settings.manage_attribution_policy') then
-    raise exception 'Changing the attribution policy requires settings.manage_attribution_policy'
+  if authz.scope_for('settings.manage_attribution_policy') is distinct from 'GLOBAL' then
+    raise exception 'Changing the attribution policy requires settings.manage_attribution_policy at GLOBAL scope'
       using errcode = '42501';
   end if;
-  if authz.aal() is distinct from 'aal2' then
-    raise exception 'Changing the attribution policy requires step-up MFA (aal2)'
-      using errcode = '42501';
-  end if;
+  perform public.crm_assert_recent_mfa(p_session_token_sha256);
+  perform 1 from public.organizations where id = v_org for update;
   return v_org;
 end;
 $$;
 
-revoke all on function public.crm_assert_policy_administrator() from public;
+revoke all on function public.crm_assert_policy_administrator(text) from public;
 
--- Applies a policy value to the caller's organization and writes the CRITICAL audit entry.
+-- Applies a policy value to the caller's organization and writes the CRITICAL audit entry. It
+-- re-reads the ledger row it is given by id, in the caller's organization and APPLIED, so the row
+-- argument can never name another organization or an undecided change.
 create or replace function public.crm_apply_attribution_policy(
   p_change public.crm_attribution_policy_changes
 ) returns void
@@ -1559,30 +1758,40 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_change public.crm_attribution_policy_changes;
 begin
+  select * into v_change from public.crm_attribution_policy_changes
+  where id = p_change.id and org_id = authz.org_id() and status = 'APPLIED';
+  if not found then
+    raise exception 'Attribution policy change not found' using errcode = 'P0002';
+  end if;
+
   update public.organizations
   set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{attribution}',
                            coalesce(settings->'attribution', '{}'::jsonb)
-                             || jsonb_build_object('policy', p_change.requested_policy), true),
+                             || jsonb_build_object('policy', v_change.requested_policy), true),
       updated_at = clock_timestamp()
-  where id = p_change.org_id;
+  where id = v_change.org_id;
 
   perform public.write_audit_log(
-    p_action := case p_change.requested_policy
+    p_action := case v_change.requested_policy
                   when 'SINGLE_MANAGER' then 'organization.attribution_policy_activated'
                   else 'organization.attribution_policy_deactivated'
                 end,
     p_entity_type := 'organization',
-    p_entity_id := p_change.org_id,
+    p_entity_id := v_change.org_id,
     p_severity := 'CRITICAL',
-    p_before := jsonb_build_object('policy', p_change.previous_policy),
-    p_after := jsonb_build_object('policy', p_change.requested_policy),
+    p_before := jsonb_build_object('policy', v_change.previous_policy),
+    p_after := jsonb_build_object('policy', v_change.requested_policy),
     p_metadata := jsonb_build_object(
-      'change_id', p_change.id,
-      'reason', p_change.reason,
-      'requested_by_person_id', p_change.requested_by_person_id,
+      'change_id', v_change.id,
+      'reason', v_change.reason,
+      'requested_by_person_id', v_change.requested_by_person_id,
+      'requested_at', v_change.requested_at,
       'approved_by_person_id', authz.person_id(),
-      'aal', authz.aal()
+      'aal', authz.aal(),
+      'step_up_mfa', true
     )
   );
 end;
@@ -1591,18 +1800,19 @@ $$;
 revoke all on function public.crm_apply_attribution_policy(public.crm_attribution_policy_changes) from public;
 
 create or replace function public.request_attribution_policy_change(
-  p_policy text, p_reason text
+  p_policy text, p_reason text, p_session_token_sha256 text
 ) returns uuid
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  v_org uuid := public.crm_assert_policy_administrator();
+  v_org uuid := public.crm_assert_policy_administrator(p_session_token_sha256);
   v_person uuid := authz.person_id();
   v_current text := coalesce(public.crm_attribution_policy(), 'TWO_PERSON');
   v_reason text := nullif(btrim(p_reason), '');
   v_change public.crm_attribution_policy_changes;
+  v_expired public.crm_attribution_policy_changes;
 begin
   if p_policy is null or p_policy not in ('TWO_PERSON', 'SINGLE_MANAGER') then
     raise exception 'Attribution policy must be TWO_PERSON or SINGLE_MANAGER' using errcode = '22023';
@@ -1614,6 +1824,31 @@ begin
     raise exception 'A policy change needs a reason (at least 10 characters)' using errcode = '22023';
   end if;
 
+  -- A pending change older than 7 days has expired (F-SEC-20): it is closed as REJECTED, audited,
+  -- so it can never be approved and no longer holds the organization's single pending slot.
+  for v_expired in
+    select * from public.crm_attribution_policy_changes
+    where org_id = v_org and status = 'PENDING' and requested_at <= now() - interval '7 days'
+    for update
+  loop
+    update public.crm_attribution_policy_changes
+    set status = 'REJECTED', decided_by_person_id = v_person, decided_at = clock_timestamp(),
+        decision_reason = 'Expired: not approved within 7 days'
+    where id = v_expired.id and org_id = v_org;
+    perform public.write_audit_log(
+      p_action := 'organization.attribution_policy_change_expired',
+      p_entity_type := 'organization',
+      p_entity_id := v_org,
+      p_severity := 'HIGH',
+      p_metadata := jsonb_build_object(
+        'change_id', v_expired.id,
+        'requested_policy', v_expired.requested_policy,
+        'requested_by_person_id', v_expired.requested_by_person_id,
+        'requested_at', v_expired.requested_at
+      )
+    );
+  end loop;
+
   if p_policy = 'TWO_PERSON' then
     -- Returning to the stricter rule: applied at once, recorded as decided by the requester.
     insert into public.crm_attribution_policy_changes
@@ -1623,7 +1858,7 @@ begin
     returning * into v_change;
     perform public.crm_apply_attribution_policy(v_change);
   else
-    -- Enabling the exception: pending until a second administrator approves.
+    -- Enabling the exception: pending until a second, independent administrator approves.
     insert into public.crm_attribution_policy_changes
       (org_id, previous_policy, requested_policy, reason, requested_by_person_id)
     values (v_org, v_current, p_policy, v_reason, v_person)
@@ -1635,22 +1870,30 @@ begin
       p_severity := 'HIGH',
       p_before := jsonb_build_object('policy', v_current),
       p_after := jsonb_build_object('policy', p_policy),
-      p_metadata := jsonb_build_object('change_id', v_change.id, 'reason', v_reason, 'aal', authz.aal())
+      p_metadata := jsonb_build_object('change_id', v_change.id, 'reason', v_reason,
+                                       'aal', authz.aal(), 'step_up_mfa', true)
     );
   end if;
   return v_change.id;
 end;
 $$;
 
-create or replace function public.approve_attribution_policy_change(p_change_id uuid)
-returns void
+-- Approval (F-SEC-12, F-SEC-20, F-SEC-21). The approver is a different person AND a different
+-- login from the requester, held this authority independently of the requester since before the
+-- request (crm_independent_scope at GLOBAL), and was a member of the organization before it. The
+-- request is still PENDING, not expired (7 days), the requester is still an active policy
+-- administrator, and the policy is still the one the request was made against.
+create or replace function public.approve_attribution_policy_change(
+  p_change_id uuid, p_session_token_sha256 text
+) returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  v_org uuid := public.crm_assert_policy_administrator();
+  v_org uuid := public.crm_assert_policy_administrator(p_session_token_sha256);
   v_person uuid := authz.person_id();
+  v_login uuid := public.crm_assert_recent_mfa(p_session_token_sha256);
   v_change public.crm_attribution_policy_changes;
 begin
   select * into v_change from public.crm_attribution_policy_changes
@@ -1662,9 +1905,26 @@ begin
   if v_change.status <> 'PENDING' then
     raise exception 'The policy change is already decided' using errcode = '23514';
   end if;
-  if v_change.requested_by_person_id = v_person then
+  if v_change.requested_at <= now() - interval '7 days' then
+    raise exception 'The policy change request has expired (7 days)' using errcode = '23514';
+  end if;
+  if v_change.requested_by_person_id = v_person
+     or exists (select 1 from public.people rq
+                where rq.id = v_change.requested_by_person_id and rq.auth_user_id = v_login) then
     raise exception 'A policy change must be approved by a different administrator'
       using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.people ap
+                 where ap.id = v_person and ap.created_at < v_change.requested_at)
+     or public.crm_independent_scope('settings.manage_attribution_policy',
+                                     v_change.requested_by_person_id, v_change.requested_at)
+        is distinct from 'GLOBAL' then
+    raise exception 'The approver must have held policy authority, independently of the requester, before the request'
+      using errcode = '42501';
+  end if;
+  if not public.crm_requester_still_authorised(v_change.requested_by_person_id,
+                                               'settings.manage_attribution_policy', null, null, true) then
+    raise exception 'The requester is no longer an active policy administrator' using errcode = '23514';
   end if;
   if coalesce(public.crm_attribution_policy(), 'TWO_PERSON') is distinct from v_change.previous_policy then
     raise exception 'The policy changed after this request was made' using errcode = '23514';
@@ -1679,14 +1939,14 @@ end;
 $$;
 
 create or replace function public.reject_attribution_policy_change(
-  p_change_id uuid, p_reason text
+  p_change_id uuid, p_reason text, p_session_token_sha256 text
 ) returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  v_org uuid := public.crm_assert_policy_administrator();
+  v_org uuid := public.crm_assert_policy_administrator(p_session_token_sha256);
   v_person uuid := authz.person_id();
   v_reason text := nullif(btrim(p_reason), '');
   v_change public.crm_attribution_policy_changes;
@@ -1720,25 +1980,26 @@ begin
       'requested_policy', v_change.requested_policy,
       'requested_by_person_id', v_change.requested_by_person_id,
       'rejection_reason', v_reason,
-      'aal', authz.aal()
+      'aal', authz.aal(),
+      'step_up_mfa', true
     )
   );
 end;
 $$;
 
-revoke all on function public.request_attribution_policy_change(text, text) from public;
-revoke all on function public.approve_attribution_policy_change(uuid) from public;
-revoke all on function public.reject_attribution_policy_change(uuid, text) from public;
-grant execute on function public.request_attribution_policy_change(text, text) to app_user;
-grant execute on function public.approve_attribution_policy_change(uuid) to app_user;
-grant execute on function public.reject_attribution_policy_change(uuid, text) to app_user;
+revoke all on function public.request_attribution_policy_change(text, text, text) from public;
+revoke all on function public.approve_attribution_policy_change(uuid, text) from public;
+revoke all on function public.reject_attribution_policy_change(uuid, text, text) from public;
+grant execute on function public.request_attribution_policy_change(text, text, text) to app_user;
+grant execute on function public.approve_attribution_policy_change(uuid, text) to app_user;
+grant execute on function public.reject_attribution_policy_change(uuid, text, text) to app_user;
 
-comment on function public.request_attribution_policy_change(text, text) is
-  'Requests a change of the caller organization''s attribution policy (0089). Needs settings.manage_attribution_policy and aal2. SINGLE_MANAGER waits for a second administrator; TWO_PERSON applies at once. Audited.';
-comment on function public.approve_attribution_policy_change(uuid) is
-  'Approves and applies a pending attribution-policy change (0089). Needs settings.manage_attribution_policy, aal2 and a different administrator from the requester. CRITICAL audit.';
-comment on function public.reject_attribution_policy_change(uuid, text) is
-  'Rejects a pending attribution-policy change with a reason (0089). Needs settings.manage_attribution_policy and aal2. Audited.';
+comment on function public.request_attribution_policy_change(text, text, text) is
+  'Requests a change of the caller organization''s attribution policy (0089). Needs settings.manage_attribution_policy at GLOBAL and step-up MFA within 5 minutes (session token SHA-256). SINGLE_MANAGER waits for an independent second administrator; TWO_PERSON applies at once. Closes expired (7-day) pending requests. Audited.';
+comment on function public.approve_attribution_policy_change(uuid, text) is
+  'Approves and applies a pending attribution-policy change (0089). Needs settings.manage_attribution_policy at GLOBAL, step-up MFA within 5 minutes, a different person and login from the requester holding that authority independently since before the request; the request unexpired and its requester still authorised. CRITICAL audit.';
+comment on function public.reject_attribution_policy_change(uuid, text, text) is
+  'Rejects a pending attribution-policy change with a reason (0089). Needs settings.manage_attribution_policy at GLOBAL and step-up MFA within 5 minutes. Audited.';
 
 -- 9k. Governed attribution correction: approve or reject.
 --
@@ -1749,8 +2010,24 @@ comment on function public.reject_attribution_policy_change(uuid, text) is
 -- inside its scope); every such use writes its own CRITICAL audit entry. Approval re-checks the
 -- current value (a stale request would record a falsehood) and changes the lead; rejection needs a
 -- reason and never touches the lead.
+--
+-- Founder decisions F-SEC-19..F-SEC-23 (2026-11-08):
+--   * every APPROVAL changes attribution under a sensitive permission (leads.attribution.approve
+--     is_sensitive) and is treated as high-risk: step-up MFA within the last 5 minutes on the
+--     approver's own session (crm_assert_recent_mfa). Using the SINGLE_MANAGER exception needs it
+--     too, for an approval or a rejection. A plain two-person rejection changes nothing and does not;
+--   * a two-person approval needs an independent approver: a different person and login from the
+--     requester, a member of the organization before the request, whose approval authority — at a
+--     scope that reaches this lead — was held before the request and not granted by the requester
+--     (crm_independent_scope + crm_lead_reachable);
+--   * the requester must still be active and still hold leads.attribution.request for this lead
+--     (crm_requester_still_authorised); a request older than 7 days has expired and can never
+--     change attribution (it can still be rejected);
+--   * the organization row is share-locked BEFORE the policy is read, so a policy change (which
+--     locks the row for update) and a decision are serialised: a decision never acts on a policy
+--     that a concurrent, committed switch has already replaced.
 create or replace function public.crm_decide_lead_attribution_correction(
-  p_correction_id uuid, p_approve boolean, p_rejection_reason text
+  p_correction_id uuid, p_approve boolean, p_rejection_reason text, p_session_token_sha256 text
 ) returns void
 language plpgsql
 security definer
@@ -1768,6 +2045,7 @@ declare
   v_current text;
   v_policy text;
   v_exception boolean := false;
+  v_login uuid;
   v_reason text := nullif(btrim(p_rejection_reason), '');
 begin
   if v_person is null or v_org is null then
@@ -1780,6 +2058,13 @@ begin
     raise exception 'Deciding an attribution correction requires leads.attribution.approve'
       using errcode = '42501';
   end if;
+  if p_approve then
+    v_login := public.crm_assert_recent_mfa(p_session_token_sha256);
+  end if;
+
+  -- Serialise with policy changes before anything is read (lock order: organization, correction,
+  -- lead — the policy functions take the organization first too).
+  perform 1 from public.organizations where id = v_org for share;
 
   select * into v_corr
   from public.crm_lead_attribution_corrections
@@ -1802,6 +2087,10 @@ begin
   if v_corr.status <> 'PENDING' then
     raise exception 'Correction request is already decided' using errcode = '23514';
   end if;
+  if p_approve and v_corr.requested_at <= now() - interval '7 days' then
+    raise exception 'Attribution correction request has expired (7 days) and cannot be approved'
+      using errcode = '23514';
+  end if;
 
   v_policy := coalesce(public.crm_attribution_policy(), 'TWO_PERSON');
   if v_corr.requested_by_person_id = v_person then
@@ -1811,15 +2100,33 @@ begin
       raise exception 'Two-person policy violation: the requester cannot decide their own correction'
         using errcode = '42501';
     end if;
-    -- Using the exception is high-risk: step-up MFA (founder decision, 2026-11-06).
-    if authz.aal() is distinct from 'aal2' then
-      raise exception 'Using the SINGLE_MANAGER exception requires step-up MFA (aal2)'
+    -- Using the exception is high-risk: step-up MFA within 5 minutes, for either decision.
+    perform public.crm_assert_recent_mfa(p_session_token_sha256);
+    v_exception := true;
+  elsif p_approve then
+    if exists (select 1 from public.people rq
+               where rq.id = v_corr.requested_by_person_id and rq.auth_user_id = v_login) then
+      raise exception 'Two-person policy violation: the approver signed in as the requester'
         using errcode = '42501';
     end if;
-    v_exception := true;
+    if not exists (select 1 from public.people ap
+                   where ap.id = v_person and ap.created_at < v_corr.requested_at)
+       or not public.crm_lead_reachable(
+             public.crm_independent_scope('leads.attribution.approve',
+                                          v_corr.requested_by_person_id, v_corr.requested_at),
+             v_owner, v_team) then
+      raise exception 'The approver must have held approval authority for this lead, independently of the requester, before the request'
+        using errcode = '42501';
+    end if;
   end if;
 
   if p_approve then
+    if not public.crm_requester_still_authorised(v_corr.requested_by_person_id,
+                                                 'leads.attribution.request', v_owner, v_team, false) then
+      raise exception 'The requester is no longer active or no longer authorised to request this correction'
+        using errcode = '23514';
+    end if;
+
     v_current := case v_corr.field_name
       when 'source' then v_source
       when 'source_subcategory' then v_source_subcategory
@@ -1860,9 +2167,11 @@ begin
       p_metadata := jsonb_build_object(
         'correction_id', v_corr.id,
         'requested_by_person_id', v_corr.requested_by_person_id,
+        'requested_at', v_corr.requested_at,
         'reason', v_corr.reason,
         'policy', v_policy,
-        'single_manager_exception', v_exception
+        'single_manager_exception', v_exception,
+        'step_up_mfa', true
       )
     );
   else
@@ -1904,46 +2213,71 @@ begin
         'correction_id', v_corr.id,
         'decision', case when p_approve then 'APPROVED' else 'REJECTED' end,
         'policy', v_policy,
-        'aal', authz.aal()
+        'aal', authz.aal(),
+        'step_up_mfa', true
       )
     );
   end if;
 end;
 $$;
 
-revoke all on function public.crm_decide_lead_attribution_correction(uuid, boolean, text) from public;
+revoke all on function public.crm_decide_lead_attribution_correction(uuid, boolean, text, text) from public;
 
-comment on function public.crm_decide_lead_attribution_correction(uuid, boolean, text) is
+comment on function public.crm_decide_lead_attribution_correction(uuid, boolean, text, text) is
   'Internal (0089): decides an attribution correction. Not executable by app_user; called by apply_lead_attribution_correction / reject_lead_attribution_correction.';
 
-create or replace function public.apply_lead_attribution_correction(p_correction_id uuid)
-returns void
-language sql
-security definer
-set search_path = ''
-as $$
-  select public.crm_decide_lead_attribution_correction(p_correction_id, true, null);
-$$;
-
-create or replace function public.reject_lead_attribution_correction(
-  p_correction_id uuid, p_reason text
+create or replace function public.apply_lead_attribution_correction(
+  p_correction_id uuid, p_session_token_sha256 text
 ) returns void
 language sql
 security definer
 set search_path = ''
 as $$
-  select public.crm_decide_lead_attribution_correction(p_correction_id, false, p_reason);
+  select public.crm_decide_lead_attribution_correction(p_correction_id, true, null, p_session_token_sha256);
 $$;
 
-revoke all on function public.apply_lead_attribution_correction(uuid) from public;
-grant execute on function public.apply_lead_attribution_correction(uuid) to app_user;
-revoke all on function public.reject_lead_attribution_correction(uuid, text) from public;
-grant execute on function public.reject_lead_attribution_correction(uuid, text) to app_user;
+create or replace function public.reject_lead_attribution_correction(
+  p_correction_id uuid, p_reason text, p_session_token_sha256 text default null
+) returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  select public.crm_decide_lead_attribution_correction(p_correction_id, false, p_reason, p_session_token_sha256);
+$$;
 
-comment on function public.apply_lead_attribution_correction(uuid) is
-  'Approves an attribution correction and applies it to the lead (0089). Needs leads.attribution.approve and the lead in scope; two-person rule or the audited SINGLE_MANAGER exception; refuses stale requests; audited in the same transaction.';
-comment on function public.reject_lead_attribution_correction(uuid, text) is
-  'Rejects an attribution correction with a reason, leaving the lead unchanged (0089). Same authority rules as approval; audited in the same transaction.';
+revoke all on function public.apply_lead_attribution_correction(uuid, text) from public;
+grant execute on function public.apply_lead_attribution_correction(uuid, text) to app_user;
+revoke all on function public.reject_lead_attribution_correction(uuid, text, text) from public;
+grant execute on function public.reject_lead_attribution_correction(uuid, text, text) to app_user;
+
+comment on function public.apply_lead_attribution_correction(uuid, text) is
+  'Approves an attribution correction and applies it to the lead (0089). Needs leads.attribution.approve with the lead in scope and step-up MFA within 5 minutes (session token SHA-256); an independent approver under the two-person rule, or the audited SINGLE_MANAGER exception; the requester still authorised; refuses stale and expired (7-day) requests; audited in the same transaction.';
+comment on function public.reject_lead_attribution_correction(uuid, text, text) is
+  'Rejects an attribution correction with a reason, leaving the lead unchanged (0089). Needs leads.attribution.approve with the lead in scope; using the SINGLE_MANAGER exception also needs step-up MFA within 5 minutes (session token SHA-256); audited in the same transaction.';
+
+-- 9l. The time of a correction request is the database's (F-SEC-20/21): expiry and the approver's
+-- "held before the request" both read requested_at, so no caller may supply it.
+create or replace function public.stamp_crm_lead_attribution_request()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.requested_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function public.stamp_crm_lead_attribution_request() from public;
+
+create trigger crm_lead_attribution_corrections_request_time
+  before insert on public.crm_lead_attribution_corrections
+  for each row execute function public.stamp_crm_lead_attribution_request();
+
+comment on function public.stamp_crm_lead_attribution_request() is
+  'BEFORE INSERT on crm_lead_attribution_corrections (0089): requested_at is always the inserting transaction''s time.';
 
 
 -- 10. Row-Level Security Configuration
