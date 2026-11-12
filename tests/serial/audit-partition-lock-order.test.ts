@@ -113,13 +113,21 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
    * ["organizations:ShareRowExclusiveLock"]).
    *
    * So one call, on one dedicated session, reads the wait state, then the locks, then the wait state
-   * again, refreshing the statistics snapshot before each wait-state read (pg_stat_activity is
-   * otherwise frozen for the transaction). A lock list counts as "held during back-off" only when
-   * the backend was sleeping on BOTH sides of the lock read, and as "held while waiting" only when
-   * it was waiting on a lock on both sides; an observation whose wait state changed during the call
-   * is a transition and proves nothing either way. A backend that really holds a lock while it
-   * sleeps (≥ 50 ms per back-off) or waits is still seen on both sides: nothing is weakened. The
-   * function lives in pg_temp — private to the observer session, invisible to every guard.
+   * again (each a separate statement, in order; the wait event is read live from the backend, and
+   * the statistics snapshot is cleared before each read so the backend list is current too). A lock
+   * list counts as "held during back-off" only when the backend was sleeping on BOTH sides of the
+   * lock read, and as "held while waiting" only when it was in a lock wait on both sides; an
+   * observation whose wait state changed during the call is a transition and proves nothing.
+   *
+   * That narrows the race; it does not close it: a backend can wake from one back-off, be caught by
+   * the lock read mid-attempt, and be asleep in the NEXT back-off by the second read. So a lock seen
+   * in a back-off (or wait) is recorded only when a second observation, taken at once, sees the same
+   * verdict and the same lock (observeConfirmed). The straddle is not expected to repeat: the second call lands
+   * inside the new back-off (≥ 50 ms in 0075), where nothing is held. A lock really held across a
+   * back-off or a lock wait is seen by both calls: nothing is weakened. The residual — the observer
+   * descheduled for longer than a whole back-off AND caught mid-attempt twice in a row — is not
+   * zero, only far smaller. The function lives in pg_temp — private to the observer session,
+   * invisible to every guard.
    */
   type WaitState = { type: string | null; event: string | null };
   type Observation = { before: WaitState; held: string[]; after: WaitState };
@@ -132,6 +140,10 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
     if (o.before.type !== o.after.type || o.before.event !== o.after.event) return 'transition';
     return 'other';
   };
+
+  /** Locks seen in two consecutive observations with the same verdict; nothing otherwise. */
+  const confirmedHeld = (first: Observation, second: Observation): string[] =>
+    classify(first) === classify(second) ? first.held.filter((l) => second.held.includes(l)) : [];
 
   let observer: PoolClient | undefined;
   /** One consistent observation of backend `pid` (see above). */
@@ -150,6 +162,18 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       held: r.held,
       after: { type: r.after_type, event: r.after_event },
     };
+  };
+
+  /**
+   * An observation whose held locks, in a back-off or a lock wait, are confirmed by a second
+   * observation taken at once (see above). Any other observation is returned as it is.
+   */
+  const observeConfirmed = async (pid: number): Promise<Observation> => {
+    const o = await observe(pid);
+    const verdict = classify(o);
+    if (o.held.length === 0 || (verdict !== 'backing-off' && verdict !== 'waiting-on-lock'))
+      return o;
+    return { ...o, held: confirmedHeld(o, await observe(pid)) };
   };
 
   /** The previous observer, kept only to reproduce its false positive in the regression test. */
@@ -172,7 +196,7 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
   async function untilBackingOff(pid: number) {
     const deadline = Date.now() + 10_000;
     for (;;) {
-      const o = await observe(pid);
+      const o = await observeConfirmed(pid);
       const verdict = classify(o);
       if (verdict === 'backing-off') {
         expect(o.held, 'maintenance holds no lock while backing off').toEqual([]);
@@ -204,7 +228,7 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       waitsWhileHolding: [] as string[],
     };
     while (!settled) {
-      const o = await observe(pid);
+      const o = await observeConfirmed(pid);
       const verdict = classify(o);
       if (verdict === 'backing-off') {
         out.backoffs += 1;
@@ -570,11 +594,29 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       expect(classify({ before: idle, held: [], after: idle })).toBe('other');
     });
 
-    it('reproduces the false positive with two queries; one call never pairs that lock with a back-off', async () => {
+    it('records a lock only when a second observation confirms it (the residual straddle)', () => {
+      const sleeping = { type: 'Timeout', event: 'PgSleep' };
+      const waiting = { type: 'Lock', event: 'relation' };
+      const running = { type: null, event: null };
+      const asleep = (held: string[]) => ({ before: sleeping, held, after: sleeping });
+      // Woke, caught mid-attempt, asleep again by the second read; the next call sees nothing held.
+      expect(confirmedHeld(asleep([SRE]), asleep([]))).toEqual([]);
+      // The second call caught a different moment altogether.
+      expect(
+        confirmedHeld(asleep([SRE]), { before: sleeping, held: [SRE], after: running }),
+      ).toEqual([]);
+      // Really held across the back-off, or across a lock wait: confirmed.
+      expect(confirmedHeld(asleep([SRE]), asleep([SRE]))).toEqual([SRE]);
+      const blocked = { before: waiting, held: [SRE], after: waiting };
+      expect(confirmedHeld(blocked, blocked)).toEqual([SRE]);
+    });
+
+    it('reproduces the two-query false positive; the lock-holding state after it is not a back-off', async () => {
       const x = await session(); // a scripted stand-in for one maintenance back-off and next attempt
       try {
         await x.c.query('begin');
-        const napping = x.c.query('select pg_sleep(1)');
+        const napping = x.c.query('select pg_sleep(2)');
+        napping.catch(() => undefined); // awaited below; only silences a failing run's noise
         const during = await until(() => observe(x.pid), 'backing-off', 'the scripted back-off');
         expect(during.held, 'nothing is held during the scripted back-off').toEqual([]);
         // The previous observer, with the backend's next step landing between its two queries —
@@ -603,14 +645,24 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       try {
         await x.c.query('begin');
         await x.c.query('lock table public.organizations in share row exclusive mode');
-        const napping = x.c.query('select pg_sleep(1)');
-        const asleep = await until(() => observe(x.pid), 'backing-off', 'sleeping while holding');
+        const napping = x.c.query('select pg_sleep(2)');
+        napping.catch(() => undefined); // awaited below; only silences a failing run's noise
+        const asleep = await until(
+          () => observeConfirmed(x.pid),
+          'backing-off',
+          'sleeping while holding',
+        );
         expect(asleep.held, 'held during back-off is still seen').toEqual([SRE]);
         await napping;
         await y.c.query('begin');
         await y.c.query('select pg_advisory_xact_lock(750089)');
         const blocked = x.c.query('select pg_advisory_xact_lock(750089)');
-        const stuck = await until(() => observe(x.pid), 'waiting-on-lock', 'waiting while holding');
+        blocked.catch(() => undefined); // awaited below; only silences a failing run's noise
+        const stuck = await until(
+          () => observeConfirmed(x.pid),
+          'waiting-on-lock',
+          'waiting while holding',
+        );
         expect(stuck.held, 'held while waiting is still seen').toEqual([SRE]);
         await y.c.query('rollback');
         await blocked;
