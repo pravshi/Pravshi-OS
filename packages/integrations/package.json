@@ -16,7 +16,7 @@
     "@pravshi/security": "workspace:*",
     "@pravshi/shared-services": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "resend": "^6.30.0",
+    "resend": "^6.35.0",
     "zod": "^4.6.6"
   }
 }
