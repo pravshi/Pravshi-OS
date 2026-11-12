@@ -122,9 +122,13 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
    * That narrows the race; it does not close it: a backend can wake from one back-off, be caught by
    * the lock read mid-attempt, and be asleep in the NEXT back-off by the second read. So a lock seen
    * in a back-off (or wait) is recorded only when a second observation, taken at once, sees the same
-   * verdict and the same lock (observeConfirmed). The straddle is not expected to repeat: the second call lands
-   * inside the new back-off (≥ 50 ms in 0075), where nothing is held. A lock really held across a
-   * back-off or a lock wait is seen by both calls: nothing is weakened. The residual — the observer
+   * verdict and the same lock (observeConfirmed). The straddle is not expected to repeat: the second
+   * call lands inside the new back-off (≥ 50 ms in 0075), where nothing is held. If the second call
+   * sees a different verdict (the sleep or wait ended in between), the pair proves nothing and the
+   * second observation is returned, so callers sample again rather than accept an unconfirmed
+   * "clean" back-off. A lock really held across a back-off or a lock wait is seen by both calls
+   * whenever both land inside it, and is seen on a later sample otherwise: nothing is weakened.
+   * The residual — the observer
    * descheduled for longer than a whole back-off AND caught mid-attempt twice in a row — is not
    * zero, only far smaller. The function lives in pg_temp — private to the observer session,
    * invisible to every guard.
@@ -141,9 +145,14 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
     return 'other';
   };
 
-  /** Locks seen in two consecutive observations with the same verdict; nothing otherwise. */
-  const confirmedHeld = (first: Observation, second: Observation): string[] =>
-    classify(first) === classify(second) ? first.held.filter((l) => second.held.includes(l)) : [];
+  /**
+   * Two consecutive observations combined: with the same verdict, the first with only the locks
+   * both saw; with different verdicts, nothing is proven and the newer observation stands.
+   */
+  const confirm = (first: Observation, second: Observation): Observation =>
+    classify(first) === classify(second)
+      ? { ...first, held: first.held.filter((l) => second.held.includes(l)) }
+      : second;
 
   let observer: PoolClient | undefined;
   /** One consistent observation of backend `pid` (see above). */
@@ -173,7 +182,7 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
     const verdict = classify(o);
     if (o.held.length === 0 || (verdict !== 'backing-off' && verdict !== 'waiting-on-lock'))
       return o;
-    return { ...o, held: confirmedHeld(o, await observe(pid)) };
+    return confirm(o, await observe(pid));
   };
 
   /** The previous observer, kept only to reproduce its false positive in the regression test. */
@@ -600,15 +609,16 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       const running = { type: null, event: null };
       const asleep = (held: string[]) => ({ before: sleeping, held, after: sleeping });
       // Woke, caught mid-attempt, asleep again by the second read; the next call sees nothing held.
-      expect(confirmedHeld(asleep([SRE]), asleep([]))).toEqual([]);
-      // The second call caught a different moment altogether.
-      expect(
-        confirmedHeld(asleep([SRE]), { before: sleeping, held: [SRE], after: running }),
-      ).toEqual([]);
+      expect(confirm(asleep([SRE]), asleep([])).held).toEqual([]);
+      // The second call caught a different moment (the sleep ended): nothing is proven — the newer
+      // observation stands, so the caller samples again instead of accepting a "clean" back-off.
+      const woke = { before: sleeping, held: [SRE], after: running };
+      expect(confirm(asleep([SRE]), woke)).toEqual(woke);
+      expect(classify(confirm(asleep([SRE]), woke))).toBe('transition');
       // Really held across the back-off, or across a lock wait: confirmed.
-      expect(confirmedHeld(asleep([SRE]), asleep([SRE]))).toEqual([SRE]);
+      expect(confirm(asleep([SRE]), asleep([SRE])).held).toEqual([SRE]);
       const blocked = { before: waiting, held: [SRE], after: waiting };
-      expect(confirmedHeld(blocked, blocked)).toEqual([SRE]);
+      expect(confirm(blocked, blocked)).toEqual(blocked);
     });
 
     it('reproduces the two-query false positive; the lock-holding state after it is not a back-off', async () => {
