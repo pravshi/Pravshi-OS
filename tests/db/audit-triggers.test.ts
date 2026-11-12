@@ -54,6 +54,16 @@ const AUDITED_PHASE4 = [
 // carry no audit trigger by design (they inherit execution visibility —
 // 0044 header comment) — only workflows (HIGH) and workflow_executions (MEDIUM).
 const AUDITED_PHASE5 = ['workflows', 'workflow_executions'] as const;
+// P1 CRM leads (migration 0089): every table it creates.
+const AUDITED_P1_LEADS = [
+  'crm_leads',
+  'crm_lead_assignment_history',
+  'crm_assignment_cursors',
+  'crm_lead_tasks',
+  'crm_dedup_candidates',
+  'crm_lead_attribution_corrections',
+  'crm_attribution_policy_changes',
+] as const;
 const AUDITED_ALL = [
   ...AUDITED,
   ...AUDITED_CRM,
@@ -61,6 +71,7 @@ const AUDITED_ALL = [
   ...AUDITED_PHASE3,
   ...AUDITED_PHASE4,
   ...AUDITED_PHASE5,
+  ...AUDITED_P1_LEADS,
 ] as const;
 
 let orgA = '';
@@ -225,7 +236,7 @@ afterAll(async () => {
 // ── the allow-list ───────────────────────────────────────────────────────────────
 
 describe('the trigger allow-list', () => {
-  it('attaches exactly one audit trigger to each of the twenty-three approved tables', async () => {
+  it('attaches exactly one audit trigger to each of the twenty-nine approved tables', async () => {
     const { rows } = await owner.query<{ relname: string; tgname: string; events: number }>(
       `select c.relname, t.tgname, t.tgtype events
        from pg_trigger t
@@ -285,7 +296,7 @@ describe('the trigger allow-list', () => {
        join pg_proc p on p.oid=t.tgfoid
        where p.proname='audit_row_change'`,
     );
-    expect(rows.length).toBe(23);
+    expect(rows.length).toBe(30);
     for (const r of rows) expect(r.tgenabled, r.relname).toBe('O');
   });
 });
@@ -768,7 +779,7 @@ describe('nothing already approved has moved', () => {
     // integration_inbound_events, integration_sync_checkpoints) from
     // migration 0056.
     // 105 after the later phases; 0077 drops deal_stage_history_insert (MT-L6).
-    expect(Number(policies.rows[0]!.n)).toBe(117); // 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert)
+    expect(Number(policies.rows[0]!.n)).toBe(133); // 0080 adds organization_types_select_all; 0081 adds six crm_import(s) policies; 0088 adds six (crm_import_decisions select/insert/update/delete, crm_import_row_plans select/insert); 0089 adds sixteen app_user policies (crm_leads, crm_lead_assignment_history select only — the ledger is trigger-written, crm_assignment_cursors, crm_lead_tasks, crm_dedup_candidates, crm_lead_attribution_corrections, crm_attribution_policy_changes select only — written by the policy functions; the Real Estate table left 0089, AD-6)
 
     const unprotected = await owner.query<{ relname: string }>(
       `select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace

@@ -103,6 +103,22 @@ export const TABLES: Readonly<Record<string, Classification>> = {
       title: 'alice’s identity sees exactly Org A rows in every analytics table',
     },
   },
+  'public.crm_assignment_cursors': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_assignment_cursors across tenants',
+    },
+  },
+  'public.crm_dedup_candidates': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_dedup_candidates across tenants',
+    },
+  },
   'public.crm_import_decisions': {
     class: 'tenant',
     org: 'org_id',
@@ -133,6 +149,46 @@ export const TABLES: Readonly<Record<string, Classification>> = {
     isolationTest: {
       file: 'tests/db/crm-imports.test.ts',
       title: 'isolates organizations and requires crm.import (AC-S2, AC-S3)',
+    },
+  },
+  'public.crm_lead_assignment_history': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_lead_assignment_history across tenants',
+    },
+  },
+  'public.crm_attribution_policy_changes': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_attribution_policy_changes across tenants',
+    },
+  },
+  'public.crm_lead_attribution_corrections': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_lead_attribution_corrections across tenants',
+    },
+  },
+  'public.crm_lead_tasks': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_lead_tasks across tenants',
+    },
+  },
+  'public.crm_leads': {
+    class: 'tenant',
+    org: 'org_id',
+    isolationTest: {
+      file: 'tests/tenant-isolation/crm-leads-rls.test.ts',
+      title: 'isolates crm_leads across tenants and enforces leads permissions',
     },
   },
   'public.deal_stage_history': {
@@ -388,6 +444,8 @@ export const TABLES: Readonly<Record<string, Classification>> = {
   // ── operational ──
   'public.bootstrap_setup_token': { class: 'operational' },
   'public.bootstrap_state': { class: 'operational' },
+  // 0089: the per-statement caller-identity pin; only app_owner's definer triggers touch it.
+  'public.crm_statement_identity': { class: 'operational' },
   'auth.auth_accounts': { class: 'operational', access: ['app_auth'] },
   'auth.auth_rate_limits': { class: 'operational', access: ['app_auth'] },
   'auth.auth_sessions': { class: 'operational', access: ['app_auth'] },

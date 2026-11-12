@@ -283,7 +283,11 @@ describe.each(ROLES)('%s', (role) => {
       role === 'SUPER_ADMIN'
         ? Object.fromEntries(
             catalogue
-              .filter((key) => key !== 'users.impersonate')
+              // users.impersonate is granted to no role; the single-manager attribution
+              // exception is never granted automatically (0089, founder decision F-SEC-12).
+              .filter(
+                (key) => key !== 'users.impersonate' && key !== 'leads.attribution.single_manager',
+              )
               .map((key): [string, string] => [key, 'GLOBAL']),
           )
         : Object.fromEntries(

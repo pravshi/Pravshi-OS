@@ -422,11 +422,36 @@ describe('insert rules', () => {
           ctxOf(c1),
           `insert into public.activities
              (org_id, entity_type, entity_id, type, subject, owner_person_id)
-           values ($1,'lead',$2,'CALL','Bad entity',$3)`,
+           values ($1,'unknown_type',$2,'CALL','Bad entity',$3)`,
           [orgA, coS1, c1],
         ),
       ),
     ).toBe('23514');
+  });
+
+  it('the entity_type CHECK accepts lead (migration 0089)', async () => {
+    // A real lead of the same organization (not another entity's id): activities carry no FK by
+    // design (0034), so the fixture must not pin a dangling link. Lead visibility for activities
+    // is an application-layer probe, to be added with the lead service (security review F-SEC-9).
+    const lead = (
+      await owner.query<{ id: string }>(
+        `insert into public.crm_leads (org_id, full_name, primary_phone, source, sla_due_at, owner_person_id)
+         values ($1, 'Activity lead', '+919800000099', 'manual', now() + interval '1 hour', $2)
+         returning id`,
+        [orgA, c1],
+      )
+    ).rows[0]!.id;
+    expect(
+      await sqlstateOf(
+        inContext(
+          ctxOf(c1),
+          `insert into public.activities
+             (org_id, entity_type, entity_id, type, subject, owner_person_id)
+           values ($1,'lead',$2,'CALL','Lead activity',$3)`,
+          [orgA, lead, c1],
+        ),
+      ),
+    ).toBe('NO ERROR');
   });
 
   it('a blank subject is rejected', async () => {

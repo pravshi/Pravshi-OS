@@ -310,7 +310,11 @@ describe('permission catalogue', () => {
     // 'settings'); 0057 re-homes it to the integrations module and grants it.
     // Note: reports.view already existed from migration 0008 (not a new Phase 7 permission).
     // Plus crm.import from migration 0081 (the Sales Sheet import).
-    expect(Number(rows[0]!.count)).toBe(128);
+    // Plus the 3 attribution-correction permissions from migration 0089 (founder decision
+    // 2026-11-06): leads.attribution.request, leads.attribution.approve,
+    // leads.attribution.single_manager; and settings.manage_attribution_policy (founder decision
+    // F-SEC-13, 2026-11-07).
+    expect(Number(rows[0]!.count)).toBe(132);
   });
 
   it('holds every named key from each module', async () => {
@@ -458,6 +462,12 @@ describe('permission catalogue', () => {
       'integrations.view',
       // Migration 0081: the Sales Sheet import.
       'crm.import',
+      // Migration 0089: the attribution-correction permissions (founder decision 2026-11-06).
+      'leads.attribution.request',
+      'leads.attribution.approve',
+      'leads.attribution.single_manager',
+      // Migration 0089: governing the attribution policy (founder decision F-SEC-13).
+      'settings.manage_attribution_policy',
     ];
     const { rows } = await owner.query<{ key: string }>(`select key from public.permissions`);
     const keys = rows.map((r) => r.key);
@@ -493,12 +503,17 @@ describe('permission catalogue', () => {
       'deals.export',
       'hr.sensitive.edit',
       'hr.sensitive.view',
+      // 0089: deciding an attribution correction, and the single-manager exception.
+      'leads.attribution.approve',
+      'leads.attribution.single_manager',
       'leads.export',
       'people.export',
       'permissions.manage',
       'record_grants.manage',
       'reports.export',
       'roles.manage',
+      // 0089: changing the organization's attribution policy (F-SEC-13).
+      'settings.manage_attribution_policy',
       'users.impersonate',
     ]);
   });
@@ -590,7 +605,7 @@ describe('system roles', () => {
     expect(rows.filter((r) => r.is_protected).map((r) => r.key)).toEqual(['SUPER_ADMIN']);
   });
 
-  it('gives SUPER_ADMIN the whole catalogue at GLOBAL except users.impersonate', async () => {
+  it('gives SUPER_ADMIN the whole catalogue at GLOBAL except users.impersonate and the single-manager exception', async () => {
     const { rows } = await owner.query<{ total: string; global: string }>(
       `select count(*) total, count(*) filter (where rp.scope='GLOBAL') global
        from public.role_permissions rp
@@ -603,9 +618,12 @@ describe('system roles', () => {
     // 1 Phase 10 integration — integrations.view; integrations.manage was already
     // among the 82 from migration 0008), minus users.impersonate
     // which is listed but granted to no role. Note: reports.view already existed from
-    // migration 0008. Plus crm.import (0081): 128 in the catalogue, 127 held.
-    expect(Number(rows[0]!.total)).toBe(127);
-    expect(Number(rows[0]!.global)).toBe(127);
+    // migration 0008. Plus crm.import (0081): 128 in the catalogue, 127 held. Plus the 3
+    // leads.attribution.* permissions and settings.manage_attribution_policy (0089): 132 in the
+    // catalogue, 130 held — leads.attribution.single_manager is never granted automatically
+    // (founder decision F-SEC-12, 2026-11-07).
+    expect(Number(rows[0]!.total)).toBe(130);
+    expect(Number(rows[0]!.global)).toBe(130);
   });
 
   it('seeds MARKETING with no grants; MANAGER holds the seven Phase 4 grants plus two Phase 8 notification grants plus the Phase 9 ai.use grant', async () => {
