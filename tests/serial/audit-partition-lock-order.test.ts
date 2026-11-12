@@ -121,17 +121,17 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
    *
    * That narrows the race; it does not close it: a backend can wake from one back-off, be caught by
    * the lock read mid-attempt, and be asleep in the NEXT back-off by the second read. So a lock seen
-   * in a back-off (or wait) is recorded only when a second observation, taken at once, sees the same
-   * verdict and the same lock (observeConfirmed). The straddle is not expected to repeat: the second
-   * call lands inside the new back-off (≥ 50 ms in 0075), where nothing is held. If the second call
-   * sees a different verdict (the sleep or wait ended in between), the pair proves nothing and the
-   * second observation is returned, so callers sample again rather than accept an unconfirmed
-   * "clean" back-off. A lock really held across a back-off or a lock wait is seen by both calls
-   * whenever both land inside it, and is seen on a later sample otherwise: nothing is weakened.
-   * The residual — the observer
-   * descheduled for longer than a whole back-off AND caught mid-attempt twice in a row — is not
-   * zero, only far smaller. The function lives in pg_temp — private to the observer session,
-   * invisible to every guard.
+   * in a back-off is recorded only when a second observation, taken at once, is a back-off with the
+   * same lock (observeConfirmed). The straddle is not expected to repeat: the second call lands
+   * inside the new back-off (≥ 50 ms in 0075), where nothing is held. If the second call is not a
+   * back-off (the sleep ended in between), the pair proves nothing and the second observation is
+   * returned — callers sample again (or fail, if it is a lock wait) rather than accept an
+   * unconfirmed "clean" back-off. A lock wait is never re-checked: the wait itself is the failure,
+   * and it stands as first observed, so it cannot be traded for a later clean back-off. A lock
+   * really held across a back-off is seen by both calls whenever both land inside it, and on a
+   * later sample otherwise: nothing is weakened. The residual — the observer descheduled for longer
+   * than a whole back-off AND caught mid-attempt twice in a row — is not zero, only far smaller.
+   * The function lives in pg_temp — private to the observer session, invisible to every guard.
    */
   type WaitState = { type: string | null; event: string | null };
   type Observation = { before: WaitState; held: string[]; after: WaitState };
@@ -146,13 +146,16 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
   };
 
   /**
-   * Two consecutive observations combined: with the same verdict, the first with only the locks
-   * both saw; with different verdicts, nothing is proven and the newer observation stands.
+   * A back-off observation checked against the next one: both back-offs — the first, with only the
+   * locks both saw; otherwise nothing is proven and the newer observation stands. Anything that is
+   * not a back-off — a lock wait above all — is returned as first observed.
    */
-  const confirm = (first: Observation, second: Observation): Observation =>
-    classify(first) === classify(second)
+  const confirm = (first: Observation, second: Observation): Observation => {
+    if (classify(first) !== 'backing-off') return first;
+    return classify(second) === 'backing-off'
       ? { ...first, held: first.held.filter((l) => second.held.includes(l)) }
       : second;
+  };
 
   let observer: PoolClient | undefined;
   /** One consistent observation of backend `pid` (see above). */
@@ -174,14 +177,12 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
   };
 
   /**
-   * An observation whose held locks, in a back-off or a lock wait, are confirmed by a second
-   * observation taken at once (see above). Any other observation is returned as it is.
+   * An observation whose held locks, in a back-off, are confirmed by a second observation taken at
+   * once (see above). Any other observation — a lock wait included — is returned as it is.
    */
   const observeConfirmed = async (pid: number): Promise<Observation> => {
     const o = await observe(pid);
-    const verdict = classify(o);
-    if (o.held.length === 0 || (verdict !== 'backing-off' && verdict !== 'waiting-on-lock'))
-      return o;
+    if (o.held.length === 0 || classify(o) !== 'backing-off') return o;
     return confirm(o, await observe(pid));
   };
 
@@ -615,16 +616,20 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       const woke = { before: sleeping, held: [SRE], after: running };
       expect(confirm(asleep([SRE]), woke)).toEqual(woke);
       expect(classify(confirm(asleep([SRE]), woke))).toBe('transition');
-      // Really held across the back-off, or across a lock wait: confirmed.
+      // Really held across the back-off: confirmed.
       expect(confirm(asleep([SRE]), asleep([SRE])).held).toEqual([SRE]);
+      // A lock wait while holding stands as observed: it is never traded for a later clean
+      // back-off (the wait ended — 55P03, savepoint rolled back, asleep — before the second call).
       const blocked = { before: waiting, held: [SRE], after: waiting };
-      expect(confirm(blocked, blocked)).toEqual(blocked);
+      expect(confirm(blocked, asleep([]))).toEqual(blocked);
+      expect(classify(confirm(blocked, asleep([])))).toBe('waiting-on-lock');
     });
 
     it('reproduces the two-query false positive; the lock-holding state after it is not a back-off', async () => {
       const x = await session(); // a scripted stand-in for one maintenance back-off and next attempt
       try {
         await x.c.query('begin');
+        await x.c.query(`set local idle_in_transaction_session_timeout = '30s'`);
         const napping = x.c.query('select pg_sleep(2)');
         napping.catch(() => undefined); // awaited below; only silences a failing run's noise
         const during = await until(() => observe(x.pid), 'backing-off', 'the scripted back-off');
@@ -654,6 +659,7 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
       const y = await session();
       try {
         await x.c.query('begin');
+        await x.c.query(`set local idle_in_transaction_session_timeout = '30s'`);
         await x.c.query('lock table public.organizations in share row exclusive mode');
         const napping = x.c.query('select pg_sleep(2)');
         napping.catch(() => undefined); // awaited below; only silences a failing run's noise
@@ -665,6 +671,7 @@ describe.skipIf(!DB_READY)('audit-partition maintenance lock order (0075, live D
         expect(asleep.held, 'held during back-off is still seen').toEqual([SRE]);
         await napping;
         await y.c.query('begin');
+        await y.c.query(`set local idle_in_transaction_session_timeout = '30s'`);
         await y.c.query('select pg_advisory_xact_lock(750089)');
         const blocked = x.c.query('select pg_advisory_xact_lock(750089)');
         blocked.catch(() => undefined); // awaited below; only silences a failing run's noise
