@@ -18,7 +18,7 @@
     "@pravshi/observability": "workspace:*",
     "@pravshi/security": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "next": "15.5.28",
+    "next": "15.5.29",
     "react": "19.1.0",
     "resend": "^6.30.0",
     "zod": "^4.6.6"
